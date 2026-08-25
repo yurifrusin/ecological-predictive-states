@@ -5,7 +5,7 @@ from epsbench.schema import DatasetManifest, TransitionRecord
 from epsbench.utils.canonical import canonical_json_bytes
 
 EXPECTED_EPISODE_0_ECOLOGICAL_HASH = (
-    "3de23fb70a1f68934b3dbb81a8929434ecc9b81c92c0fa5d55c5138e36963419"
+    "8f7c7a7e8f70f9e84bf2f256ecf93f8d94f5327abe536c01a6b8f7e87aef3df0"
 )
 
 

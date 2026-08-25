@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from epsbench.schema import (
+    CameraInstrumentation,
     DatasetManifest,
     OcclusionRelation,
     TransitionRecord,
@@ -29,8 +30,8 @@ def test_invalid_visibility_fraction_fails() -> None:
             surface_id="surface-0123456789abcdef",
             before_visible_pixels=1,
             after_visible_pixels=1,
-            before_visible_fraction=1.01,
-            after_visible_fraction=0.5,
+            before_projected_image_fraction=1.01,
+            after_projected_image_fraction=0.5,
         )
 
 
@@ -51,4 +52,24 @@ def test_malformed_occlusion_relation_fails() -> None:
             occluder_surface_id="surface-0123456789abcdef",
             occluded_surface_id="surface-0123456789abcdef",
             frame_indices=(0,),
+        )
+
+
+@pytest.mark.parametrize(
+    ("position", "rotation"),
+    [
+        ((float("nan"), 0.0, 0.0), (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)),
+        ((0.0, 0.0, 0.0), (float("inf"), 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)),
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 1.0)),
+    ],
+)
+def test_nonfinite_or_nonorthonormal_camera_pose_fails(
+    position: tuple[float, float, float],
+    rotation: tuple[float, ...],
+) -> None:
+    with pytest.raises(ValidationError):
+        CameraInstrumentation(
+            frame_index=0,
+            camera_world_position=position,
+            camera_world_rotation_row_major=rotation,
         )

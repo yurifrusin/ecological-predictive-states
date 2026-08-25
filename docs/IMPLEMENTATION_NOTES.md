@@ -10,6 +10,7 @@ The path is intentionally short:
 strict YAML config
   -> generated MuJoCo XML and fixed kinematic camera transition
   -> RGB/depth/raw segmentation instrumentation
+  -> privileged counterfactual occluder-exclusion segmentation
   -> episode-local opaque segmentation remap
   -> minimal segmentation-derived ecological annotations
   -> strict transition and manifest schemas
@@ -22,7 +23,7 @@ strict YAML config
 
 `src/epsbench/sim/single_occluder.py` generates a small MuJoCo XML model using the official `mujoco` package. It contains a support plane, one opaque foreground panel, one opaque background surface, a directional light, and one fixed monocular camera. The executed action is a discrete lateral translation from `x=-0.35` to `x=0.35`; forward displacement and yaw are zero. MuJoCo world coordinates and camera matrices are retained only as privileged instrumentation.
 
-The `base` and `alternate` appearance variants change procedurally specified surface colours while preserving geometry, camera trajectory, action, correspondence, occlusion order, and visibility events.
+The `base` and `alternate` appearance variants change procedurally specified surface colours while preserving geometry, camera trajectory, action, correspondence, occlusion order, and visibility events. Configuration validation rejects non-finite values, forward or yaw actions, zero lateral displacement, and action names with the wrong lateral sign. Whole-dataset validation separately checks the persisted before/after camera positions and proper, approximately orthonormal rotations against the configured action.
 
 ## Modality boundaries and loader permissions
 
@@ -30,6 +31,7 @@ The `base` and `alternate` appearance variants change procedurally specified sur
 - `ECOLOGICAL_ORACLE`: remapped surface regions, segmentation-derived boundary contacts, frame-normalised visibility fractions, region correspondence, occlusion relation, and visibility events.
 - `METRIC_BASELINE`: depth.
 - `INSTRUMENTATION_ONLY`: camera world transform, raw MuJoCo geom IDs, raw simulator coordinates, and privileged generation records.
+- `CONTROL_METADATA`: the compound transition record that indexes explicitly typed records; it is not a learner input.
 
 Every `DatasetLoader` is constructed with an explicit `ModalityPermissionSet`. It checks permissions before resolving or opening the requested artifact. The ecological view returns no `FrameRecord`, depth path, camera record, raw identifier, or world-coordinate value.
 
@@ -37,13 +39,15 @@ Every `DatasetLoader` is constructed with an explicit `ModalityPermissionSet`. I
 
 MuJoCo geom IDs are read only during generation. A namespaced deterministic random generator produces a different random order, opaque `surface-<token>` identifier, and non-raw integer segmentation label for every episode. Ordinary segmentation arrays contain only zero (unlabelled renderer background) or those declared episode-local labels. The raw-ID-to-opaque-ID mapping exists only in `instrumentation.json`, whose modality is privileged generation data.
 
-The same root seed and episode index reproduce the mapping exactly, but independently serialised episode indices use disjoint opaque identifiers even with identical geometry.
+The same root seed and episode index reproduce the mapping exactly, but independently serialised episode indices use disjoint opaque identifiers even with identical geometry. Whole-dataset validation enforces that surface-ID sets are disjoint across episodes. Numeric segmentation labels remain episode-local and may be reused by different episodes.
 
 ## Annotation derivation
 
-Visible pixels and frame-area fractions are measured from remapped segmentation. Correspondence uses the same opaque surface hypothesis before and after and records exact before count, after count, and image-coordinate overlap. Accretion counts pixels present only after the action; deletion counts pixels present only before. A shifted surface may correctly carry both events even when its total visible area is unchanged. Appearance and disappearance are used when visibility crosses zero.
+Visible pixels and projected-image fractions are measured from remapped segmentation. `before_projected_image_fraction` and `after_projected_image_fraction` mean surface-labelled pixels divided by all image pixels; they are not fractions of a physical surface. Correspondence uses persistent opaque surface identity before and after and records exact before count, after count, and `same_image_coordinate_overlap_pixels`. That overlap is mask intersection at unchanged image coordinates, not optical-flow correspondence or an estimate of optical transformation. Dense and region-level optical transformation remain unfinished Gate 0B work. Accretion counts pixels present only after the action; deletion counts pixels present only before. A shifted surface may correctly carry both events even when its total visible area is unchanged. Appearance and disappearance are used when visibility crosses zero.
 
-Boundary records count four-neighbour segmentation label transitions. Contacts between two declared surfaces are aggregated by opaque identifier. The foreground-to-background occlusion relation is an analytic oracle fact from the generated scene and is stored only with opaque surface identifiers.
+Boundary records count four-neighbour segmentation label transitions. Contacts between two declared surfaces are aggregated by opaque identifier.
+
+The current occlusion oracle uses the appearance-invariant rule `counterfactual_occluder_exclusion_v1`. For each frame, generation renders ordinary raw geom segmentation and a privileged second segmentation with the candidate foreground occluder's MuJoCo render group disabled. A foreground-to-background relation is emitted for a frame only when at least one pixel is labelled as the candidate background in the counterfactual segmentation but not as that background in the ordinary segmentation. Generation stores the counterfactual array, revealed-pixel count, and logical reveal-mask hash only in privileged instrumentation; the ecological record contains only opaque surface IDs and derived frame membership. Validation reloads the ordinary opaque segmentation and privileged raw counterfactual, independently recomputes the reveal mask, and requires exact agreement with both the evidence record and ecological relation.
 
 Dense optical flow is not fabricated. Its schema status is `unavailable` with a typed reason in every transition.
 
@@ -57,13 +61,17 @@ All hashes are SHA-256 and lowercase hexadecimal.
 - `ecological_label_sha256` covers schema version, executed action values, opaque surface references, logical segmentation hashes, visibility states, region correspondence, visibility events, occlusion relations, boundary structures, and the explicit dense-flow availability record.
 - The ecological-label domain excludes RGB, depth, colour/appearance identity, camera transforms, raw simulator IDs, raw/world coordinates, paths, timestamps, and hostnames.
 - `dataset_logical_sha256` covers schema/generator versions, root seed, resolved-config logical hash, appearance variant, and each episode's stable identifier, derived seed, ecological-label hash, and RGB logical hashes. It excludes renderer provenance, file-container hashes, timestamps, hostname, and absolute paths.
+- `source_provenance_sha256` independently covers the typed inline source record: repository URL, exact commit and truthful dirty state, dirty-diff hash when applicable, lock-file identity, governing-document hashes, package version, and Python version. Git unavailability is recorded as unavailable with a reason and never represented as clean.
+- `content_provenance_binding_sha256` hashes the already-computed dataset logical hash together with the already-computed source-provenance hash. This binds content and provenance without making either domain self-referential. The existing content identity deliberately continues to exclude provenance.
 - Volatile time, hostname, and Python build text live only in unreferenced `run.json`; they do not participate in manifest or scientific identity.
+
+The unreleased schema identifier is `0.1.0-dev.1`. The terminology, transition modality, counterfactual evidence, and provenance corrections revise the development schema in place and do not imply that a prior public `0.1.0` scientific dataset existed.
 
 ## Determinism and rendering limits
 
 The same seed/configuration produces byte-identical manifests and transition annotations in the declared environment fingerprint. The manifest records MuJoCo and NumPy versions, renderer name, selected GL backend, and operating system. The lock file pins the complete Python dependency environment.
 
-Cross-platform RGB byte identity is not claimed. The final Windows/WGL smoke dataset had logical hash `0dce78cbf1d46614277eade77fd7f74f1b7619e4c2e183bd696d1b1c1ccfecb9`; Ubuntu/OSMesa CI produced `aef5387cb42d4187ccc7373b69b65d57e2d5919f2234b81d1dcf0d8dac25e996`. Because the dataset identity includes RGB hashes while the pinned episode-0 ecological hash passed unchanged as `3de23fb70a1f68934b3dbb81a8929434ecc9b81c92c0fa5d55c5138e36963419` in both environments, the current evidence establishes ecological-label stability for this scene and locked dependency set across those two backends, while confirming that complete pixel/dataset identity differs. It does not establish stability across arbitrary drivers, renderer versions, scene families, or dependency updates.
+Cross-platform RGB byte identity is not claimed. At the original reviewed schema, Windows/WGL and Ubuntu/OSMesa produced different dataset logical hashes while sharing episode-0 ecological hash `3de23fb70a1f68934b3dbb81a8929434ecc9b81c92c0fa5d55c5138e36963419`. The corrected development schema intentionally changes that ecological identity domain and the local Windows/WGL episode-0 regression value is now `8f7c7a7e8f70f9e84bf2f256ecf93f8d94f5327abe536c01a6b8f7e87aef3df0`. A renewed exact-head CI run must establish whether the corrected value also remains stable on locked Ubuntu/OSMesa; local success alone is not cross-platform evidence. Pixel/container identity, ecological-label identity, and source provenance remain distinct claims.
 
 ## Remaining Gate 0B work
 

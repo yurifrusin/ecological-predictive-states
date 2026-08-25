@@ -1,9 +1,15 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from epsbench.data import DatasetLoader, validate_dataset
-from epsbench.schema import DatasetManifest, ModalityPermissionSet, TransitionRecord
+from epsbench.schema import (
+    DatasetManifest,
+    ModalityPermissionSet,
+    PrivilegedInstrumentation,
+    TransitionRecord,
+)
 
 
 def _transition(root: Path, episode_index: int) -> TransitionRecord:
@@ -69,3 +75,31 @@ def test_surface_identifiers_are_episode_local(smoke_dataset: Path) -> None:
 def test_smoke_dataset_validates(smoke_dataset: Path) -> None:
     manifest = validate_dataset(smoke_dataset)
     assert len(manifest.episodes) == 2
+
+
+def test_persisted_camera_motion_exactly_matches_action(smoke_dataset: Path) -> None:
+    loader = DatasetLoader(smoke_dataset, ModalityPermissionSet.all_modalities())
+    action = loader.read_action(0)
+    before = loader.read_camera_world_transform(0, 0)
+    after = loader.read_camera_world_transform(0, 1)
+    observed = np.subtract(after.camera_world_position, before.camera_world_position)
+    assert observed == pytest.approx((action.delta_lateral, action.delta_forward, 0.0))
+    assert after.camera_world_rotation_row_major == pytest.approx(
+        before.camera_world_rotation_row_major
+    )
+
+
+def test_counterfactual_oracle_derives_relation_frame_membership(smoke_dataset: Path) -> None:
+    manifest = validate_dataset(smoke_dataset)
+    episode = manifest.episodes[0]
+    instrumentation = PrivilegedInstrumentation.model_validate_json(
+        (smoke_dataset / episode.privileged_instrumentation.path).read_text(encoding="utf-8")
+    )
+    transition = _transition(smoke_dataset, 0)
+    evidence_frames = tuple(
+        evidence.frame_index
+        for evidence in instrumentation.occlusion_oracle.frames
+        if evidence.revealed_pixel_count > 0
+    )
+    assert evidence_frames == (0, 1)
+    assert transition.occlusion_relations[0].frame_indices == evidence_frames

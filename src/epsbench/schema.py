@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
+import numpy as np
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -16,6 +18,7 @@ from pydantic import (
 )
 
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+GitCommit = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 SurfaceId = Annotated[str, StringConstraints(pattern=r"^surface-[0-9a-f]{16}$")]
 
 
@@ -30,6 +33,7 @@ class ModalityClass(StrEnum):
     ECOLOGICAL_ORACLE = "ecological_oracle"
     METRIC_BASELINE = "metric_baseline"
     INSTRUMENTATION_ONLY = "instrumentation_only"
+    CONTROL_METADATA = "control_metadata"
 
 
 class Modality(StrEnum):
@@ -47,6 +51,7 @@ class Modality(StrEnum):
     MUJOCO_GEOM_IDS = "mujoco_geom_ids"
     RAW_SIMULATOR_COORDINATES = "raw_simulator_coordinates"
     PRIVILEGED_GENERATION_RECORDS = "privileged_generation_records"
+    TRANSITION_RECORD = "transition_record"
 
     @property
     def modality_class(self) -> ModalityClass:
@@ -63,6 +68,8 @@ class Modality(StrEnum):
             return ModalityClass.ECOLOGICAL_ORACLE
         if self in {Modality.DEPTH, Modality.LOCAL_METRIC_ARRAYS}:
             return ModalityClass.METRIC_BASELINE
+        if self == Modality.TRANSITION_RECORD:
+            return ModalityClass.CONTROL_METADATA
         return ModalityClass.INSTRUMENTATION_ONLY
 
 
@@ -92,6 +99,23 @@ class Action(StrictModel):
     delta_lateral: float
     delta_yaw: float
 
+    @model_validator(mode="after")
+    def supported_action_is_finite_and_lateral(self) -> Action:
+        values = (self.delta_forward, self.delta_lateral, self.delta_yaw)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("all action values must be finite")
+        if self.delta_forward != 0.0:
+            raise ValueError("forward motion is unsupported in this vertical slice")
+        if self.delta_yaw != 0.0:
+            raise ValueError("yaw motion is unsupported in this vertical slice")
+        if self.delta_lateral == 0.0:
+            raise ValueError("lateral displacement must be non-zero")
+        if self.name == "lateral_right" and self.delta_lateral < 0.0:
+            raise ValueError("lateral_right requires positive displacement")
+        if self.name == "lateral_left" and self.delta_lateral > 0.0:
+            raise ValueError("lateral_left requires negative displacement")
+        return self
+
 
 class SurfaceReference(StrictModel):
     surface_id: SurfaceId
@@ -102,8 +126,8 @@ class VisibilityState(StrictModel):
     surface_id: SurfaceId
     before_visible_pixels: int = Field(ge=0)
     after_visible_pixels: int = Field(ge=0)
-    before_visible_fraction: float = Field(ge=0.0, le=1.0)
-    after_visible_fraction: float = Field(ge=0.0, le=1.0)
+    before_projected_image_fraction: float = Field(ge=0.0, le=1.0)
+    after_projected_image_fraction: float = Field(ge=0.0, le=1.0)
 
 
 class VisibilityEventKind(StrEnum):
@@ -124,11 +148,13 @@ class RegionCorrespondence(StrictModel):
     surface_id: SurfaceId
     before_visible_pixels: int = Field(ge=0)
     after_visible_pixels: int = Field(ge=0)
-    image_overlap_pixels: int = Field(ge=0)
+    same_image_coordinate_overlap_pixels: int = Field(ge=0)
 
     @model_validator(mode="after")
     def overlap_is_bounded(self) -> RegionCorrespondence:
-        if self.image_overlap_pixels > min(self.before_visible_pixels, self.after_visible_pixels):
+        if self.same_image_coordinate_overlap_pixels > min(
+            self.before_visible_pixels, self.after_visible_pixels
+        ):
             raise ValueError("image overlap cannot exceed either visible region")
         return self
 
@@ -154,7 +180,7 @@ class BoundaryStructure(StrictModel):
 class OcclusionRelation(StrictModel):
     occluder_surface_id: SurfaceId
     occluded_surface_id: SurfaceId
-    frame_indices: tuple[Literal[0, 1], ...] = Field(min_length=1)
+    frame_indices: tuple[Literal[0, 1], ...]
 
     @model_validator(mode="after")
     def relation_is_not_reflexive(self) -> OcclusionRelation:
@@ -216,10 +242,18 @@ class FrameRecord(StrictModel):
         for field_name, (artifact, modality) in expected_modalities.items():
             if artifact.modality != modality:
                 raise ValueError(f"{field_name} artifact has the wrong modality")
-        expected_prefix = (self.height, self.width)
-        for artifact in (self.rgb, self.depth, self.segmentation):
-            if artifact.shape[:2] != expected_prefix:
-                raise ValueError("RGB, depth, and segmentation dimensions must align")
+        expected = {
+            "RGB": (self.rgb, "uint8", (self.height, self.width, 3)),
+            "depth": (self.depth, "float32", (self.height, self.width)),
+            "segmentation": (
+                self.segmentation,
+                "int32",
+                (self.height, self.width),
+            ),
+        }
+        for field_name, (artifact, dtype, shape) in expected.items():
+            if artifact.dtype != dtype or artifact.shape != shape:
+                raise ValueError(f"{field_name} artifact has an invalid dtype or shape")
         return self
 
 
@@ -230,7 +264,7 @@ class UnavailableAnnotation(StrictModel):
 
 
 class TransitionRecord(StrictModel):
-    schema_version: Literal["0.1.0"]
+    schema_version: Literal["0.1.0-dev.1"]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     action: Action
     surfaces: tuple[SurfaceReference, ...] = Field(min_length=1)
@@ -239,7 +273,7 @@ class TransitionRecord(StrictModel):
     visibility_states: tuple[VisibilityState, ...] = Field(min_length=1)
     region_correspondence: tuple[RegionCorrespondence, ...] = Field(min_length=1)
     visibility_events: tuple[VisibilityEvent, ...] = Field(min_length=1)
-    occlusion_relations: tuple[OcclusionRelation, ...] = Field(min_length=1)
+    occlusion_relations: tuple[OcclusionRelation, ...]
     boundary_structures: tuple[BoundaryStructure, ...] = Field(min_length=2, max_length=2)
     dense_optical_flow: UnavailableAnnotation
     ecological_label_sha256: Sha256
@@ -310,8 +344,8 @@ class EpisodeManifest(StrictModel):
 
     @model_validator(mode="after")
     def manifest_modalities_are_correct(self) -> EpisodeManifest:
-        if self.transition.modality != Modality.VISIBILITY_EVENTS:
-            raise ValueError("transition artifact must be ecological-oracle data")
+        if self.transition.modality != Modality.TRANSITION_RECORD:
+            raise ValueError("transition artifact must be neutral control metadata")
         if self.privileged_instrumentation.modality != Modality.PRIVILEGED_GENERATION_RECORDS:
             raise ValueError("instrumentation artifact must be privileged")
         return self
@@ -322,14 +356,118 @@ class CameraInstrumentation(StrictModel):
     camera_world_position: tuple[float, float, float]
     camera_world_rotation_row_major: tuple[float, ...] = Field(min_length=9, max_length=9)
 
+    @model_validator(mode="after")
+    def pose_is_finite_and_rotation_is_orthonormal(self) -> CameraInstrumentation:
+        if not all(math.isfinite(value) for value in self.camera_world_position):
+            raise ValueError("camera world position must contain only finite values")
+        if not all(math.isfinite(value) for value in self.camera_world_rotation_row_major):
+            raise ValueError("camera rotation must contain only finite values")
+        rotation = np.asarray(self.camera_world_rotation_row_major, dtype=np.float64).reshape(3, 3)
+        if not np.allclose(rotation @ rotation.T, np.eye(3), atol=1e-6, rtol=0.0):
+            raise ValueError("camera rotation must be approximately orthonormal")
+        if not math.isclose(float(np.linalg.det(rotation)), 1.0, abs_tol=1e-6, rel_tol=0.0):
+            raise ValueError("camera rotation must be a proper rotation")
+        return self
+
+
+class OcclusionFrameEvidence(StrictModel):
+    frame_index: Literal[0, 1]
+    counterfactual_segmentation: ArtifactRecord
+    revealed_pixel_count: int = Field(ge=0)
+    reveal_mask_logical_sha256: Sha256
+
+    @model_validator(mode="after")
+    def artifact_is_privileged_segmentation(self) -> OcclusionFrameEvidence:
+        artifact = self.counterfactual_segmentation
+        if artifact.modality != Modality.PRIVILEGED_GENERATION_RECORDS:
+            raise ValueError("counterfactual segmentation must be privileged")
+        if artifact.dtype != "int32" or len(artifact.shape) != 2:
+            raise ValueError("counterfactual segmentation must be a two-dimensional int32 array")
+        return self
+
+
+class OcclusionOracleEvidence(StrictModel):
+    rule: Literal["counterfactual_occluder_exclusion_v1"]
+    candidate_occluder_raw_geom_id: int = Field(ge=0)
+    candidate_occluded_raw_geom_id: int = Field(ge=0)
+    frames: tuple[OcclusionFrameEvidence, OcclusionFrameEvidence]
+
+    @model_validator(mode="after")
+    def candidate_and_frames_are_well_formed(self) -> OcclusionOracleEvidence:
+        if self.candidate_occluder_raw_geom_id == self.candidate_occluded_raw_geom_id:
+            raise ValueError("occlusion candidates must be distinct")
+        if {frame.frame_index for frame in self.frames} != {0, 1}:
+            raise ValueError("occlusion evidence must cover both frames")
+        return self
+
 
 class PrivilegedInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0"]
+    schema_version: Literal["0.1.0-dev.1"]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]
     raw_geom_ids: dict[str, int]
     raw_to_opaque_surface_ids: dict[str, SurfaceId]
     raw_geom_world_positions: dict[str, tuple[float, float, float]]
+    occlusion_oracle: OcclusionOracleEvidence
+
+    @model_validator(mode="after")
+    def raw_coordinates_are_finite(self) -> PrivilegedInstrumentation:
+        if not all(
+            math.isfinite(coordinate)
+            for position in self.raw_geom_world_positions.values()
+            for coordinate in position
+        ):
+            raise ValueError("raw geom world positions must contain only finite values")
+        return self
+
+
+class GitAvailabilityStatus(StrEnum):
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+
+
+class SourceProvenance(StrictModel):
+    git_repository: str | None
+    git_commit: GitCommit | None
+    git_dirty: bool | None
+    dirty_diff_sha256: Sha256 | None
+    git_availability_status: GitAvailabilityStatus
+    git_unavailable_reason: str | None
+    uv_lock_sha256: Sha256
+    research_charter_sha256: Sha256
+    eps_bench_spec_sha256: Sha256
+    milestone_plan_sha256: Sha256
+    codex_handoff_sha256: Sha256
+    package_version: str = Field(min_length=1)
+    python_version: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def git_state_is_truthful(self) -> SourceProvenance:
+        if self.git_availability_status == GitAvailabilityStatus.AVAILABLE:
+            if self.git_repository is None or self.git_commit is None or self.git_dirty is None:
+                raise ValueError(
+                    "available Git provenance requires repository, commit, and dirty state"
+                )
+            if self.git_unavailable_reason is not None:
+                raise ValueError("available Git provenance cannot have an unavailable reason")
+            if self.git_dirty and self.dirty_diff_sha256 is None:
+                raise ValueError("dirty Git provenance requires an exact dirty diff hash")
+            if not self.git_dirty and self.dirty_diff_sha256 is not None:
+                raise ValueError("clean Git provenance cannot report a dirty diff hash")
+        else:
+            if not self.git_unavailable_reason:
+                raise ValueError("unavailable Git provenance requires a reason")
+            if any(
+                value is not None
+                for value in (
+                    self.git_repository,
+                    self.git_commit,
+                    self.git_dirty,
+                    self.dirty_diff_sha256,
+                )
+            ):
+                raise ValueError("unavailable Git provenance cannot imply a clean or known state")
+        return self
 
 
 class RendererProvenance(StrictModel):
@@ -341,7 +479,7 @@ class RendererProvenance(StrictModel):
 
 
 class DatasetManifest(StrictModel):
-    schema_version: Literal["0.1.0"]
+    schema_version: Literal["0.1.0-dev.1"]
     generator_version: Literal["0.1.0"]
     root_seed: int = Field(ge=0)
     config_logical_sha256: Sha256
@@ -350,6 +488,9 @@ class DatasetManifest(StrictModel):
     renderer_provenance: RendererProvenance
     episodes: tuple[EpisodeManifest, ...] = Field(min_length=1)
     dataset_logical_sha256: Sha256
+    source_provenance: SourceProvenance
+    source_provenance_sha256: Sha256
+    content_provenance_binding_sha256: Sha256
 
     @model_validator(mode="after")
     def episodes_are_unique_and_ordered(self) -> DatasetManifest:
@@ -359,6 +500,6 @@ class DatasetManifest(StrictModel):
         indices = [episode.episode_index for episode in self.episodes]
         if len(ids) != len(set(ids)) or len(indices) != len(set(indices)):
             raise ValueError("episode identifiers and indices must be unique")
-        if indices != sorted(indices):
-            raise ValueError("episodes must be ordered by episode index")
+        if indices != list(range(len(indices))):
+            raise ValueError("episode indices must be contiguous from zero")
         return self

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from epsbench.schema import DatasetManifest, TransitionRecord
+from epsbench.schema import DatasetManifest, SourceProvenance, TransitionRecord
 from epsbench.utils.canonical import canonical_json_bytes, sha256_bytes
 
 
@@ -64,3 +64,25 @@ def dataset_logical_domain(manifest: DatasetManifest) -> dict[str, Any]:
 
 def compute_dataset_logical_hash(manifest: DatasetManifest) -> str:
     return sha256_bytes(canonical_json_bytes(dataset_logical_domain(manifest)))
+
+
+def compute_source_provenance_hash(provenance: SourceProvenance) -> str:
+    """Hash source provenance independently of scientific content identity."""
+
+    return sha256_bytes(canonical_json_bytes(provenance))
+
+
+def compute_content_provenance_binding(
+    dataset_logical_sha256: str,
+    source_provenance_sha256: str,
+) -> str:
+    """Bind already-computed content and provenance identities without recursion."""
+
+    return sha256_bytes(
+        canonical_json_bytes(
+            {
+                "dataset_logical_sha256": dataset_logical_sha256,
+                "source_provenance_sha256": source_provenance_sha256,
+            }
+        )
+    )

@@ -14,6 +14,7 @@ def test_ecological_permission_set_excludes_metric_and_instrumentation() -> None
     assert not permissions.permits(Modality.CAMERA_WORLD_TRANSFORM)
     assert not permissions.permits(Modality.MUJOCO_GEOM_IDS)
     assert not permissions.permits(Modality.RAW_SIMULATOR_COORDINATES)
+    assert not permissions.permits(Modality.TRANSITION_RECORD)
 
 
 def test_ecological_loader_denies_depth_camera_raw_ids_and_coordinates(
@@ -26,6 +27,7 @@ def test_ecological_loader_denies_depth_camera_raw_ids_and_coordinates(
     assert "camera_world_transform" not in ecological_payload
     assert "raw_geom_ids" not in ecological_payload
     assert "raw_geom_world_positions" not in ecological_payload
+    assert "occlusion_oracle" not in ecological_payload
     loader.read_action(0)
     with pytest.raises(PermissionDeniedError):
         loader.read_depth(0, 0)

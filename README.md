@@ -8,7 +8,7 @@ Gate 0A (repository foundation) and a deliberately small Gate 0B vertical slice 
 
 **No scientific result exists yet.** Successful generation and tests establish infrastructure only. Full Gate 0B completion is not claimed: corridor scenes, dense optical flow, and full boundary ownership remain incomplete. The next authorised work is the remainder of Gate 0B; Gate 0C and all model work are not authorised.
 
-The scientific authority is [the Research Charter](docs/RESEARCH_CHARTER.md), followed by [EPS-Bench v0](docs/EPS_BENCH_V0.md) and [Milestone 0](docs/MILESTONE_0.md). Architecture and current limits are recorded in [the implementation notes](docs/IMPLEMENTATION_NOTES.md).
+The scientific authority is [the Research Charter](docs/RESEARCH_CHARTER.md), followed by [EPS-Bench v0](docs/EPS_BENCH_V0.md) and [Milestone 0](docs/MILESTONE_0.md). Architecture and current limits are recorded in [the implementation notes](docs/IMPLEMENTATION_NOTES.md); implementation, review, ownership, and closeout are separated by [the review protocol](docs/review-protocol.md).
 
 ## Windows PowerShell setup
 
@@ -61,6 +61,7 @@ Use `uv run ruff format .` to apply formatting intentionally.
 | Ecological oracle | Opaque surface regions, boundary contacts, visibility fractions/events, correspondence, and occlusion relation |
 | Metric baseline | Depth |
 | Instrumentation only | Camera world transforms, raw MuJoCo geom IDs, raw coordinates, and generation records |
+| Control metadata | Compound transition record; never treated as a learner input |
 
 `DatasetLoader` requires an explicit `ModalityPermissionSet`. Ecological-only access fails before depth, camera pose, raw IDs, or world-coordinate artifacts are opened.
 

@@ -18,7 +18,13 @@ from PIL import Image
 from epsbench import __version__
 from epsbench.annotations import derive_boundary_structure, derive_visibility
 from epsbench.config import BenchmarkConfig
-from epsbench.data.identity import compute_dataset_logical_hash, compute_ecological_label_hash
+from epsbench.data.identity import (
+    compute_content_provenance_binding,
+    compute_dataset_logical_hash,
+    compute_ecological_label_hash,
+    compute_source_provenance_hash,
+)
+from epsbench.data.provenance import collect_source_provenance
 from epsbench.schema import (
     Action,
     ArtifactRecord,
@@ -27,6 +33,8 @@ from epsbench.schema import (
     EpisodeManifest,
     FrameRecord,
     Modality,
+    OcclusionFrameEvidence,
+    OcclusionOracleEvidence,
     OcclusionRelation,
     PrivilegedInstrumentation,
     RendererProvenance,
@@ -62,7 +70,7 @@ def _array_artifact(
         path=_relative(path, root),
         modality=modality,
         media_type=media_type,
-        dtype=array.dtype.str,
+        dtype=str(array.dtype),
         shape=tuple(array.shape),
         logical_sha256=logical_array_hash(array),
         file_sha256=sha256_file(path),
@@ -224,8 +232,43 @@ def _generate_episode(
         derive_boundary_structure(before_segmentation, surfaces, 0),
         derive_boundary_structure(after_segmentation, surfaces, 1),
     )
+    occluder_raw_id = rendered.raw_geom_ids["occluding_surface"]
+    occluded_raw_id = rendered.raw_geom_ids["background_surface"]
+    occlusion_frame_evidence: list[OcclusionFrameEvidence] = []
+    relation_frame_indices: list[int] = []
+    for frame_index, frame in enumerate((rendered.before, rendered.after)):
+        stem = "before" if frame_index == 0 else "after"
+        counterfactual_path = episode_directory / f"counterfactual_segmentation_{stem}.npy"
+        np.save(
+            counterfactual_path,
+            frame.counterfactual_raw_geom_segmentation,
+            allow_pickle=False,
+        )
+        counterfactual_artifact = _array_artifact(
+            counterfactual_path,
+            root,
+            frame.counterfactual_raw_geom_segmentation,
+            Modality.PRIVILEGED_GENERATION_RECORDS,
+            "application/x-npy",
+        )
+        reveal_mask = (frame.counterfactual_raw_geom_segmentation == occluded_raw_id) & (
+            frame.raw_geom_segmentation != occluded_raw_id
+        )
+        revealed_pixel_count = int(np.count_nonzero(reveal_mask))
+        if revealed_pixel_count > 0:
+            relation_frame_indices.append(frame_index)
+        occlusion_frame_evidence.append(
+            OcclusionFrameEvidence(
+                frame_index=frame_index,  # type: ignore[arg-type]
+                counterfactual_segmentation=counterfactual_artifact,
+                revealed_pixel_count=revealed_pixel_count,
+                reveal_mask_logical_sha256=logical_array_hash(reveal_mask),
+            )
+        )
+    if not relation_frame_indices:
+        raise RuntimeError("counterfactual oracle found no foreground/background occlusion")
     transition = TransitionRecord(
-        schema_version="0.1.0",
+        schema_version="0.1.0-dev.1",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -238,7 +281,7 @@ def _generate_episode(
             OcclusionRelation(
                 occluder_surface_id=references["occluding_surface"].surface_id,
                 occluded_surface_id=references["background_surface"].surface_id,
-                frame_indices=(0, 1),
+                frame_indices=tuple(relation_frame_indices),  # type: ignore[arg-type]
             ),
         ),
         boundary_structures=boundaries,
@@ -262,7 +305,7 @@ def _generate_episode(
     write_canonical_json(transition_path, transition)
 
     instrumentation = PrivilegedInstrumentation(
-        schema_version="0.1.0",
+        schema_version="0.1.0-dev.1",
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,
         raw_geom_ids=rendered.raw_geom_ids,
@@ -271,6 +314,12 @@ def _generate_episode(
             for name, raw_id in rendered.raw_geom_ids.items()
         },
         raw_geom_world_positions=rendered.raw_geom_positions,
+        occlusion_oracle=OcclusionOracleEvidence(
+            rule="counterfactual_occluder_exclusion_v1",
+            candidate_occluder_raw_geom_id=occluder_raw_id,
+            candidate_occluded_raw_geom_id=occluded_raw_id,
+            frames=tuple(occlusion_frame_evidence),  # type: ignore[arg-type]
+        ),
     )
     instrumentation_path = episode_directory / "instrumentation.json"
     write_canonical_json(instrumentation_path, instrumentation)
@@ -282,7 +331,7 @@ def _generate_episode(
             transition_path,
             root,
             transition,
-            Modality.VISIBILITY_EVENTS,
+            Modality.TRANSITION_RECORD,
             "application/json",
         ),
         privileged_instrumentation=_json_artifact(
@@ -317,6 +366,8 @@ def generate_dataset(config: BenchmarkConfig, episodes: int, output: Path) -> Da
         raise ValueError("episodes must be at least one")
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(f"output directory is not empty: {output}")
+    source_provenance = collect_source_provenance(Path.cwd())
+    source_provenance_sha256 = compute_source_provenance_hash(source_provenance)
     output.mkdir(parents=True, exist_ok=True)
     resolved_config_path = output / "resolved_config.json"
     write_canonical_json(resolved_config_path, config)
@@ -331,7 +382,7 @@ def generate_dataset(config: BenchmarkConfig, episodes: int, output: Path) -> Da
         _generate_episode(output, config, episode_index) for episode_index in range(episodes)
     )
     manifest = DatasetManifest(
-        schema_version="0.1.0",
+        schema_version="0.1.0-dev.1",
         generator_version="0.1.0",
         root_seed=config.seed,
         config_logical_sha256=sha256_bytes(canonical_json_bytes(config)),
@@ -340,11 +391,19 @@ def generate_dataset(config: BenchmarkConfig, episodes: int, output: Path) -> Da
         renderer_provenance=_renderer_provenance(),
         episodes=episode_manifests,
         dataset_logical_sha256="0" * 64,
+        source_provenance=source_provenance,
+        source_provenance_sha256=source_provenance_sha256,
+        content_provenance_binding_sha256="0" * 64,
     )
+    dataset_logical_sha256 = compute_dataset_logical_hash(manifest)
     manifest = DatasetManifest.model_validate(
         {
             **manifest.model_dump(mode="python"),
-            "dataset_logical_sha256": compute_dataset_logical_hash(manifest),
+            "dataset_logical_sha256": dataset_logical_sha256,
+            "content_provenance_binding_sha256": compute_content_provenance_binding(
+                dataset_logical_sha256,
+                source_provenance_sha256,
+            ),
         }
     )
     write_canonical_json(output / "manifest.json", manifest)

@@ -20,6 +20,7 @@ class RenderedFrame:
     rgb: RGBArray
     depth: DepthArray
     raw_geom_segmentation: RawSegmentationArray
+    counterfactual_raw_geom_segmentation: RawSegmentationArray
     camera_world_position: tuple[float, float, float]
     camera_world_rotation_row_major: tuple[float, ...]
 
@@ -69,7 +70,7 @@ def build_scene_xml(config: BenchmarkConfig) -> str:
           rgba="{support_colour}"/>
     <geom name="background_surface" type="box" pos="0 2.5 1.05"
           size="2.2 0.05 1.05" rgba="{background_colour}"/>
-    <geom name="occluding_surface" type="box" pos="0 0.8 0.9"
+    <geom name="occluding_surface" type="box" group="1" pos="0 0.8 0.9"
           size="0.55 0.05 0.9" rgba="{occluder_colour}"/>
     <camera name="monocular_camera" pos="{camera.before_lateral} {camera.forward} {camera.height}"
             xyaxes="1 0 0 0 0.16 1" fovy="{camera.field_of_view_degrees}"/>
@@ -78,12 +79,30 @@ def build_scene_xml(config: BenchmarkConfig) -> str:
 """.strip()
 
 
+def _render_raw_segmentation(
+    renderer: mujoco.Renderer,
+    data: mujoco.MjData,
+    camera_id: int,
+    scene_option: mujoco.MjvOption | None = None,
+) -> RawSegmentationArray:
+    renderer.enable_segmentation_rendering()
+    renderer.update_scene(data, camera=camera_id, scene_option=scene_option)
+    segmentation = np.asarray(renderer.render(), dtype=np.int32).copy()
+    renderer.disable_segmentation_rendering()
+    if segmentation.ndim != 3 or segmentation.shape[2] != 2:
+        raise RuntimeError("MuJoCo returned an unexpected segmentation buffer")
+    object_ids = segmentation[:, :, 0]
+    object_types = segmentation[:, :, 1]
+    return np.where(object_types == int(mujoco.mjtObj.mjOBJ_GEOM), object_ids, -1).astype(np.int32)
+
+
 def _render_frame(
     model: mujoco.MjModel,
     data: mujoco.MjData,
     renderer: mujoco.Renderer,
     camera_id: int,
     lateral_position: float,
+    counterfactual_option: mujoco.MjvOption,
 ) -> RenderedFrame:
     model.cam_pos[camera_id, 0] = lateral_position
     mujoco.mj_forward(model, data)
@@ -95,21 +114,18 @@ def _render_frame(
     depth = np.asarray(renderer.render(), dtype=np.float32).copy()
     renderer.disable_depth_rendering()
 
-    renderer.enable_segmentation_rendering()
-    renderer.update_scene(data, camera=camera_id)
-    segmentation = np.asarray(renderer.render(), dtype=np.int32).copy()
-    renderer.disable_segmentation_rendering()
-    if segmentation.ndim != 3 or segmentation.shape[2] != 2:
-        raise RuntimeError("MuJoCo returned an unexpected segmentation buffer")
-    object_ids = segmentation[:, :, 0]
-    object_types = segmentation[:, :, 1]
-    raw_geom_segmentation = np.where(
-        object_types == int(mujoco.mjtObj.mjOBJ_GEOM), object_ids, -1
-    ).astype(np.int32)
+    raw_geom_segmentation = _render_raw_segmentation(renderer, data, camera_id)
+    counterfactual_raw_geom_segmentation = _render_raw_segmentation(
+        renderer,
+        data,
+        camera_id,
+        scene_option=counterfactual_option,
+    )
     return RenderedFrame(
         rgb=rgb,
         depth=depth,
         raw_geom_segmentation=raw_geom_segmentation,
+        counterfactual_raw_geom_segmentation=counterfactual_raw_geom_segmentation,
         camera_world_position=(
             float(data.cam_xpos[camera_id, 0]),
             float(data.cam_xpos[camera_id, 1]),
@@ -144,6 +160,9 @@ def render_transition(config: BenchmarkConfig) -> RenderedTransition:
         height=config.render.height,
         width=config.render.width,
     )
+    counterfactual_option = mujoco.MjvOption()
+    counterfactual_option.geomgroup[:] = 1
+    counterfactual_option.geomgroup[1] = 0
     try:
         before = _render_frame(
             model,
@@ -151,6 +170,7 @@ def render_transition(config: BenchmarkConfig) -> RenderedTransition:
             renderer,
             camera_id,
             config.camera.before_lateral,
+            counterfactual_option,
         )
         after = _render_frame(
             model,
@@ -158,6 +178,7 @@ def render_transition(config: BenchmarkConfig) -> RenderedTransition:
             renderer,
             camera_id,
             config.camera.after_lateral,
+            counterfactual_option,
         )
     finally:
         renderer.close()

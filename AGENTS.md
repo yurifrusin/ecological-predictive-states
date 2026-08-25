@@ -11,3 +11,7 @@ This repository tests a falsifiable engineering hypothesis; it does not assume a
 - Do not purchase, require, or assume a physical robot.
 - Work on reviewed branches, keep generated data and ordinary artifacts untracked, and run locked sync, lint, formatting, typing, tests, smoke generation, validation, inspection, and `git diff --check` before review.
 - Do not add a repository, documentation, or data licence without owner approval.
+
+## Review roles
+
+Follow `docs/review-protocol.md`. An agent implementing or correcting a work package may self-check but may not independently approve that work package. Reviews and owner approval are bound to an exact pull request and head SHA; a changed head requires renewed review. CI success does not advance a gate or establish a scientific result.

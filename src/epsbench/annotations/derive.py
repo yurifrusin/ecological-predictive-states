@@ -55,8 +55,8 @@ def derive_visibility(
                 surface_id=surface.surface_id,
                 before_visible_pixels=before_count,
                 after_visible_pixels=after_count,
-                before_visible_fraction=before_count / pixel_total,
-                after_visible_fraction=after_count / pixel_total,
+                before_projected_image_fraction=before_count / pixel_total,
+                after_projected_image_fraction=after_count / pixel_total,
             )
         )
         correspondence.append(
@@ -64,7 +64,7 @@ def derive_visibility(
                 surface_id=surface.surface_id,
                 before_visible_pixels=before_count,
                 after_visible_pixels=after_count,
-                image_overlap_pixels=overlap_count,
+                same_image_coordinate_overlap_pixels=overlap_count,
             )
         )
         added_count = int(np.count_nonzero(after_mask & ~before_mask))
