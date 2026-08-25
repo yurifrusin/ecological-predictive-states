@@ -4,6 +4,19 @@ from epsbench.data.identity import ecological_label_domain
 from epsbench.schema import DatasetManifest, TransitionRecord
 from epsbench.utils.canonical import canonical_json_bytes
 
+EXPECTED_EPISODE_0_ECOLOGICAL_HASH = (
+    "3de23fb70a1f68934b3dbb81a8929434ecc9b81c92c0fa5d55c5138e36963419"
+)
+
+
+def test_ecological_label_hash_matches_locked_cross_platform_regression(
+    smoke_dataset: Path,
+) -> None:
+    manifest = DatasetManifest.model_validate_json(
+        (smoke_dataset / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest.episodes[0].ecological_label_sha256 == EXPECTED_EPISODE_0_ECOLOGICAL_HASH
+
 
 def test_ecological_hash_domain_excludes_metric_appearance_and_privileged_data(
     smoke_dataset: Path,
