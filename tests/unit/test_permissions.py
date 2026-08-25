@@ -1,0 +1,37 @@
+from pathlib import Path
+
+import pytest
+
+from epsbench.data import DatasetLoader, PermissionDeniedError
+from epsbench.schema import Modality, ModalityPermissionSet
+
+
+def test_ecological_permission_set_excludes_metric_and_instrumentation() -> None:
+    permissions = ModalityPermissionSet.ecological_only()
+    assert permissions.permits(Modality.VISIBILITY_EVENTS)
+    assert permissions.permits(Modality.EXECUTED_ACTION)
+    assert not permissions.permits(Modality.DEPTH)
+    assert not permissions.permits(Modality.CAMERA_WORLD_TRANSFORM)
+    assert not permissions.permits(Modality.MUJOCO_GEOM_IDS)
+    assert not permissions.permits(Modality.RAW_SIMULATOR_COORDINATES)
+
+
+def test_ecological_loader_denies_depth_camera_raw_ids_and_coordinates(
+    smoke_dataset: Path,
+) -> None:
+    loader = DatasetLoader(smoke_dataset, ModalityPermissionSet.ecological_only())
+    ecological_view = loader.read_ecological_transition(0)
+    ecological_payload = ecological_view.model_dump(mode="json")
+    assert "depth" not in ecological_payload
+    assert "camera_world_transform" not in ecological_payload
+    assert "raw_geom_ids" not in ecological_payload
+    assert "raw_geom_world_positions" not in ecological_payload
+    loader.read_action(0)
+    with pytest.raises(PermissionDeniedError):
+        loader.read_depth(0, 0)
+    with pytest.raises(PermissionDeniedError):
+        loader.read_camera_world_transform(0, 0)
+    with pytest.raises(PermissionDeniedError):
+        loader.read_raw_mujoco_geom_ids(0)
+    with pytest.raises(PermissionDeniedError):
+        loader.read_raw_world_coordinates(0)

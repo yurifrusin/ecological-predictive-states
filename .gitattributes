@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.png binary
+*.npy binary
+*.npz binary
+docs/EPS_BENCH_V0.md whitespace=-trailing-space

@@ -1,0 +1,27 @@
+# Python and tooling
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Generated benchmark data and run artifacts
+data/**
+!data/README.md
+artifacts/**
+!artifacts/README.md
+*.log
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
