@@ -63,14 +63,14 @@ All hashes are SHA-256 and lowercase hexadecimal.
 
 The same seed/configuration produces byte-identical manifests and transition annotations in the declared environment fingerprint. The manifest records MuJoCo and NumPy versions, renderer name, selected GL backend, and operating system. The lock file pins the complete Python dependency environment.
 
-Cross-platform RGB byte identity is not claimed. Rasterisation, drivers, antialiasing, and offscreen backends may change pixels. Cross-platform byte identity of segmentation-derived pixel counts and therefore the complete ecological-label hash has not yet been established either; analytic occlusion structure and opaque correspondence are backend-independent, but raster boundary counts may differ. This is a remaining validation question, not a hidden assumption.
+Cross-platform RGB byte identity is not claimed. The final Windows/WGL smoke dataset had logical hash `0dce78cbf1d46614277eade77fd7f74f1b7619e4c2e183bd696d1b1c1ccfecb9`; Ubuntu/OSMesa CI produced `aef5387cb42d4187ccc7373b69b65d57e2d5919f2234b81d1dcf0d8dac25e996`. Because the dataset identity includes RGB hashes while the pinned episode-0 ecological hash passed unchanged as `3de23fb70a1f68934b3dbb81a8929434ecc9b81c92c0fa5d55c5138e36963419` in both environments, the current evidence establishes ecological-label stability for this scene and locked dependency set across those two backends, while confirming that complete pixel/dataset identity differs. It does not establish stability across arbitrary drivers, renderer versions, scene families, or dependency updates.
 
 ## Remaining Gate 0B work
 
 - Add and validate the corridor scene family.
 - Implement geometry-derived or analytic dense optical flow and its alignment tests.
 - Define and serialise full oriented boundary ownership rather than only boundary contacts plus an occlusion edge.
-- Establish cross-platform stability expectations and tolerances for raster-derived ecological labels.
+- Extend cross-platform ecological-label expectations beyond the currently tested Windows/WGL and Ubuntu/OSMesa locked environments, and define any required tolerances for later scenes.
 - Expand procedural appearances beyond solid-colour variants if texture-frequency testing is adopted.
 
 Gate 0B completion is therefore not claimed. Gate 0C should not begin until these items and every Gate 0B exit criterion have owner-reviewed evidence.
