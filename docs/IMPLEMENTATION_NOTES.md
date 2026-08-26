@@ -2,7 +2,7 @@
 
 ## Scope and architecture
 
-This implementation completes the repository foundation in Gate 0A, preserves the reviewed single-occluder Gate 0B slice and corridor Slice 2, and adds the separately authorised analytic optical-transport Slice 3 pending review. It does not satisfy the full Gate 0B deliverable list in `MILESTONE_0.md` and makes no scientific claim.
+This implementation completes the repository foundation in Gate 0A and preserves the canonical single-occluder Gate 0B Slice 1, corridor Slice 2, and analytic optical-transport Slice 3. It does not satisfy the full Gate 0B deliverable list in `MILESTONE_0.md` and makes no scientific claim.
 
 The path is intentionally short:
 
@@ -85,13 +85,29 @@ All hashes are SHA-256 and lowercase hexadecimal.
 - `content_provenance_binding_sha256` hashes the already-computed dataset logical hash together with the already-computed source-provenance and renderer/execution-provenance hashes. This binds content and both provenance domains without making any domain self-referential. The existing scientific content identity deliberately continues to exclude provenance.
 - Volatile time, hostname, and Python build text live only in unreferenced `run.json`; they do not participate in manifest or scientific identity.
 
-The corrected Slice 3 version matrix advances only changed wire contracts. Both resolved configuration schemas remain `0.1.0-dev.2`. The dataset manifest remains `0.1.0-dev.3` because its episode analytic-identity field and wire shape are unchanged. Transition and both scene-specific privileged-instrumentation schemas advance to `0.1.0-dev.5` for method v3 and the complete v2 finite-edge comparison contract. Slice 1 used transition `0.1.0-dev.1`; its pinned episode-0 ecological hash was `8f7c7a7e8f70f9e84bf2f256ecf93f8d94f5327abe536c01a6b8f7e87aef3df0`. Slice 2 used `0.1.0-dev.2`; the scientifically rejected infinite-plane PR #5 revision used transition and instrumentation `0.1.0-dev.3`; the finite-plane engineering-reviewed head `eee0eaa4b1de50b4dea1e391dba6f32b588e763c` used `0.1.0-dev.4`.
+The final Slice 3 schema and method matrix advances only changed wire contracts:
+
+| Contract | Final version or method |
+| --- | --- |
+| Single-occluder config | `0.1.0-dev.2` |
+| Corridor config | `0.1.0-dev.2` |
+| Dataset manifest | `0.1.0-dev.3` |
+| Transition | `0.1.0-dev.5` |
+| Single-occluder privileged instrumentation | `0.1.0-dev.5` |
+| Corridor privileged instrumentation | `0.1.0-dev.5` |
+| Analytic transport | `analytic_static_scene_transport_v3` |
+| Compiled intersection | `compiled_plane_and_oriented_box_nearest_hit_v3` |
+| Finite-plane extent | `finite_plane_visual_extent_v2` |
+
+The dataset manifest stays at `0.1.0-dev.3` because its wire shape is unchanged. Transition and both scene-specific privileged-instrumentation schemas advance for method v3 and the complete finite-edge comparison contract. Slice 1 used transition `0.1.0-dev.1`; its pinned episode-0 ecological hash was `8f7c7a7e8f70f9e84bf2f256ecf93f8d94f5327abe536c01a6b8f7e87aef3df0`. Slice 2 used `0.1.0-dev.2`; the scientifically rejected infinite-plane PR #5 revision used transition and instrumentation `0.1.0-dev.3`; the finite-plane engineering-reviewed head `eee0eaa4b1de50b4dea1e391dba6f32b588e763c` used `0.1.0-dev.4`.
 
 Neither meaningful migration is byte compatible: canonical transition JSON, ecological identity domains, artifact hashes, dataset hashes, and schema validation change. Under historical `0.1.0-dev.2`, the expected single-occluder episode-0 ecological hash is `0210bdbce412c6cf199c1cad58b5e8831b97d8a112a0e82f285b6ea1c20df4a3` in both tested environments. Historical corridor raster boundaries differ between Windows/WGL and Ubuntu/OSMesa, so exact regression values remain recorded by backend: Windows/WGL episode 0/1 are `92e89e4e0eb23b2a50a39cb3803c490654899531a000a3c1ef139e875177f2f8` and `ea231fe400fabfeb1afea6f9ba58450700734d6b539cfd0a3d540b7ad3345980`; Ubuntu/OSMesa episode 0/1 are `8ca92d6161acc2029421f1182491a96837f01058486fb5ee0c0189a1c2ff9a22` and `65ed70d5ad141313070978217d84a73e8504c17be95be193568d569940e71189`. No public `0.1.0` scientific dataset is implied.
 
 The scientifically rejected PR #5 v1 analytic identities remain historical evidence: `e6d5fc664957c4e68b3c249ce5bd32113755b1c86d5fff8dbeaafc75b550c7cd` for both canonical single-occluder episodes, `12ea54fea0b8d9716d12189fcba89397156f7c8111fcb7a488702ffb8240f3bf` for corridor episode 0, and `9b41e6780bbf89654cda8c5f6d5f4d6326d64bac2594a1afb12db883f91395b6` for corridor episode 1. Their earlier Windows/WGL and Ubuntu/OSMesa equality does not rescue the rejected infinite-plane method.
 
-The reviewed v2 analytic identities remain historical evidence for exact head `eee0eaa4b1de50b4dea1e391dba6f32b588e763c`: `479d4540835dcc5d204e530766edfcc4bd74b971cc8efe9cbe391317d4ca6740` for both single-occluder episodes, `ddb4dff0fba18d89cd6c15eb988e672c93988d3d4eda2ae625ab317d36631015` for corridor episode 0, and `a276190abe142bd6859cd0e29983964cbdd17c2cbbf291141ed6f32c6c3c5007` for corridor episode 1. Method v3 deliberately changes analytic identity by binding the complete finite-edge policy, while correction evidence and current identities remain in the PR response rather than active-review files.
+The reviewed v2 analytic identities remain historical evidence for exact head `eee0eaa4b1de50b4dea1e391dba6f32b588e763c`: `479d4540835dcc5d204e530766edfcc4bd74b971cc8efe9cbe391317d4ca6740` for both single-occluder episodes, `ddb4dff0fba18d89cd6c15eb988e672c93988d3d4eda2ae625ab317d36631015` for corridor episode 0, and `a276190abe142bd6859cd0e29983964cbdd17c2cbbf291141ed6f32c6c3c5007` for corridor episode 1. Method v3 deliberately changes analytic identity by binding the complete finite-edge policy, while all 24 canonical v2/v3 vector, validity, and reason arrays remained byte-identical.
+
+The final v3 identities are `77821c734e4a5316851b9e57417a014e8caf292f568314da05e2493608960832` for both single-occluder episodes, `ffa9b31e91da7a4cdb68ce938beba901beecb3973684bc303d3e362fa01fa09a` for corridor episode 0, and `64706a77347aa2a98e52d6da023ba80f7a04d1b7a94eaa809124c9b7fe9fca0a` for corridor episode 1.
 
 Inspection output is encoded completely before publication. A same-directory temporary file is flushed and atomically linked to the requested path without replacement; existing files, symbolic or hard links, directories, incompatible parents, and create-time races fail closed. Temporary files are removed after either outcome.
 
@@ -111,11 +127,19 @@ The final reviewed apparatus independently checks compiled positions, sizes, cam
 
 This evidence does not establish full Gate 0B completion, authorise Gate 0C, or establish a scientific result.
 
+## PR #5 closeout evidence
+
+The final reviewed implementation head was `3086bc2eccc4b7492eb8a77660572e879a04ef0b`; it received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`. Exact-head Ubuntu/OSMesa CI run `32971294963` passed locked installation, lint, formatting, typing, all 241 tests, and both two-episode generation, validation, and inspection workflows. Local Windows/WGL review evidence recorded 238 passed and 3 platform skips.
+
+The accepted exact-edge policy is `inclusive_extent_plus_scaled_binary64_epsilon_v1`: each finite-plane local-axis limit is `extent + 16.0 * 2.220446049250313e-16 * max(1.0, extent)`. It is the declared binary64 inclusive comparison contract, not an ecological enlargement of the surface. Public analytic raster dimensions, FOV, camera position/rotation, and controlled geom identifiers fail closed before allocation or indexing. Inspection uses race-safe atomic no-replace publication.
+
+Canonical evidence retains zero unexplained renderer-interior disagreement and correspondence-indexed inverse tests. Full oriented boundary ownership, ecological visibility events, arbitrary-subpixel dense-array inverse interpolation, cross-platform claims beyond locked Windows/WGL and Ubuntu/OSMesa, full Gate 0B, Gate 0C, and model work remain unavailable or unimplemented. No scientific result is claimed.
+
 ## Remaining Gate 0B work
 
 - Define and serialise full oriented boundary ownership rather than only boundary contacts plus an occlusion edge.
 - Derive true ecological accretion/deletion and disocclusion only after oriented boundary ownership is reviewed.
-- Obtain renewed exact-head engineering and scientific review for method v3, then extend its cross-platform posture beyond the locked Windows/WGL and Ubuntu/OSMesa environments.
+- Extend the reviewed method v3 cross-platform posture beyond the locked Windows/WGL and Ubuntu/OSMesa environments.
 - Expand procedural appearances beyond solid-colour variants if texture-frequency testing is adopted.
 
 Gate 0B completion is therefore not claimed. Gate 0C should not begin until these items and every Gate 0B exit criterion have owner-reviewed evidence.

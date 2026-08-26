@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-This branch implements the analytic optical-transport slice of Gate 0B for the canonical single-occluder and corridor families. Engineering review of head `eee0eaa4b1de50b4dea1e391dba6f32b588e763c` requested changes. The finite-edge policy changes a label-defining scientific contract, so scientific escalation is required for the changed head as well as renewed engineering review. It does not complete Gate 0B, establish oriented boundary ownership or ecological accretion/deletion, authorise Gate 0C, add a model, or establish a scientific result.
+The analytic optical-transport slice of Gate 0B is canonical for the single-occluder and corridor families. Exact reviewed head `3086bc2eccc4b7492eb8a77660572e879a04ef0b` received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`. This status does not complete Gate 0B, establish oriented boundary ownership or ecological accretion/deletion, authorise Gate 0C, add a model, or establish a scientific result.
 
 The annotation answers one bounded question: for a source pixel imaging a controlled static surface point, where does that point project after the prescribed observer movement, and is that exact point still visibly transportable? Controlled compiled geometry and camera transforms are privileged generation and validation instruments. RGB matching, learned flow, rendered motion vectors, depth, and renderer segmentation do not define the canonical result.
 
@@ -133,7 +133,7 @@ The reviewed v1 identities are historical evidence for the rejected infinite-pla
 | Rejected corridor 0 | `12ea54fea0b8d9716d12189fcba89397156f7c8111fcb7a488702ffb8240f3bf` |
 | Rejected corridor 1 | `9b41e6780bbf89654cda8c5f6d5f4d6326d64bac2594a1afb12db883f91395b6` |
 
-The reviewed v2 identities `479d4540835dcc5d204e530766edfcc4bd74b971cc8efe9cbe391317d4ca6740`, `ddb4dff0fba18d89cd6c15eb988e672c93988d3d4eda2ae625ab317d36631015`, and `a276190abe142bd6859cd0e29983964cbdd17c2cbbf291141ed6f32c6c3c5007` are retained as historical evidence for head `eee0eaa4b1de50b4dea1e391dba6f32b588e763c`. Method v3 deliberately changes analytic identity even when canonical arrays remain unchanged. Current correction identities and execution evidence belong in the PR correction response rather than active review records or this contract.
+The reviewed v2 identities `479d4540835dcc5d204e530766edfcc4bd74b971cc8efe9cbe391317d4ca6740`, `ddb4dff0fba18d89cd6c15eb988e672c93988d3d4eda2ae625ab317d36631015`, and `a276190abe142bd6859cd0e29983964cbdd17c2cbbf291141ed6f32c6c3c5007` are retained as historical evidence for head `eee0eaa4b1de50b4dea1e391dba6f32b588e763c`. Method v3 deliberately changes analytic identity even though the canonical v2 and v3 vector, validity, and reason arrays remained byte-identical.
 
 ## Independent validation and tests
 
@@ -148,6 +148,22 @@ Rendered raw segmentation is a non-authoritative diagnostic only. Privileged ins
 With `finite_plane_visual_extent_v2`, canonical single-occluder and corridor assignments retain zero unexplained non-boundary disagreement. The renderer comparison remains outside analytic identity.
 
 Inspection validates the complete dataset before writing anything and shows before/after RGB, before/after opaque segmentation, forward/backward flow visualisations, and forward/backward validity/reason views. It encodes to a same-directory temporary file and publishes with an atomic no-replace link; existing files, links, directories, incompatible parents, and create-time races fail without replacing the existing output. Its ordinary summary includes the method and analytic identity without metric or semantic apparatus values.
+
+## Final review evidence
+
+Exact reviewed implementation head `3086bc2eccc4b7492eb8a77660572e879a04ef0b` received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`. Exact-head Ubuntu/OSMesa CI run `32971294963` passed locked installation, lint, formatting, typing, all 241 tests, and both two-episode generation, validation, and inspection workflows.
+
+The final `analytic_static_scene_transport_v3` identities are:
+
+| Family / episode | `analytic_transport_sha256` |
+| --- | --- |
+| Single occluder 0 and 1 | `77821c734e4a5316851b9e57417a014e8caf292f568314da05e2493608960832` |
+| Corridor 0 | `ffa9b31e91da7a4cdb68ce938beba901beecb3973684bc303d3e362fa01fa09a` |
+| Corridor 1 | `64706a77347aa2a98e52d6da023ba80f7a04d1b7a94eaa809124c9b7fe9fca0a` |
+
+All 24 canonical v2/v3 vector, validity, and reason arrays were byte-identical. The identity change is deliberate because the formal numerical contract changed. Review accepted `inclusive_extent_plus_scaled_binary64_epsilon_v1` as the declared binary64 comparison contract for an inclusive finite optical edge: the exact edge is accepted and values beyond the declared tolerance are rejected. Evidence remains limited to the canonical apparatus, bounded scene scale, and locked Windows/WGL and Ubuntu/OSMesa environments. Arbitrary-subpixel dense-array inverse interpolation remains undeclared.
+
+This evidence does not establish oriented boundary ownership or ecological visibility events, complete Gate 0B, authorise Gate 0C, or establish a scientific result.
 
 ## Scientific limit and remaining work
 
