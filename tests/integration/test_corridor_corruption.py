@@ -186,7 +186,7 @@ def test_hash_rebuilt_fabricated_corridor_raw_ids_are_rejected(
         changed_mapping[str(new_raw_id)] = old_mapping[str(old_raw_id)]
     instrumentation["raw_to_opaque_surface_ids"] = changed_mapping
     commit_episode_payloads(broken, 0, transition, instrumentation)
-    with pytest.raises(DatasetValidationError, match="unknown raw ID"):
+    with pytest.raises(DatasetValidationError, match="compiled MuJoCo geom identifiers"):
         validate_dataset(broken)
 
 

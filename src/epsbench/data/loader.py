@@ -8,6 +8,7 @@ import numpy as np
 import numpy.typing as npt
 from PIL import Image
 
+from epsbench.data.paths import resolve_dataset_manifest
 from epsbench.schema import (
     Action,
     CameraInstrumentation,
@@ -34,10 +35,9 @@ class DatasetLoader:
     """Dataset reader that requires a declared permission set at construction."""
 
     def __init__(self, root: Path, permissions: ModalityPermissionSet) -> None:
-        self.root = root.resolve()
+        self.root, manifest_path = resolve_dataset_manifest(root)
         self.permissions = permissions
-        manifest_path = self.root / "manifest.json"
-        self.manifest = DatasetManifest.model_validate_json(
+        self._manifest = DatasetManifest.model_validate_json(
             manifest_path.read_text(encoding="utf-8")
         )
 
@@ -57,7 +57,7 @@ class DatasetLoader:
         try:
             return next(
                 episode
-                for episode in self.manifest.episodes
+                for episode in self._manifest.episodes
                 if episode.episode_index == episode_index
             )
         except StopIteration as error:
@@ -83,7 +83,17 @@ class DatasetLoader:
 
     def read_scene_family(self) -> SceneFamily:
         self._require(Modality.SCENE_FAMILY)
-        return self.manifest.scene_family
+        return self._manifest.scene_family
+
+    def read_dataset_manifest(self) -> DatasetManifest:
+        """Return full control metadata only to explicitly privileged callers."""
+
+        self._require(
+            Modality.TRANSITION_RECORD,
+            Modality.SCENE_FAMILY,
+            Modality.PRIVILEGED_GENERATION_RECORDS,
+        )
+        return self._manifest.model_copy(deep=True)
 
     def read_ecological_transition(self, episode_index: int) -> EcologicalTransitionView:
         self._require(

@@ -11,8 +11,10 @@ verification. The original findings remain unchanged in
 - Pull request: `#3 — Gate 0B Slice 2: add corridor scene-family apparatus`
 - Original reviewed head: `5129612540a6520aea1c6bf62c6d2a89cc704534`
 - Correction role: `CORRECTION_IMPLEMENTER`
-- Correction head: `PENDING CORRECTION COMMIT`
-- Engineering review: `PENDING`
+- Committed scientific-correction evidence: `446934899e1e814697e79f3d8b87506194176012`
+  and `5451f21c6fd7df99c41758bdea647954b556c18a`
+- Engineering review: `ENGINEERING_REQUEST_CHANGES` on
+  `5451f21c6fd7df99c41758bdea647954b556c18a`
 - Scientific re-review: `PENDING`
 - Owner approval: `PENDING`
 - Merge, tag, release, or gate advancement: `NOT AUTHORISED`
@@ -83,7 +85,10 @@ verification. The original findings remain unchanged in
 
 ## Local and CI evidence
 
-Required locked checks, two-episode generation/validation/inspection for both scene families,
-inspection-image review, exact Git status, correction commit, push, and exact-head CI are reported
-in the PR correction evidence and final correction-implementer response. Until independent
-re-review, every finding remains `IMPLEMENTED_PENDING_VERIFICATION`.
+Run `32929169048` failed on intermediate head
+`446934899e1e814697e79f3d8b87506194176012` when it exposed unpinned Ubuntu/OSMesa corridor
+identities; its dataset-command step was skipped. Run `32929628787` passed all checks and both
+dataset-command paths on exact scientific-correction head
+`5451f21c6fd7df99c41758bdea647954b556c18a`. Engineering review of that exact head requested the
+separate corrections recorded in the engineering review cycle. Until independent re-review,
+every scientific finding remains `IMPLEMENTED_PENDING_VERIFICATION`.

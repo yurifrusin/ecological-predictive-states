@@ -10,6 +10,7 @@ import numpy.typing as npt
 
 from epsbench.config import CorridorConfig
 from epsbench.schema import CorridorSampledGeometry
+from epsbench.sim.compiled import CompiledSceneContract, extract_compiled_scene_contract
 from epsbench.utils.seeding import derive_seed
 
 RGBArray = npt.NDArray[np.uint8]
@@ -39,6 +40,7 @@ class CorridorRenderedTransition:
     after: CorridorRenderedFrame
     raw_geom_ids: dict[str, int]
     raw_geom_positions: dict[str, tuple[float, float, float]]
+    raw_geom_compiled_sizes: dict[str, tuple[float, float, float]]
 
 
 def corridor_generation_seeds(episode_seed: int) -> tuple[int, int, int]:
@@ -145,6 +147,25 @@ def build_corridor_scene_xml(
 """.strip()
 
 
+def compile_corridor_scene_contract(
+    config: CorridorConfig,
+    geometry: CorridorSampledGeometry,
+    appearance_seed: int,
+) -> CompiledSceneContract:
+    """Compile the sampled corridor without rendering and extract its exact facts."""
+
+    model = mujoco.MjModel.from_xml_string(
+        build_corridor_scene_xml(config, geometry, appearance_seed)
+    )
+    data = mujoco.MjData(model)
+    return extract_compiled_scene_contract(
+        model,
+        data,
+        CORRIDOR_SURFACE_NAMES,
+        "monocular_camera",
+    )
+
+
 def _render_raw_segmentation(
     renderer: mujoco.Renderer,
     data: mujoco.MjData,
@@ -206,18 +227,12 @@ def render_corridor_transition(
     )
     data = mujoco.MjData(model)
     camera_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "monocular_camera")
-    raw_geom_ids = {
-        name: mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
-        for name in CORRIDOR_SURFACE_NAMES
-    }
-    raw_geom_positions = {
-        name: (
-            float(model.geom_pos[raw_id, 0]),
-            float(model.geom_pos[raw_id, 1]),
-            float(model.geom_pos[raw_id, 2]),
-        )
-        for name, raw_id in raw_geom_ids.items()
-    }
+    compiled = extract_compiled_scene_contract(
+        model,
+        data,
+        CORRIDOR_SURFACE_NAMES,
+        "monocular_camera",
+    )
     renderer = mujoco.Renderer(
         model,
         height=config.render.height,
@@ -243,6 +258,7 @@ def render_corridor_transition(
     return CorridorRenderedTransition(
         before=before,
         after=after,
-        raw_geom_ids=raw_geom_ids,
-        raw_geom_positions=raw_geom_positions,
+        raw_geom_ids=compiled.raw_geom_ids,
+        raw_geom_positions=compiled.raw_geom_world_positions,
+        raw_geom_compiled_sizes=compiled.raw_geom_compiled_sizes,
     )

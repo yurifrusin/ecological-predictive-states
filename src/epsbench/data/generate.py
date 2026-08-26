@@ -365,6 +365,7 @@ def _generate_single_occluder_episode(
             for name, raw_id in rendered.raw_geom_ids.items()
         },
         raw_geom_world_positions=rendered.raw_geom_positions,
+        raw_geom_compiled_sizes=rendered.raw_geom_compiled_sizes,
         occlusion_oracle=OcclusionOracleEvidence(
             rule="counterfactual_occluder_exclusion_v1",
             candidate_occluder_raw_geom_id=occluder_raw_id,
@@ -539,6 +540,7 @@ def _generate_corridor_episode(
             for name, raw_id in rendered.raw_geom_ids.items()
         },
         raw_geom_world_positions=rendered.raw_geom_positions,
+        raw_geom_compiled_sizes=rendered.raw_geom_compiled_sizes,
         sampled_geometry=geometry,
         camera_before=camera_before,
         camera_after=camera_after,

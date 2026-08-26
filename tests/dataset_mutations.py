@@ -167,6 +167,27 @@ def commit_raw_instrumentation_payload(
     _write_manifest(root, manifest, episodes)
 
 
+def commit_resolved_config_payload(
+    root: Path,
+    config_payload: dict[str, Any],
+) -> None:
+    """Rewrite resolved configuration and every manifest identity that depends on it."""
+
+    manifest = load_manifest(root)
+    resolved_config = rewrite_json_artifact(
+        root,
+        manifest.resolved_config,
+        config_payload,
+    )
+    changed = manifest.model_copy(
+        update={
+            "resolved_config": resolved_config,
+            "config_logical_sha256": sha256_bytes(canonical_json_bytes(config_payload)),
+        }
+    )
+    _write_manifest(root, changed, list(changed.episodes))
+
+
 def _write_manifest(
     root: Path,
     manifest: DatasetManifest,

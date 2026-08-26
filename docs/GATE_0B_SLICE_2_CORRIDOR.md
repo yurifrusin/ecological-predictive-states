@@ -178,7 +178,10 @@ Artifact/container hashes, ecological-label identity, dataset scientific-content
 source provenance, renderer/execution provenance, content/provenance binding, and volatile
 `run.json` metadata remain separate domains. RGB byte equality across WGL and OSMesa is not
 claimed. These backend-specific identities were pinned from local Windows/WGL evidence and exact-
-head Ubuntu/OSMesa run `32929169048`; a successful renewed exact-head CI run remains required.
+head Ubuntu/OSMesa run `32929169048`, which failed at the then-unpinned regression and skipped the
+dataset-command step. Run `32929628787` passed all checks and dataset commands on engineering-
+reviewed head `5451f21c6fd7df99c41758bdea647954b556c18a`. The resulting engineering request for changes and
+all later corrections require renewed exact-head review; the successful run is not an approval.
 
 ## Remaining Gate 0B work
 

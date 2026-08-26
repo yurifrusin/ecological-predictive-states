@@ -23,6 +23,7 @@ from epsbench.data.identity import (
     compute_renderer_execution_provenance_hash,
     compute_source_provenance_hash,
 )
+from epsbench.data.paths import UnsafeDatasetManifestError, resolve_dataset_manifest
 from epsbench.schema import (
     Action,
     ArtifactRecord,
@@ -37,7 +38,13 @@ from epsbench.schema import (
     UnavailableOcclusionAnnotation,
     parse_privileged_instrumentation_json,
 )
-from epsbench.sim import CORRIDOR_SURFACE_NAMES, corridor_generation_seeds
+from epsbench.sim import (
+    CORRIDOR_SURFACE_NAMES,
+    compile_corridor_scene_contract,
+    compile_single_occluder_scene_contract,
+    corridor_generation_seeds,
+)
+from epsbench.sim.compiled import CompiledSceneContract
 from epsbench.utils.canonical import (
     canonical_json_bytes,
     logical_array_hash,
@@ -160,6 +167,7 @@ def _require_camera_action_alignment(
     transition: TransitionRecord,
     cameras: tuple[CameraInstrumentation, CameraInstrumentation],
     instrumentation: PrivilegedInstrumentation,
+    compiled_scene: CompiledSceneContract,
 ) -> None:
     expected_action = Action.model_validate(config.action.model_dump(mode="python"))
     if transition.action != expected_action:
@@ -225,6 +233,57 @@ def _require_camera_action_alignment(
         rtol=0.0,
     ):
         raise DatasetValidationError("camera rotation changed despite zero executed yaw")
+    if not np.allclose(
+        before.camera_world_rotation_row_major,
+        compiled_scene.camera_world_rotation_row_major,
+        atol=1e-12,
+        rtol=0.0,
+    ):
+        raise DatasetValidationError("camera rotation differs from the compiled MuJoCo scene")
+    if not np.allclose(
+        before.camera_world_position,
+        compiled_scene.camera_world_position,
+        atol=1e-12,
+        rtol=0.0,
+    ):
+        raise DatasetValidationError("before camera pose differs from the compiled MuJoCo scene")
+    if not np.isclose(
+        compiled_scene.camera_field_of_view_degrees,
+        config.camera.field_of_view_degrees,
+        atol=1e-12,
+        rtol=0.0,
+    ):
+        raise DatasetValidationError("camera field of view differs from the compiled MuJoCo scene")
+
+
+def _require_compiled_apparatus_contract(
+    instrumentation: PrivilegedInstrumentation,
+    compiled_scene: CompiledSceneContract,
+) -> None:
+    if instrumentation.raw_geom_ids != compiled_scene.raw_geom_ids:
+        raise DatasetValidationError(
+            "semantic apparatus names do not match compiled MuJoCo geom identifiers"
+        )
+    for name, expected_position in compiled_scene.raw_geom_world_positions.items():
+        if not np.allclose(
+            instrumentation.raw_geom_world_positions[name],
+            expected_position,
+            atol=1e-12,
+            rtol=0.0,
+        ):
+            raise DatasetValidationError(
+                "instrumented geom world position differs from compiled MuJoCo scene"
+            )
+    for name, expected_size in compiled_scene.raw_geom_compiled_sizes.items():
+        if not np.allclose(
+            instrumentation.raw_geom_compiled_sizes[name],
+            expected_size,
+            atol=1e-12,
+            rtol=0.0,
+        ):
+            raise DatasetValidationError(
+                "instrumented geom size differs from compiled MuJoCo scene"
+            )
 
 
 def _corridor_scene_content_hash(
@@ -386,6 +445,7 @@ def _require_corridor_raw_segmentation(
     transition: TransitionRecord,
     instrumentation: CorridorInstrumentation,
     segmentations: tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]],
+    expected_shape: tuple[int, int],
     registry: _ArtifactRegistry,
 ) -> None:
     labels = {surface.surface_id: surface.segmentation_label for surface in transition.surfaces}
@@ -401,8 +461,10 @@ def _require_corridor_raw_segmentation(
             evidence_by_frame[frame_index].raw_segmentation,
             registry,
         )
-        if raw_segmentation.dtype != np.dtype("int32") or (
-            raw_segmentation.shape != public_segmentation.shape
+        if (
+            raw_segmentation.dtype != np.dtype("int32")
+            or raw_segmentation.shape != expected_shape
+            or raw_segmentation.shape != public_segmentation.shape
         ):
             raise DatasetValidationError("corridor raw segmentation dtype or shape is invalid")
         frame_raw_ids = {int(value) for value in np.unique(raw_segmentation)}
@@ -425,6 +487,7 @@ def _require_occlusion_oracle(
     transition: TransitionRecord,
     instrumentation: SingleOccluderInstrumentation,
     segmentations: tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]],
+    expected_shape: tuple[int, int],
     registry: _ArtifactRegistry,
 ) -> None:
     oracle = instrumentation.occlusion_oracle
@@ -465,6 +528,7 @@ def _require_occlusion_oracle(
         )
         if (
             counterfactual.dtype != np.dtype("int32")
+            or counterfactual.shape != expected_shape
             or counterfactual.shape != ordinary_segmentation.shape
         ):
             raise DatasetValidationError("counterfactual segmentation dtype or shape is invalid")
@@ -513,10 +577,10 @@ def _require_occlusion_oracle(
 def validate_dataset(root: Path) -> DatasetManifest:
     """Validate every declared artifact and cross-record invariant."""
 
-    resolved_root = root.resolve()
-    manifest_path = resolved_root / "manifest.json"
-    if not manifest_path.is_file():
-        raise DatasetValidationError("missing manifest.json")
+    try:
+        resolved_root, manifest_path = resolve_dataset_manifest(root)
+    except UnsafeDatasetManifestError as error:
+        raise DatasetValidationError(str(error)) from error
     try:
         manifest = DatasetManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
     except Exception as error:
@@ -556,6 +620,7 @@ def validate_dataset(root: Path) -> DatasetManifest:
         raise DatasetValidationError("appearance variant is inconsistent")
     if config.scene_family != manifest.scene_family:
         raise DatasetValidationError("manifest scene family differs from resolved configuration")
+    expected_raster_shape = (config.render.height, config.render.width)
 
     dataset_surface_ids: set[str] = set()
     for episode in manifest.episodes:
@@ -598,6 +663,8 @@ def validate_dataset(root: Path) -> DatasetManifest:
             raise DatasetValidationError("raw MuJoCo geom identifiers must be unique")
         if set(instrumentation.raw_geom_ids) != set(instrumentation.raw_geom_world_positions):
             raise DatasetValidationError("raw geom coordinate records are incomplete")
+        if set(instrumentation.raw_geom_ids) != set(instrumentation.raw_geom_compiled_sizes):
+            raise DatasetValidationError("compiled geom size records are incomplete")
         if set(instrumentation.raw_to_opaque_surface_ids.values()) != {
             surface.surface_id for surface in transition.surfaces
         }:
@@ -629,11 +696,19 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 raise DatasetValidationError(
                     "single-occluder instrumentation/configuration mismatch"
                 )
+            compiled_scene = compile_single_occluder_scene_contract(config)
+            _require_compiled_apparatus_contract(instrumentation, compiled_scene)
             expected_scene_content_sha256 = _single_occluder_scene_content_hash(config)
         elif isinstance(instrumentation, CorridorInstrumentation):
             if not isinstance(config, CorridorConfig):
                 raise DatasetValidationError("corridor instrumentation/configuration mismatch")
             _require_corridor_instrumentation(config, episode.episode_seed, instrumentation)
+            compiled_scene = compile_corridor_scene_contract(
+                config,
+                instrumentation.sampled_geometry,
+                instrumentation.generation_seeds.appearance_seed,
+            )
+            _require_compiled_apparatus_contract(instrumentation, compiled_scene)
             expected_scene_content_sha256 = _corridor_scene_content_hash(
                 config,
                 instrumentation,
@@ -648,6 +723,10 @@ def validate_dataset(root: Path) -> DatasetManifest:
         ] = []
         cameras: list[CameraInstrumentation] = []
         for frame in (transition.before, transition.after):
+            if (frame.height, frame.width) != expected_raster_shape:
+                raise DatasetValidationError(
+                    "frame dimensions differ from the resolved render configuration"
+                )
             rgb = _load_rgb(resolved_root, frame.rgb, registry)
             depth = _load_npy(resolved_root, frame.depth, registry)
             segmentation = _load_npy(resolved_root, frame.segmentation, registry)
@@ -692,6 +771,7 @@ def validate_dataset(root: Path) -> DatasetManifest:
             transition,
             (cameras[0], cameras[1]),
             instrumentation,
+            compiled_scene,
         )
 
         if tuple(item[0].shape for item in frame_arrays) != (
@@ -730,6 +810,7 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 transition,
                 instrumentation,
                 (frame_arrays[0][2], frame_arrays[1][2]),
+                expected_raster_shape,
                 registry,
             )
         elif not isinstance(transition.occlusion, UnavailableOcclusionAnnotation):
@@ -742,6 +823,7 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 transition,
                 instrumentation,
                 (frame_arrays[0][2], frame_arrays[1][2]),
+                expected_raster_shape,
                 registry,
             )
 

@@ -565,6 +565,7 @@ class SingleOccluderInstrumentation(StrictModel):
     raw_geom_ids: dict[str, int]
     raw_to_opaque_surface_ids: dict[str, SurfaceId]
     raw_geom_world_positions: dict[str, tuple[float, float, float]]
+    raw_geom_compiled_sizes: dict[str, tuple[float, float, float]]
     occlusion_oracle: OcclusionOracleEvidence
 
     @model_validator(mode="after")
@@ -577,6 +578,8 @@ class SingleOccluderInstrumentation(StrictModel):
             raise ValueError("apparatus raw geom IDs must be distinct and non-negative")
         if set(self.raw_geom_world_positions) != expected_names:
             raise ValueError("raw geom positions must describe exactly the apparatus surfaces")
+        if set(self.raw_geom_compiled_sizes) != expected_names:
+            raise ValueError("compiled geom sizes must describe exactly the apparatus surfaces")
         if set(self.raw_to_opaque_surface_ids) != {str(raw_id) for raw_id in raw_ids}:
             raise ValueError("raw-to-opaque mapping must cover exactly the apparatus raw IDs")
         if len(set(self.raw_to_opaque_surface_ids.values())) != len(expected_names):
@@ -587,6 +590,12 @@ class SingleOccluderInstrumentation(StrictModel):
             for coordinate in position
         ):
             raise ValueError("raw geom world positions must contain only finite values")
+        if not all(
+            math.isfinite(dimension) and dimension > 0.0
+            for size in self.raw_geom_compiled_sizes.values()
+            for dimension in size
+        ):
+            raise ValueError("compiled geom sizes must contain only finite positive values")
         return self
 
 
@@ -599,6 +608,7 @@ class CorridorInstrumentation(StrictModel):
     raw_geom_ids: dict[str, int]
     raw_to_opaque_surface_ids: dict[str, SurfaceId]
     raw_geom_world_positions: dict[str, tuple[float, float, float]]
+    raw_geom_compiled_sizes: dict[str, tuple[float, float, float]]
     sampled_geometry: CorridorSampledGeometry
     camera_before: CameraInstrumentation
     camera_after: CameraInstrumentation
@@ -629,6 +639,8 @@ class CorridorInstrumentation(StrictModel):
             raise ValueError("corridor raw geom IDs must be distinct and non-negative")
         if set(self.raw_geom_world_positions) != expected_names:
             raise ValueError("raw geom positions must describe exactly the corridor surfaces")
+        if set(self.raw_geom_compiled_sizes) != expected_names:
+            raise ValueError("compiled geom sizes must describe exactly the corridor surfaces")
         if set(self.raw_to_opaque_surface_ids) != {str(raw_id) for raw_id in raw_ids}:
             raise ValueError("corridor raw-to-opaque mapping must cover exactly the raw IDs")
         if len(set(self.raw_to_opaque_surface_ids.values())) != len(expected_names):
@@ -639,6 +651,12 @@ class CorridorInstrumentation(StrictModel):
             for coordinate in position
         ):
             raise ValueError("corridor raw geom positions must contain only finite values")
+        if not all(
+            math.isfinite(dimension) and dimension > 0.0
+            for size in self.raw_geom_compiled_sizes.values()
+            for dimension in size
+        ):
+            raise ValueError("corridor compiled geom sizes must contain finite positive values")
         if self.camera_before.frame_index != 0 or self.camera_after.frame_index != 1:
             raise ValueError("corridor camera evidence must cover ordered before/after frames")
         if {frame.frame_index for frame in self.raw_segmentation_frames} != {0, 1}:
