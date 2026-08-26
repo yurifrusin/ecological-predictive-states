@@ -1,4 +1,4 @@
-"""Deterministic dataset generation for the Gate 0B single-scene slice."""
+"""Deterministic dataset generation for the authorised Gate 0B scene families."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from PIL import Image
 
 from epsbench import __version__
 from epsbench.annotations import derive_boundary_structure, derive_visibility
-from epsbench.config import BenchmarkConfig
+from epsbench.config import BenchmarkConfig, CorridorConfig, SingleOccluderConfig
 from epsbench.data.identity import (
     compute_content_provenance_binding,
     compute_dataset_logical_hash,
@@ -30,20 +30,30 @@ from epsbench.schema import (
     Action,
     ArtifactRecord,
     CameraInstrumentation,
+    CorridorInstrumentation,
     DatasetManifest,
     EpisodeManifest,
     FrameRecord,
+    GenerationSeeds,
     Modality,
     OcclusionFrameEvidence,
     OcclusionOracleEvidence,
     OcclusionRelation,
-    PrivilegedInstrumentation,
+    RawSegmentationFrameEvidence,
     RendererProvenance,
+    SceneFamily,
+    SingleOccluderInstrumentation,
     SurfaceReference,
     TransitionRecord,
     UnavailableAnnotation,
 )
-from epsbench.sim import render_transition
+from epsbench.sim import (
+    CORRIDOR_SURFACE_NAMES,
+    corridor_generation_seeds,
+    render_corridor_transition,
+    render_single_occluder_transition,
+    sample_corridor_geometry,
+)
 from epsbench.utils.canonical import (
     canonical_json_bytes,
     logical_array_hash,
@@ -123,6 +133,28 @@ def _surface_references(
     return tuple(ordered), by_name
 
 
+def _corridor_surface_references(
+    remapping_seed: int,
+) -> tuple[tuple[SurfaceReference, ...], dict[str, SurfaceReference]]:
+    rng = np.random.default_rng(remapping_seed)
+    permutation = rng.permutation(len(CORRIDOR_SURFACE_NAMES))
+    labels: set[int] = set()
+    while len(labels) < len(CORRIDOR_SURFACE_NAMES):
+        labels.add(int(rng.integers(1, 2**31 - 1)))
+    label_list = sorted(labels)
+    by_name: dict[str, SurfaceReference] = {}
+    ordered: list[SurfaceReference] = []
+    for output_index, surface_index in enumerate(permutation.tolist()):
+        name = CORRIDOR_SURFACE_NAMES[surface_index]
+        reference = SurfaceReference(
+            surface_id=f"surface-{rng.bytes(8).hex()}",
+            segmentation_label=label_list[output_index],
+        )
+        by_name[name] = reference
+        ordered.append(reference)
+    return tuple(ordered), by_name
+
+
 def _remap_segmentation(
     raw_segmentation: np.ndarray[Any, Any],
     raw_geom_ids: dict[str, int],
@@ -175,16 +207,16 @@ def _write_frame(
     )
 
 
-def _generate_episode(
+def _generate_single_occluder_episode(
     root: Path,
-    config: BenchmarkConfig,
+    config: SingleOccluderConfig,
     episode_index: int,
 ) -> EpisodeManifest:
     episode_id = f"episode-{episode_index:06d}"
     episode_seed = derive_seed(config.seed, f"episode:{episode_index}")
     episode_directory = root / "episodes" / episode_id
     episode_directory.mkdir(parents=True)
-    rendered = render_transition(config)
+    rendered = render_single_occluder_transition(config)
     surfaces, references = _surface_references(config.seed, episode_index)
     before_segmentation = _remap_segmentation(
         rendered.before.raw_geom_segmentation,
@@ -305,8 +337,9 @@ def _generate_episode(
     transition_path = episode_directory / "transition.json"
     write_canonical_json(transition_path, transition)
 
-    instrumentation = PrivilegedInstrumentation(
-        schema_version="0.1.0-dev.1",
+    instrumentation = SingleOccluderInstrumentation(
+        schema_version="0.1.0-dev.2",
+        scene_family=SceneFamily.SINGLE_OCCLUDER,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,
         raw_geom_ids=rendered.raw_geom_ids,
@@ -342,9 +375,198 @@ def _generate_episode(
             Modality.PRIVILEGED_GENERATION_RECORDS,
             "application/json",
         ),
+        scene_content_sha256=sha256_bytes(
+            canonical_json_bytes(
+                {
+                    "episode_seed": episode_seed,
+                    "scene_family": SceneFamily.SINGLE_OCCLUDER,
+                }
+            )
+        ),
         ecological_label_sha256=transition.ecological_label_sha256,
         rgb_logical_sha256=(before.rgb.logical_sha256, after.rgb.logical_sha256),
     )
+
+
+def _generate_corridor_episode(
+    root: Path,
+    config: CorridorConfig,
+    episode_index: int,
+) -> EpisodeManifest:
+    episode_id = f"episode-{episode_index:06d}"
+    episode_seed = derive_seed(config.seed, f"episode:{episode_index}")
+    geometry_seed, remapping_seed, appearance_seed = corridor_generation_seeds(episode_seed)
+    geometry = sample_corridor_geometry(config, episode_seed)
+    episode_directory = root / "episodes" / episode_id
+    episode_directory.mkdir(parents=True)
+    rendered = render_corridor_transition(config, geometry, appearance_seed)
+    surfaces, references = _corridor_surface_references(remapping_seed)
+    before_segmentation = _remap_segmentation(
+        rendered.before.raw_geom_segmentation,
+        rendered.raw_geom_ids,
+        references,
+    )
+    after_segmentation = _remap_segmentation(
+        rendered.after.raw_geom_segmentation,
+        rendered.raw_geom_ids,
+        references,
+    )
+    camera_before = CameraInstrumentation(
+        frame_index=0,
+        camera_world_position=rendered.before.camera_world_position,
+        camera_world_rotation_row_major=rendered.before.camera_world_rotation_row_major,
+    )
+    camera_after = CameraInstrumentation(
+        frame_index=1,
+        camera_world_position=rendered.after.camera_world_position,
+        camera_world_rotation_row_major=rendered.after.camera_world_rotation_row_major,
+    )
+    before = _write_frame(
+        root,
+        episode_directory,
+        0,
+        rendered.before.rgb,
+        rendered.before.depth,
+        before_segmentation,
+        camera_before,
+    )
+    after = _write_frame(
+        root,
+        episode_directory,
+        1,
+        rendered.after.rgb,
+        rendered.after.depth,
+        after_segmentation,
+        camera_after,
+    )
+    visibility, correspondence, events = derive_visibility(
+        before_segmentation,
+        after_segmentation,
+        surfaces,
+    )
+    boundaries = (
+        derive_boundary_structure(before_segmentation, surfaces, 0),
+        derive_boundary_structure(after_segmentation, surfaces, 1),
+    )
+    transition = TransitionRecord(
+        schema_version="0.1.0-dev.1",
+        episode_id=episode_id,
+        action=Action(**config.action.model_dump()),
+        surfaces=surfaces,
+        before=before,
+        after=after,
+        visibility_states=visibility,
+        region_correspondence=correspondence,
+        visibility_events=events,
+        occlusion_relations=(),
+        boundary_structures=boundaries,
+        dense_optical_flow=UnavailableAnnotation(
+            field="dense_optical_flow",
+            status="unavailable",
+            reason=(
+                "Dense flow is remaining Gate 0B work; this corridor slice records exact "
+                "region correspondence and visibility changes without fabricating flow values."
+            ),
+        ),
+        ecological_label_sha256="0" * 64,
+    )
+    transition = TransitionRecord.model_validate(
+        {
+            **transition.model_dump(mode="python"),
+            "ecological_label_sha256": compute_ecological_label_hash(transition),
+        }
+    )
+    transition_path = episode_directory / "transition.json"
+    write_canonical_json(transition_path, transition)
+
+    generation_seeds = GenerationSeeds(
+        episode_seed=episode_seed,
+        geometry_sampling_seed=geometry_seed,
+        surface_remapping_seed=remapping_seed,
+        appearance_seed=appearance_seed,
+    )
+    raw_segmentation_evidence: list[RawSegmentationFrameEvidence] = []
+    for frame_index, frame in enumerate((rendered.before, rendered.after)):
+        stem = "before" if frame_index == 0 else "after"
+        raw_segmentation_path = episode_directory / f"raw_segmentation_{stem}.npy"
+        np.save(raw_segmentation_path, frame.raw_geom_segmentation, allow_pickle=False)
+        raw_segmentation_evidence.append(
+            RawSegmentationFrameEvidence(
+                frame_index=frame_index,  # type: ignore[arg-type]
+                raw_segmentation=_array_artifact(
+                    raw_segmentation_path,
+                    root,
+                    frame.raw_geom_segmentation,
+                    Modality.PRIVILEGED_GENERATION_RECORDS,
+                    "application/x-npy",
+                ),
+            )
+        )
+    instrumentation = CorridorInstrumentation(
+        schema_version="0.1.0-dev.2",
+        scene_family=SceneFamily.CORRIDOR,
+        episode_id=episode_id,
+        appearance_variant=config.appearance.variant,
+        apparatus_surface_names=CORRIDOR_SURFACE_NAMES,
+        raw_geom_ids=rendered.raw_geom_ids,
+        raw_to_opaque_surface_ids={
+            str(raw_id): references[name].surface_id
+            for name, raw_id in rendered.raw_geom_ids.items()
+        },
+        raw_geom_world_positions=rendered.raw_geom_positions,
+        sampled_geometry=geometry,
+        camera_before=camera_before,
+        camera_after=camera_after,
+        generation_seeds=generation_seeds,
+        raw_segmentation_frames=tuple(raw_segmentation_evidence),  # type: ignore[arg-type]
+        geometry_sampling_rule="uniform_width_length_v1",
+        appearance_rule="solid_colour_variant_v1",
+    )
+    instrumentation_path = episode_directory / "instrumentation.json"
+    write_canonical_json(instrumentation_path, instrumentation)
+    scene_content_sha256 = sha256_bytes(
+        canonical_json_bytes(
+            {
+                "episode_seed": episode_seed,
+                "sampled_geometry": geometry.model_dump(mode="json"),
+                "scene_family": SceneFamily.CORRIDOR,
+            }
+        )
+    )
+    return EpisodeManifest(
+        episode_id=episode_id,
+        episode_index=episode_index,
+        episode_seed=episode_seed,
+        transition=_json_artifact(
+            transition_path,
+            root,
+            transition,
+            Modality.TRANSITION_RECORD,
+            "application/json",
+        ),
+        privileged_instrumentation=_json_artifact(
+            instrumentation_path,
+            root,
+            instrumentation,
+            Modality.PRIVILEGED_GENERATION_RECORDS,
+            "application/json",
+        ),
+        scene_content_sha256=scene_content_sha256,
+        ecological_label_sha256=transition.ecological_label_sha256,
+        rgb_logical_sha256=(before.rgb.logical_sha256, after.rgb.logical_sha256),
+    )
+
+
+def _generate_episode(
+    root: Path,
+    config: BenchmarkConfig,
+    episode_index: int,
+) -> EpisodeManifest:
+    if isinstance(config, SingleOccluderConfig):
+        return _generate_single_occluder_episode(root, config, episode_index)
+    if isinstance(config, CorridorConfig):
+        return _generate_corridor_episode(root, config, episode_index)
+    raise TypeError(f"unsupported scene configuration: {type(config).__name__}")
 
 
 def _renderer_provenance() -> RendererProvenance:
@@ -387,8 +609,9 @@ def generate_dataset(config: BenchmarkConfig, episodes: int, output: Path) -> Da
         renderer_provenance
     )
     manifest = DatasetManifest(
-        schema_version="0.1.0-dev.1",
+        schema_version="0.1.0-dev.2",
         generator_version="0.1.0",
+        scene_family=config.scene_family,
         root_seed=config.seed,
         config_logical_sha256=sha256_bytes(canonical_json_bytes(config)),
         appearance_variant=config.appearance.variant,

@@ -18,6 +18,7 @@ from epsbench.schema import (
     DatasetManifest,
     PrivilegedInstrumentation,
     TransitionRecord,
+    parse_privileged_instrumentation_json,
 )
 from epsbench.utils.canonical import (
     canonical_json_bytes,
@@ -102,7 +103,7 @@ def commit_episode_payloads(
             "ecological_label_sha256": compute_ecological_label_hash(transition),
         }
     )
-    instrumentation = PrivilegedInstrumentation.model_validate_json(
+    instrumentation: PrivilegedInstrumentation = parse_privileged_instrumentation_json(
         canonical_json_bytes(instrumentation_payload)
     )
     transition_record = rewrite_json_artifact(

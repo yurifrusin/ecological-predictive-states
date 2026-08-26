@@ -7,7 +7,7 @@ from epsbench.data import DatasetLoader, validate_dataset
 from epsbench.schema import (
     DatasetManifest,
     ModalityPermissionSet,
-    PrivilegedInstrumentation,
+    SingleOccluderInstrumentation,
     TransitionRecord,
 )
 
@@ -92,7 +92,7 @@ def test_persisted_camera_motion_exactly_matches_action(smoke_dataset: Path) -> 
 def test_counterfactual_oracle_derives_relation_frame_membership(smoke_dataset: Path) -> None:
     manifest = validate_dataset(smoke_dataset)
     episode = manifest.episodes[0]
-    instrumentation = PrivilegedInstrumentation.model_validate_json(
+    instrumentation = SingleOccluderInstrumentation.model_validate_json(
         (smoke_dataset / episode.privileged_instrumentation.path).read_text(encoding="utf-8")
     )
     transition = _transition(smoke_dataset, 0)

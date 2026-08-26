@@ -14,7 +14,9 @@ def test_ecological_permission_set_excludes_metric_and_instrumentation() -> None
     assert not permissions.permits(Modality.CAMERA_WORLD_TRANSFORM)
     assert not permissions.permits(Modality.MUJOCO_GEOM_IDS)
     assert not permissions.permits(Modality.RAW_SIMULATOR_COORDINATES)
+    assert not permissions.permits(Modality.SAMPLED_SCENE_GEOMETRY)
     assert not permissions.permits(Modality.TRANSITION_RECORD)
+    assert not permissions.permits(Modality.SCENE_FAMILY)
 
 
 def test_ecological_loader_denies_depth_camera_raw_ids_and_coordinates(

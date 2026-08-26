@@ -10,7 +10,12 @@ import numpy as np
 from PIL import Image
 
 from epsbench.annotations import derive_boundary_structure, derive_visibility
-from epsbench.config import BenchmarkConfig
+from epsbench.config import (
+    BenchmarkConfig,
+    CorridorConfig,
+    SingleOccluderConfig,
+    parse_config,
+)
 from epsbench.data.identity import (
     compute_content_provenance_binding,
     compute_dataset_logical_hash,
@@ -22,11 +27,16 @@ from epsbench.schema import (
     Action,
     ArtifactRecord,
     CameraInstrumentation,
+    CorridorInstrumentation,
     DatasetManifest,
     OcclusionRelation,
     PrivilegedInstrumentation,
+    SceneFamily,
+    SingleOccluderInstrumentation,
     TransitionRecord,
+    parse_privileged_instrumentation_json,
 )
+from epsbench.sim import CORRIDOR_SURFACE_NAMES, corridor_generation_seeds
 from epsbench.utils.canonical import (
     canonical_json_bytes,
     logical_array_hash,
@@ -148,19 +158,49 @@ def _require_camera_action_alignment(
     config: BenchmarkConfig,
     transition: TransitionRecord,
     cameras: tuple[CameraInstrumentation, CameraInstrumentation],
+    instrumentation: PrivilegedInstrumentation,
 ) -> None:
     expected_action = Action.model_validate(config.action.model_dump(mode="python"))
     if transition.action != expected_action:
         raise DatasetValidationError("persisted action differs from resolved configuration")
     before, after = cameras
-    expected_before = np.asarray(
-        (config.camera.before_lateral, config.camera.forward, config.camera.height),
-        dtype=np.float64,
-    )
-    expected_after = np.asarray(
-        (config.camera.after_lateral, config.camera.forward, config.camera.height),
-        dtype=np.float64,
-    )
+    if isinstance(config, SingleOccluderConfig):
+        if not isinstance(instrumentation, SingleOccluderInstrumentation):
+            raise DatasetValidationError("single-occluder config requires matching instrumentation")
+        expected_before = np.asarray(
+            (config.camera.before_lateral, config.camera.forward, config.camera.height),
+            dtype=np.float64,
+        )
+        expected_after = np.asarray(
+            (config.camera.after_lateral, config.camera.forward, config.camera.height),
+            dtype=np.float64,
+        )
+    elif isinstance(config, CorridorConfig):
+        if not isinstance(instrumentation, CorridorInstrumentation):
+            raise DatasetValidationError("corridor config requires matching instrumentation")
+        geometry = instrumentation.sampled_geometry
+        expected_before = np.asarray(
+            (
+                geometry.camera_lateral_position,
+                geometry.camera_before_forward_position,
+                geometry.camera_height,
+            ),
+            dtype=np.float64,
+        )
+        expected_after = np.asarray(
+            (
+                geometry.camera_lateral_position,
+                geometry.camera_after_forward_position,
+                geometry.camera_height,
+            ),
+            dtype=np.float64,
+        )
+        if before != instrumentation.camera_before or after != instrumentation.camera_after:
+            raise DatasetValidationError(
+                "corridor camera artifacts differ from scene instrumentation"
+            )
+    else:
+        raise DatasetValidationError("unsupported scene configuration")
     before_position = np.asarray(before.camera_world_position, dtype=np.float64)
     after_position = np.asarray(after.camera_world_position, dtype=np.float64)
     if not np.allclose(before_position, expected_before, atol=1e-12, rtol=0.0):
@@ -186,10 +226,148 @@ def _require_camera_action_alignment(
         raise DatasetValidationError("camera rotation changed despite zero executed yaw")
 
 
+def _corridor_scene_content_hash(
+    episode_seed: int,
+    instrumentation: CorridorInstrumentation,
+) -> str:
+    return sha256_bytes(
+        canonical_json_bytes(
+            {
+                "episode_seed": episode_seed,
+                "sampled_geometry": instrumentation.sampled_geometry.model_dump(mode="json"),
+                "scene_family": SceneFamily.CORRIDOR,
+            }
+        )
+    )
+
+
+def _single_occluder_scene_content_hash(episode_seed: int) -> str:
+    return sha256_bytes(
+        canonical_json_bytes(
+            {
+                "episode_seed": episode_seed,
+                "scene_family": SceneFamily.SINGLE_OCCLUDER,
+            }
+        )
+    )
+
+
+def _require_corridor_instrumentation(
+    config: CorridorConfig,
+    episode_seed: int,
+    instrumentation: CorridorInstrumentation,
+) -> None:
+    geometry_seed, remapping_seed, appearance_seed = corridor_generation_seeds(episode_seed)
+    if instrumentation.generation_seeds.model_dump(mode="python") != {
+        "episode_seed": episode_seed,
+        "geometry_sampling_seed": geometry_seed,
+        "surface_remapping_seed": remapping_seed,
+        "appearance_seed": appearance_seed,
+    }:
+        raise DatasetValidationError("corridor generation seed namespaces are inconsistent")
+    geometry = instrumentation.sampled_geometry
+    geometry_rng = np.random.default_rng(geometry_seed)
+    expected_width = float(
+        geometry_rng.uniform(config.geometry.width.minimum, config.geometry.width.maximum)
+    )
+    expected_length = float(
+        geometry_rng.uniform(config.geometry.length.minimum, config.geometry.length.maximum)
+    )
+    expected_sampled_values = (
+        expected_width,
+        expected_length,
+        config.geometry.wall_height,
+        config.camera.lateral_position,
+        config.camera.starting_forward_position,
+        config.camera.starting_forward_position + config.action.delta_forward,
+        config.camera.height,
+        config.camera.field_of_view_degrees,
+    )
+    observed_sampled_values = (
+        geometry.width,
+        geometry.length,
+        geometry.wall_height,
+        geometry.camera_lateral_position,
+        geometry.camera_before_forward_position,
+        geometry.camera_after_forward_position,
+        geometry.camera_height,
+        geometry.field_of_view_degrees,
+    )
+    if observed_sampled_values != expected_sampled_values:
+        raise DatasetValidationError(
+            "sampled corridor geometry differs from deterministic configuration"
+        )
+    expected_positions = {
+        "corridor_floor": (0.0, geometry.length / 2.0, -0.05),
+        "corridor_left_surface": (
+            -geometry.width / 2.0,
+            geometry.length / 2.0,
+            geometry.wall_height / 2.0,
+        ),
+        "corridor_right_surface": (
+            geometry.width / 2.0,
+            geometry.length / 2.0,
+            geometry.wall_height / 2.0,
+        ),
+        "corridor_end_surface": (0.0, geometry.length, geometry.wall_height / 2.0),
+    }
+    if set(instrumentation.apparatus_surface_names) != set(CORRIDOR_SURFACE_NAMES):
+        raise DatasetValidationError("corridor apparatus surface membership is inconsistent")
+    for name, expected_position in expected_positions.items():
+        if not np.allclose(
+            instrumentation.raw_geom_world_positions[name],
+            expected_position,
+            atol=1e-12,
+            rtol=0.0,
+        ):
+            raise DatasetValidationError(
+                "corridor raw geometry does not match sampled privileged geometry"
+            )
+
+
+def _require_corridor_raw_segmentation(
+    root: Path,
+    transition: TransitionRecord,
+    instrumentation: CorridorInstrumentation,
+    segmentations: tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]],
+    registry: _ArtifactRegistry,
+) -> None:
+    labels = {surface.surface_id: surface.segmentation_label for surface in transition.surfaces}
+    raw_ids = set(instrumentation.raw_geom_ids.values())
+    observed_raw_ids: set[int] = set()
+    evidence_by_frame = sorted(
+        instrumentation.raw_segmentation_frames,
+        key=lambda item: item.frame_index,
+    )
+    for frame_index, public_segmentation in enumerate(segmentations):
+        raw_segmentation = _load_npy(
+            root,
+            evidence_by_frame[frame_index].raw_segmentation,
+            registry,
+        )
+        if raw_segmentation.dtype != np.dtype("int32") or (
+            raw_segmentation.shape != public_segmentation.shape
+        ):
+            raise DatasetValidationError("corridor raw segmentation dtype or shape is invalid")
+        frame_raw_ids = {int(value) for value in np.unique(raw_segmentation)}
+        if not frame_raw_ids.issubset(raw_ids | {-1}):
+            raise DatasetValidationError("corridor raw segmentation contains an unknown raw ID")
+        observed_raw_ids.update(frame_raw_ids - {-1})
+        reconstructed = np.zeros(raw_segmentation.shape, dtype=np.int32)
+        for raw_id_text, opaque_id in instrumentation.raw_to_opaque_surface_ids.items():
+            reconstructed[raw_segmentation == int(raw_id_text)] = labels[opaque_id]
+        if not np.array_equal(reconstructed, public_segmentation):
+            raise DatasetValidationError(
+                "corridor public segmentation does not match the raw-to-opaque mapping"
+            )
+    if observed_raw_ids != raw_ids:
+        raise DatasetValidationError("corridor raw segmentation does not contain every surface")
+
+
 def _require_occlusion_oracle(
     root: Path,
     transition: TransitionRecord,
-    instrumentation: PrivilegedInstrumentation,
+    instrumentation: SingleOccluderInstrumentation,
     segmentations: tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]],
     registry: _ArtifactRegistry,
 ) -> None:
@@ -307,7 +485,7 @@ def validate_dataset(root: Path) -> DatasetManifest:
 
     config_payload = _verify_json(resolved_root, manifest.resolved_config, registry)
     try:
-        config = BenchmarkConfig.model_validate_json(canonical_json_bytes(config_payload))
+        config = parse_config(config_payload)
     except Exception as error:
         raise DatasetValidationError("resolved configuration failed schema validation") from error
     if sha256_bytes(canonical_json_bytes(config)) != manifest.config_logical_sha256:
@@ -316,6 +494,8 @@ def validate_dataset(root: Path) -> DatasetManifest:
         raise DatasetValidationError("manifest seed does not match resolved configuration")
     if config.appearance.variant != manifest.appearance_variant:
         raise DatasetValidationError("appearance variant is inconsistent")
+    if config.scene_family != manifest.scene_family:
+        raise DatasetValidationError("manifest scene family differs from resolved configuration")
 
     dataset_surface_ids: set[str] = set()
     for episode in manifest.episodes:
@@ -343,7 +523,7 @@ def validate_dataset(root: Path) -> DatasetManifest:
             registry,
         )
         try:
-            instrumentation = PrivilegedInstrumentation.model_validate_json(
+            instrumentation = parse_privileged_instrumentation_json(
                 canonical_json_bytes(instrumentation_payload)
             )
         except Exception as error:
@@ -352,6 +532,8 @@ def validate_dataset(root: Path) -> DatasetManifest:
             raise DatasetValidationError("instrumentation episode identifier mismatch")
         if instrumentation.appearance_variant != manifest.appearance_variant:
             raise DatasetValidationError("instrumentation appearance variant mismatch")
+        if instrumentation.scene_family != manifest.scene_family:
+            raise DatasetValidationError("instrumentation scene family mismatch")
         if len(set(instrumentation.raw_geom_ids.values())) != len(instrumentation.raw_geom_ids):
             raise DatasetValidationError("raw MuJoCo geom identifiers must be unique")
         if set(instrumentation.raw_geom_ids) != set(instrumentation.raw_geom_world_positions):
@@ -364,11 +546,40 @@ def validate_dataset(root: Path) -> DatasetManifest:
             str(raw_id) for raw_id in instrumentation.raw_geom_ids.values()
         }:
             raise DatasetValidationError("privileged raw-ID remapping keys are inconsistent")
+        ordinary_transition_bytes = canonical_json_bytes(transition_payload)
+        forbidden_control_or_semantic_tokens = (
+            b"scene_family",
+            b"sampled_geometry",
+            *(name.encode("utf-8") for name in instrumentation.raw_geom_ids),
+        )
+        if any(
+            token in ordinary_transition_bytes for token in forbidden_control_or_semantic_tokens
+        ):
+            raise DatasetValidationError(
+                "ordinary ecological transition leaks scene control or semantic apparatus names"
+            )
         episode_surface_ids = {surface.surface_id for surface in transition.surfaces}
         duplicate_surface_ids = dataset_surface_ids & episode_surface_ids
         if duplicate_surface_ids:
             raise DatasetValidationError("surface identifiers must be disjoint across episodes")
         dataset_surface_ids.update(episode_surface_ids)
+
+        if isinstance(instrumentation, SingleOccluderInstrumentation):
+            expected_scene_content_sha256 = _single_occluder_scene_content_hash(
+                episode.episode_seed
+            )
+        elif isinstance(instrumentation, CorridorInstrumentation):
+            if not isinstance(config, CorridorConfig):
+                raise DatasetValidationError("corridor instrumentation/configuration mismatch")
+            _require_corridor_instrumentation(config, episode.episode_seed, instrumentation)
+            expected_scene_content_sha256 = _corridor_scene_content_hash(
+                episode.episode_seed,
+                instrumentation,
+            )
+        else:
+            raise DatasetValidationError("unsupported scene instrumentation")
+        if episode.scene_content_sha256 != expected_scene_content_sha256:
+            raise DatasetValidationError("episode scene-content hash mismatch")
 
         frame_arrays: list[
             tuple[np.ndarray[Any, Any], np.ndarray[Any, Any], np.ndarray[Any, Any]]
@@ -414,7 +625,12 @@ def validate_dataset(root: Path) -> DatasetManifest:
             cameras.append(camera)
             frame_arrays.append((rgb, depth, segmentation))
 
-        _require_camera_action_alignment(config, transition, (cameras[0], cameras[1]))
+        _require_camera_action_alignment(
+            config,
+            transition,
+            (cameras[0], cameras[1]),
+            instrumentation,
+        )
 
         if tuple(item[0].shape for item in frame_arrays) != (
             transition.before.rgb.shape,
@@ -435,14 +651,37 @@ def validate_dataset(root: Path) -> DatasetManifest:
             raise DatasetValidationError("segmentation contains an undeclared surface label")
         if observed_labels != declared_labels:
             raise DatasetValidationError("a declared surface is absent from both frames")
+        if isinstance(instrumentation, CorridorInstrumentation) and any(
+            np.any(segmentation == 0) for _, _, segmentation in frame_arrays
+        ):
+            raise DatasetValidationError(
+                "corridor optical field contains uncontrolled renderer background"
+            )
 
-        _require_occlusion_oracle(
-            resolved_root,
-            transition,
-            instrumentation,
-            (frame_arrays[0][2], frame_arrays[1][2]),
-            registry,
-        )
+        if isinstance(instrumentation, SingleOccluderInstrumentation):
+            if not isinstance(config, SingleOccluderConfig):
+                raise DatasetValidationError(
+                    "single-occluder instrumentation/configuration mismatch"
+                )
+            _require_occlusion_oracle(
+                resolved_root,
+                transition,
+                instrumentation,
+                (frame_arrays[0][2], frame_arrays[1][2]),
+                registry,
+            )
+        elif transition.occlusion_relations:
+            raise DatasetValidationError(
+                "corridor occlusion relations require controlled oracle evidence"
+            )
+        else:
+            _require_corridor_raw_segmentation(
+                resolved_root,
+                transition,
+                instrumentation,
+                (frame_arrays[0][2], frame_arrays[1][2]),
+                registry,
+            )
 
         derived_visibility, derived_correspondence, derived_events = derive_visibility(
             frame_arrays[0][2], frame_arrays[1][2], transition.surfaces

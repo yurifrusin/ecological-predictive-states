@@ -7,4 +7,3 @@ These questions require owner review or later gate work:
 3. What per-pixel representation should encode oriented boundary ownership without leaking depth or world coordinates?
 4. Must the complete raster-derived ecological-label hash be byte-identical across operating systems/backends, or should a backend-independent analytic identity coexist with raster artifact identities?
 5. Which appearance assets and final evaluation seeds should be frozen before comparative work?
-6. What corridor geometry is the smallest adequate second family for completing Gate 0B without beginning Gate 0C?

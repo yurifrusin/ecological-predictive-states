@@ -24,6 +24,8 @@ def test_transition_and_manifest_round_trip(smoke_dataset: Path) -> None:
     transition_bytes = transition_path.read_bytes().rstrip(b"\n")
     transition = TransitionRecord.model_validate_json(transition_bytes)
     assert canonical_json_bytes(transition) == transition_bytes
+    assert manifest.schema_version == "0.1.0-dev.2"
+    assert transition.schema_version == "0.1.0-dev.1"
 
 
 def test_invalid_visibility_fraction_fails() -> None:

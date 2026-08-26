@@ -48,3 +48,6 @@ jobs:
           uv run epsbench generate --config configs/benchmark_v0.yaml --episodes 2 --output data/ci-smoke
           uv run epsbench validate data/ci-smoke
           uv run epsbench inspect data/ci-smoke --episode 0 --output artifacts/ci-episode-0.png
+          uv run epsbench generate --config configs/corridor_v0.yaml --episodes 2 --output data/ci-corridor
+          uv run epsbench validate data/ci-corridor
+          uv run epsbench inspect data/ci-corridor --episode 0 --output artifacts/ci-corridor-episode-0.png

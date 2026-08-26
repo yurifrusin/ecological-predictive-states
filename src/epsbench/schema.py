@@ -15,6 +15,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -69,6 +70,11 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
 
+class SceneFamily(StrEnum):
+    SINGLE_OCCLUDER = "single_occluder"
+    CORRIDOR = "corridor"
+
+
 class ModalityClass(StrEnum):
     SENSORY = "sensory"
     ECOLOGICAL_ORACLE = "ecological_oracle"
@@ -91,8 +97,10 @@ class Modality(StrEnum):
     CAMERA_WORLD_TRANSFORM = "camera_world_transform"
     MUJOCO_GEOM_IDS = "mujoco_geom_ids"
     RAW_SIMULATOR_COORDINATES = "raw_simulator_coordinates"
+    SAMPLED_SCENE_GEOMETRY = "sampled_scene_geometry"
     PRIVILEGED_GENERATION_RECORDS = "privileged_generation_records"
     TRANSITION_RECORD = "transition_record"
+    SCENE_FAMILY = "scene_family"
 
     @property
     def modality_class(self) -> ModalityClass:
@@ -109,7 +117,7 @@ class Modality(StrEnum):
             return ModalityClass.ECOLOGICAL_ORACLE
         if self in {Modality.DEPTH, Modality.LOCAL_METRIC_ARRAYS}:
             return ModalityClass.METRIC_BASELINE
-        if self == Modality.TRANSITION_RECORD:
+        if self in {Modality.TRANSITION_RECORD, Modality.SCENE_FAMILY}:
             return ModalityClass.CONTROL_METADATA
         return ModalityClass.INSTRUMENTATION_ONLY
 
@@ -135,20 +143,26 @@ class ModalityPermissionSet(StrictModel):
 
 
 class Action(StrictModel):
-    name: Literal["lateral_right", "lateral_left"]
+    name: Literal["lateral_right", "lateral_left", "forward"]
     delta_forward: float
     delta_lateral: float
     delta_yaw: float
 
     @model_validator(mode="after")
-    def supported_action_is_finite_and_lateral(self) -> Action:
+    def supported_action_is_finite_and_axis_aligned(self) -> Action:
         values = (self.delta_forward, self.delta_lateral, self.delta_yaw)
         if not all(math.isfinite(value) for value in values):
             raise ValueError("all action values must be finite")
-        if self.delta_forward != 0.0:
-            raise ValueError("forward motion is unsupported in this vertical slice")
         if self.delta_yaw != 0.0:
-            raise ValueError("yaw motion is unsupported in this vertical slice")
+            raise ValueError("yaw motion is unsupported in this Gate 0B slice")
+        if self.name == "forward":
+            if self.delta_forward <= 0.0:
+                raise ValueError("forward requires positive forward displacement")
+            if self.delta_lateral != 0.0:
+                raise ValueError("forward cannot include lateral displacement")
+            return self
+        if self.delta_forward != 0.0:
+            raise ValueError("lateral actions cannot include forward displacement")
         if self.delta_lateral == 0.0:
             raise ValueError("lateral displacement must be non-zero")
         if self.name == "lateral_right" and self.delta_lateral < 0.0:
@@ -382,6 +396,7 @@ class EpisodeManifest(StrictModel):
     episode_seed: int = Field(ge=0)
     transition: ArtifactRecord
     privileged_instrumentation: ArtifactRecord
+    scene_content_sha256: Sha256
     ecological_label_sha256: Sha256
     rgb_logical_sha256: tuple[Sha256, Sha256]
 
@@ -444,8 +459,67 @@ class OcclusionOracleEvidence(StrictModel):
         return self
 
 
-class PrivilegedInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.1"]
+class GenerationSeeds(StrictModel):
+    episode_seed: int = Field(ge=0)
+    geometry_sampling_seed: int = Field(ge=0)
+    surface_remapping_seed: int = Field(ge=0)
+    appearance_seed: int = Field(ge=0)
+
+
+class RawSegmentationFrameEvidence(StrictModel):
+    frame_index: Literal[0, 1]
+    raw_segmentation: ArtifactRecord
+
+    @model_validator(mode="after")
+    def artifact_is_privileged_raw_segmentation(self) -> RawSegmentationFrameEvidence:
+        artifact = self.raw_segmentation
+        if artifact.modality != Modality.PRIVILEGED_GENERATION_RECORDS:
+            raise ValueError("raw renderer segmentation must be privileged")
+        if artifact.dtype != "int32" or len(artifact.shape) != 2:
+            raise ValueError("raw renderer segmentation must be a two-dimensional int32 array")
+        return self
+
+
+class CorridorSampledGeometry(StrictModel):
+    width: float = Field(ge=1.5, le=8.0)
+    length: float = Field(ge=3.0, le=12.0)
+    wall_height: float = Field(ge=2.0, le=8.0)
+    camera_lateral_position: float
+    camera_before_forward_position: float
+    camera_after_forward_position: float
+    camera_height: float = Field(gt=0.1)
+    field_of_view_degrees: float = Field(gt=20.0, lt=80.0)
+
+    @model_validator(mode="after")
+    def geometry_and_camera_path_are_finite_and_legal(self) -> CorridorSampledGeometry:
+        values = (
+            self.width,
+            self.length,
+            self.wall_height,
+            self.camera_lateral_position,
+            self.camera_before_forward_position,
+            self.camera_after_forward_position,
+            self.camera_height,
+            self.field_of_view_degrees,
+        )
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("sampled corridor geometry must contain only finite values")
+        if self.camera_before_forward_position <= 0.0:
+            raise ValueError("corridor camera must start beyond the entry plane")
+        if self.camera_after_forward_position <= self.camera_before_forward_position:
+            raise ValueError("corridor camera must move strictly forward")
+        if self.camera_after_forward_position >= self.length - 0.1:
+            raise ValueError("corridor camera must remain clear of the end wall")
+        if abs(self.camera_lateral_position) >= self.width / 2.0 - 0.1:
+            raise ValueError("corridor camera must remain clear of the side walls")
+        if self.camera_height >= self.wall_height:
+            raise ValueError("corridor camera must remain below the wall height")
+        return self
+
+
+class SingleOccluderInstrumentation(StrictModel):
+    schema_version: Literal["0.1.0-dev.2"]
+    scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]
     raw_geom_ids: dict[str, int]
@@ -454,7 +528,7 @@ class PrivilegedInstrumentation(StrictModel):
     occlusion_oracle: OcclusionOracleEvidence
 
     @model_validator(mode="after")
-    def apparatus_mapping_is_exact_and_finite(self) -> PrivilegedInstrumentation:
+    def apparatus_mapping_is_exact_and_finite(self) -> SingleOccluderInstrumentation:
         expected_names = {"support_surface", "occluding_surface", "background_surface"}
         if set(self.raw_geom_ids) != expected_names:
             raise ValueError("raw geom IDs must describe exactly the single-occluder apparatus")
@@ -474,6 +548,79 @@ class PrivilegedInstrumentation(StrictModel):
         ):
             raise ValueError("raw geom world positions must contain only finite values")
         return self
+
+
+class CorridorInstrumentation(StrictModel):
+    schema_version: Literal["0.1.0-dev.2"]
+    scene_family: Literal[SceneFamily.CORRIDOR]
+    episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
+    appearance_variant: Literal["base", "alternate"]
+    apparatus_surface_names: tuple[str, ...]
+    raw_geom_ids: dict[str, int]
+    raw_to_opaque_surface_ids: dict[str, SurfaceId]
+    raw_geom_world_positions: dict[str, tuple[float, float, float]]
+    sampled_geometry: CorridorSampledGeometry
+    camera_before: CameraInstrumentation
+    camera_after: CameraInstrumentation
+    generation_seeds: GenerationSeeds
+    raw_segmentation_frames: tuple[
+        RawSegmentationFrameEvidence,
+        RawSegmentationFrameEvidence,
+    ]
+    geometry_sampling_rule: Literal["uniform_width_length_v1"]
+    appearance_rule: Literal["solid_colour_variant_v1"]
+
+    @model_validator(mode="after")
+    def apparatus_mapping_and_evidence_are_exact(self) -> CorridorInstrumentation:
+        expected_names = {
+            "corridor_floor",
+            "corridor_left_surface",
+            "corridor_right_surface",
+            "corridor_end_surface",
+        }
+        if set(self.apparatus_surface_names) != expected_names or len(
+            self.apparatus_surface_names
+        ) != len(expected_names):
+            raise ValueError("corridor apparatus surface names must be exact and unique")
+        if set(self.raw_geom_ids) != expected_names:
+            raise ValueError("raw geom IDs must describe exactly the corridor apparatus")
+        raw_ids = set(self.raw_geom_ids.values())
+        if len(raw_ids) != len(expected_names) or any(raw_id < 0 for raw_id in raw_ids):
+            raise ValueError("corridor raw geom IDs must be distinct and non-negative")
+        if set(self.raw_geom_world_positions) != expected_names:
+            raise ValueError("raw geom positions must describe exactly the corridor surfaces")
+        if set(self.raw_to_opaque_surface_ids) != {str(raw_id) for raw_id in raw_ids}:
+            raise ValueError("corridor raw-to-opaque mapping must cover exactly the raw IDs")
+        if len(set(self.raw_to_opaque_surface_ids.values())) != len(expected_names):
+            raise ValueError("corridor raw-to-opaque mapping must be bijective")
+        if not all(
+            math.isfinite(coordinate)
+            for position in self.raw_geom_world_positions.values()
+            for coordinate in position
+        ):
+            raise ValueError("corridor raw geom positions must contain only finite values")
+        if self.camera_before.frame_index != 0 or self.camera_after.frame_index != 1:
+            raise ValueError("corridor camera evidence must cover ordered before/after frames")
+        if {frame.frame_index for frame in self.raw_segmentation_frames} != {0, 1}:
+            raise ValueError("corridor raw segmentation evidence must cover both frames")
+        return self
+
+
+PrivilegedInstrumentation = Annotated[
+    SingleOccluderInstrumentation | CorridorInstrumentation,
+    Field(discriminator="scene_family"),
+]
+PRIVILEGED_INSTRUMENTATION_ADAPTER: TypeAdapter[PrivilegedInstrumentation] = TypeAdapter(
+    PrivilegedInstrumentation
+)
+
+
+def parse_privileged_instrumentation_json(
+    payload: str | bytes | bytearray,
+) -> PrivilegedInstrumentation:
+    """Parse strict scene-specific instrumentation through its discriminator."""
+
+    return PRIVILEGED_INSTRUMENTATION_ADAPTER.validate_json(payload)
 
 
 class GitAvailabilityStatus(StrEnum):
@@ -541,8 +688,9 @@ class RendererProvenance(StrictModel):
 
 
 class DatasetManifest(StrictModel):
-    schema_version: Literal["0.1.0-dev.1"]
+    schema_version: Literal["0.1.0-dev.2"]
     generator_version: Literal["0.1.0"]
+    scene_family: SceneFamily
     root_seed: int = Field(ge=0)
     config_logical_sha256: Sha256
     appearance_variant: Literal["base", "alternate"]

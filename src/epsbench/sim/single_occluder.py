@@ -8,7 +8,7 @@ import mujoco
 import numpy as np
 import numpy.typing as npt
 
-from epsbench.config import BenchmarkConfig
+from epsbench.config import SingleOccluderConfig
 
 RGBArray = npt.NDArray[np.uint8]
 DepthArray = npt.NDArray[np.float32]
@@ -47,7 +47,7 @@ def _appearance_colours(variant: str) -> dict[str, str]:
     }
 
 
-def build_scene_xml(config: BenchmarkConfig) -> str:
+def build_scene_xml(config: SingleOccluderConfig) -> str:
     """Generate the compact scene rather than loading an external model asset."""
 
     colours = _appearance_colours(config.appearance.variant)
@@ -137,7 +137,7 @@ def _render_frame(
     )
 
 
-def render_transition(config: BenchmarkConfig) -> RenderedTransition:
+def render_transition(config: SingleOccluderConfig) -> RenderedTransition:
     """Render one before/action/after camera transition with no dynamics or GPU requirement."""
 
     model = mujoco.MjModel.from_xml_string(build_scene_xml(config))

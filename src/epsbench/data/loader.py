@@ -11,6 +11,8 @@ from PIL import Image
 from epsbench.schema import (
     Action,
     CameraInstrumentation,
+    CorridorInstrumentation,
+    CorridorSampledGeometry,
     DatasetManifest,
     EcologicalTransitionView,
     EpisodeManifest,
@@ -18,7 +20,9 @@ from epsbench.schema import (
     Modality,
     ModalityPermissionSet,
     PrivilegedInstrumentation,
+    SceneFamily,
     TransitionRecord,
+    parse_privileged_instrumentation_json,
 )
 
 
@@ -76,6 +80,10 @@ class DatasetLoader:
     def read_action(self, episode_index: int) -> Action:
         self._require(Modality.EXECUTED_ACTION)
         return self._transition(episode_index).action
+
+    def read_scene_family(self) -> SceneFamily:
+        self._require(Modality.SCENE_FAMILY)
+        return self.manifest.scene_family
 
     def read_ecological_transition(self, episode_index: int) -> EcologicalTransitionView:
         self._require(
@@ -136,7 +144,7 @@ class DatasetLoader:
 
     def _instrumentation(self, episode_index: int) -> PrivilegedInstrumentation:
         episode = self._episode(episode_index)
-        return PrivilegedInstrumentation.model_validate_json(
+        return parse_privileged_instrumentation_json(
             self._path(episode.privileged_instrumentation.path).read_text(encoding="utf-8")
         )
 
@@ -152,3 +160,18 @@ class DatasetLoader:
             Modality.PRIVILEGED_GENERATION_RECORDS,
         )
         return dict(self._instrumentation(episode_index).raw_geom_world_positions)
+
+    def read_sampled_corridor_geometry(self, episode_index: int) -> CorridorSampledGeometry:
+        self._require(
+            Modality.SAMPLED_SCENE_GEOMETRY,
+            Modality.PRIVILEGED_GENERATION_RECORDS,
+        )
+        instrumentation = self._instrumentation(episode_index)
+        if not isinstance(instrumentation, CorridorInstrumentation):
+            raise ValueError("sampled corridor geometry is unavailable for this scene family")
+        return instrumentation.sampled_geometry
+
+    def read_semantic_surface_names(self, episode_index: int) -> tuple[str, ...]:
+        self._require(Modality.PRIVILEGED_GENERATION_RECORDS)
+        instrumentation = self._instrumentation(episode_index)
+        return tuple(instrumentation.raw_geom_ids)

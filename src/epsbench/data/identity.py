@@ -51,6 +51,7 @@ def dataset_logical_domain(manifest: DatasetManifest) -> dict[str, Any]:
     return {
         "schema_version": manifest.schema_version,
         "generator_version": manifest.generator_version,
+        "scene_family": manifest.scene_family,
         "root_seed": manifest.root_seed,
         "config_logical_sha256": manifest.config_logical_sha256,
         "appearance_variant": manifest.appearance_variant,
@@ -59,6 +60,7 @@ def dataset_logical_domain(manifest: DatasetManifest) -> dict[str, Any]:
                 "episode_id": episode.episode_id,
                 "episode_index": episode.episode_index,
                 "episode_seed": episode.episode_seed,
+                "scene_content_sha256": episode.scene_content_sha256,
                 "ecological_label_sha256": episode.ecological_label_sha256,
                 "rgb_logical_sha256": list(episode.rgb_logical_sha256),
             }

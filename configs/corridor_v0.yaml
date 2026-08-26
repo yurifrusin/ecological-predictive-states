@@ -1,0 +1,26 @@
+schema_version: "0.1.0-dev.2"
+scene_family: corridor
+seed: 1729
+render:
+  width: 160
+  height: 120
+geometry:
+  width:
+    minimum: 2.8
+    maximum: 3.2
+  length:
+    minimum: 5.6
+    maximum: 6.4
+  wall_height: 5.0
+camera:
+  lateral_position: 0.0
+  starting_forward_position: 0.5
+  height: 1.25
+  field_of_view_degrees: 55.0
+action:
+  name: forward
+  delta_forward: 0.7
+  delta_lateral: 0.0
+  delta_yaw: 0.0
+appearance:
+  variant: base
