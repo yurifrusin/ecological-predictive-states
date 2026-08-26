@@ -186,7 +186,7 @@ def test_corridor_visibility_and_occlusion_claims_are_typed_unavailable(
     transition = _transition(corridor_dataset, 0)
     assert transition.ecological_visibility_events.status == "unavailable"
     assert transition.ecological_visibility_events.reason_category == (
-        "optical_transport_and_boundary_ownership_unavailable"
+        "oriented_boundary_ownership_unavailable"
     )
     assert isinstance(transition.occlusion, UnavailableOcclusionAnnotation)
     assert transition.occlusion.reason_category == (

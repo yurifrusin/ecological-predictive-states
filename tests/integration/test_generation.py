@@ -113,4 +113,4 @@ def test_actual_ecological_visibility_events_remain_typed_unavailable(
 ) -> None:
     annotation = _transition(smoke_dataset, 0).ecological_visibility_events
     assert annotation.status == "unavailable"
-    assert annotation.reason_category == ("optical_transport_and_boundary_ownership_unavailable")
+    assert annotation.reason_category == "oriented_boundary_ownership_unavailable"

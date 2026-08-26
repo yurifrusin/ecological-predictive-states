@@ -25,3 +25,7 @@ Affordances require body-scaled action constraints and are explicitly later work
 ## 2026-08-26 — Minimal second scene family
 
 The smallest adequate second scene family is a four-surface closed corridor with prescribed forward observer motion; openings and navigation remain deferred. The implementation uses an open top only because validated wall height keeps the full optical field on the four controlled surfaces. This adds a structurally different action/scene pair without inventing an occlusion oracle outside the single-occluder counterfactual contract.
+
+## 2026-08-26 — Analytic image-plane transport
+
+Gate 0B uses geometry-derived analytic image-plane transport rather than RGB matching, learned flow, or renderer-defined motion. Metric geometry is used only to generate and validate an ecological oracle expressed in image coordinates. The transport of an already visible static surface point remains distinct from oriented boundary ownership, accretion, deletion, and disocclusion.

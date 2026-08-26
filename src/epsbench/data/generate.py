@@ -16,9 +16,20 @@ import numpy as np
 from PIL import Image
 
 from epsbench import __version__
-from epsbench.annotations import derive_boundary_structure, derive_visibility
+from epsbench.annotations import (
+    ANALYTIC_BOUNDARY_RULE,
+    ANALYTIC_BOUNDARY_WIDTH_PIXELS,
+    ANALYTIC_TRANSPORT_METHOD,
+    FLOW_FIXED_POINT_SCALE,
+    FLOW_QUANTISATION_ROUNDING,
+    AnalyticTransportArrays,
+    DirectionalTransportArrays,
+    derive_boundary_structure,
+    derive_visibility,
+)
 from epsbench.config import BenchmarkConfig, CorridorConfig, SingleOccluderConfig
 from epsbench.data.identity import (
+    compute_analytic_transport_hash,
     compute_content_provenance_binding,
     compute_corridor_scene_content_hash,
     compute_dataset_logical_hash,
@@ -30,11 +41,17 @@ from epsbench.data.identity import (
 from epsbench.data.provenance import collect_source_provenance
 from epsbench.schema import (
     Action,
+    AnalyticBoundaryAmbiguityRule,
+    AnalyticRendererFrameDiagnostic,
+    AnalyticTransportDiagnostics,
     ArtifactRecord,
+    AvailableDenseOpticalTransport,
     AvailableOcclusionAnnotation,
     CameraInstrumentation,
     CorridorInstrumentation,
     DatasetManifest,
+    DirectionalOpticalTransport,
+    DirectionalTransportDiagnostic,
     EpisodeManifest,
     FrameRecord,
     GenerationSeeds,
@@ -42,13 +59,14 @@ from epsbench.schema import (
     OcclusionFrameEvidence,
     OcclusionOracleEvidence,
     OcclusionRelation,
+    OpticalTransportCoordinateConvention,
+    OpticalTransportQuantisation,
     RawSegmentationFrameEvidence,
     RendererProvenance,
     SceneFamily,
     SingleOccluderInstrumentation,
     SurfaceReference,
     TransitionRecord,
-    UnavailableAnnotation,
     UnavailableEcologicalVisibilityEvents,
     UnavailableOcclusionAnnotation,
 )
@@ -212,6 +230,158 @@ def _write_frame(
     )
 
 
+def _write_transport_direction(
+    root: Path,
+    episode_directory: Path,
+    name: str,
+    source_frame_index: int,
+    target_frame_index: int,
+    arrays: DirectionalTransportArrays,
+) -> DirectionalOpticalTransport:
+    vectors_path = episode_directory / f"analytic_transport_{name}_vectors_fixed.npy"
+    validity_path = episode_directory / f"analytic_transport_{name}_validity.npy"
+    reasons_path = episode_directory / f"analytic_transport_{name}_reasons.npy"
+    np.save(vectors_path, arrays.vectors_fixed, allow_pickle=False)
+    np.save(validity_path, arrays.validity, allow_pickle=False)
+    np.save(reasons_path, arrays.reasons, allow_pickle=False)
+    return DirectionalOpticalTransport(
+        source_frame_index=source_frame_index,  # type: ignore[arg-type]
+        target_frame_index=target_frame_index,  # type: ignore[arg-type]
+        vectors_fixed=_array_artifact(
+            vectors_path,
+            root,
+            arrays.vectors_fixed,
+            Modality.ANALYTIC_OPTICAL_TRANSPORT,
+            "application/x-npy",
+        ),
+        validity=_array_artifact(
+            validity_path,
+            root,
+            arrays.validity,
+            Modality.ANALYTIC_OPTICAL_TRANSPORT,
+            "application/x-npy",
+        ),
+        reasons=_array_artifact(
+            reasons_path,
+            root,
+            arrays.reasons,
+            Modality.ANALYTIC_OPTICAL_TRANSPORT,
+            "application/x-npy",
+        ),
+    )
+
+
+def _write_analytic_transport(
+    root: Path,
+    episode_directory: Path,
+    arrays: AnalyticTransportArrays,
+) -> AvailableDenseOpticalTransport:
+    transport = AvailableDenseOpticalTransport(
+        status="available",
+        method=ANALYTIC_TRANSPORT_METHOD,
+        coordinate_convention=OpticalTransportCoordinateConvention(
+            pixel_sample="centre_of_pixel",
+            pixel_centre_x="column_plus_0.5",
+            pixel_centre_y="row_plus_0.5",
+            x_axis="increases_right",
+            y_axis="increases_down",
+            flow_definition="target_pixel_centre_minus_source_pixel_centre",
+            units="image_pixels",
+        ),
+        quantisation=OpticalTransportQuantisation(
+            dtype="int32",
+            fixed_point_scale=FLOW_FIXED_POINT_SCALE,
+            rounding=FLOW_QUANTISATION_ROUNDING,
+        ),
+        boundary_ambiguity=AnalyticBoundaryAmbiguityRule(
+            rule=ANALYTIC_BOUNDARY_RULE,
+            width_pixels=ANALYTIC_BOUNDARY_WIDTH_PIXELS,
+            connectivity="four_neighbour",
+            application="source_and_projected_target",
+        ),
+        reason_code_domain="analytic_transport_reason_codes_v1",
+        forward=_write_transport_direction(
+            root,
+            episode_directory,
+            "forward",
+            0,
+            1,
+            arrays.forward,
+        ),
+        backward=_write_transport_direction(
+            root,
+            episode_directory,
+            "backward",
+            1,
+            0,
+            arrays.backward,
+        ),
+        analytic_transport_sha256="0" * 64,
+    )
+    return AvailableDenseOpticalTransport.model_validate(
+        {
+            **transport.model_dump(mode="python"),
+            "analytic_transport_sha256": compute_analytic_transport_hash(transport),
+        }
+    )
+
+
+def _directional_diagnostic(
+    arrays: DirectionalTransportArrays,
+) -> DirectionalTransportDiagnostic:
+    total = int(arrays.validity.size)
+    valid = int(np.count_nonzero(arrays.validity))
+    counts = np.bincount(arrays.reasons.reshape(-1), minlength=5)
+    return DirectionalTransportDiagnostic(
+        total_pixels=total,
+        valid_transport_pixels=valid,
+        valid_transport_fraction=valid / total,
+        reason_code_counts=tuple(int(count) for count in counts[:5]),  # type: ignore[arg-type]
+    )
+
+
+def _analytic_transport_diagnostics(
+    arrays: AnalyticTransportArrays,
+    raw_before: np.ndarray[Any, Any],
+    raw_after: np.ndarray[Any, Any],
+) -> AnalyticTransportDiagnostics:
+    frame_diagnostics: list[AnalyticRendererFrameDiagnostic] = []
+    for frame_index, (assignment, boundary, rendered) in enumerate(
+        (
+            (
+                arrays.before_surface_assignment,
+                arrays.before_boundary_ambiguous,
+                raw_before,
+            ),
+            (
+                arrays.after_surface_assignment,
+                arrays.after_boundary_ambiguous,
+                raw_after,
+            ),
+        )
+    ):
+        interior = ~boundary
+        compared = int(np.count_nonzero(interior))
+        agreeing = int(np.count_nonzero((assignment == rendered) & interior))
+        frame_diagnostics.append(
+            AnalyticRendererFrameDiagnostic(
+                frame_index=frame_index,  # type: ignore[arg-type]
+                compared_interior_pixels=compared,
+                agreeing_interior_pixels=agreeing,
+                interior_agreement_rate=agreeing / compared,
+                excluded_analytic_boundary_pixels=int(np.count_nonzero(boundary)),
+            )
+        )
+    return AnalyticTransportDiagnostics(
+        method=ANALYTIC_TRANSPORT_METHOD,
+        renderer_cross_check="non_authoritative_interior_segmentation_agreement_v1",
+        minimum_interior_agreement_rate=0.9,
+        frames=tuple(frame_diagnostics),  # type: ignore[arg-type]
+        forward=_directional_diagnostic(arrays.forward),
+        backward=_directional_diagnostic(arrays.backward),
+    )
+
+
 def _generate_single_occluder_episode(
     root: Path,
     config: SingleOccluderConfig,
@@ -270,6 +440,11 @@ def _generate_single_occluder_episode(
         derive_boundary_structure(before_segmentation, surfaces, 0),
         derive_boundary_structure(after_segmentation, surfaces, 1),
     )
+    analytic_transport = _write_analytic_transport(
+        root,
+        episode_directory,
+        rendered.analytic_transport,
+    )
     occluder_raw_id = rendered.raw_geom_ids["occluding_surface"]
     occluded_raw_id = rendered.raw_geom_ids["background_surface"]
     occlusion_frame_evidence: list[OcclusionFrameEvidence] = []
@@ -306,7 +481,7 @@ def _generate_single_occluder_episode(
     if not relation_frame_indices:
         raise RuntimeError("counterfactual oracle found no foreground/background occlusion")
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.2",
+        schema_version="0.1.0-dev.3",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -317,10 +492,10 @@ def _generate_single_occluder_episode(
         region_mask_changes=mask_changes,
         ecological_visibility_events=UnavailableEcologicalVisibilityEvents(
             status="unavailable",
-            reason_category="optical_transport_and_boundary_ownership_unavailable",
+            reason_category="oriented_boundary_ownership_unavailable",
             reason=(
-                "Ecological accretion/deletion events are unavailable until optical transport "
-                "and oriented boundary ownership are implemented."
+                "Ecological accretion/deletion events remain unavailable until oriented "
+                "boundary ownership is implemented; analytic transport alone is insufficient."
             ),
         ),
         occlusion=AvailableOcclusionAnnotation(
@@ -335,14 +510,7 @@ def _generate_single_occluder_episode(
             ),
         ),
         boundary_structures=boundaries,
-        dense_optical_flow=UnavailableAnnotation(
-            field="dense_optical_flow",
-            status="unavailable",
-            reason=(
-                "Dense flow is remaining Gate 0B work; this vertical slice records exact "
-                "region correspondence and visibility changes without fabricating flow values."
-            ),
-        ),
+        analytic_optical_transport=analytic_transport,
         ecological_label_sha256="0" * 64,
     )
     transition = TransitionRecord.model_validate(
@@ -355,7 +523,7 @@ def _generate_single_occluder_episode(
     write_canonical_json(transition_path, transition)
 
     instrumentation = SingleOccluderInstrumentation(
-        schema_version="0.1.0-dev.2",
+        schema_version="0.1.0-dev.3",
         scene_family=SceneFamily.SINGLE_OCCLUDER,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,
@@ -371,6 +539,11 @@ def _generate_single_occluder_episode(
             candidate_occluder_raw_geom_id=occluder_raw_id,
             candidate_occluded_raw_geom_id=occluded_raw_id,
             frames=tuple(occlusion_frame_evidence),  # type: ignore[arg-type]
+        ),
+        analytic_transport_diagnostics=_analytic_transport_diagnostics(
+            rendered.analytic_transport,
+            rendered.before.raw_geom_segmentation,
+            rendered.after.raw_geom_segmentation,
         ),
     )
     instrumentation_path = episode_directory / "instrumentation.json"
@@ -395,6 +568,7 @@ def _generate_single_occluder_episode(
         ),
         scene_content_sha256=compute_single_occluder_scene_content_hash(config),
         ecological_label_sha256=transition.ecological_label_sha256,
+        analytic_transport_sha256=analytic_transport.analytic_transport_sha256,
         rgb_logical_sha256=(before.rgb.logical_sha256, after.rgb.logical_sha256),
     )
 
@@ -459,8 +633,13 @@ def _generate_corridor_episode(
         derive_boundary_structure(before_segmentation, surfaces, 0),
         derive_boundary_structure(after_segmentation, surfaces, 1),
     )
+    analytic_transport = _write_analytic_transport(
+        root,
+        episode_directory,
+        rendered.analytic_transport,
+    )
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.2",
+        schema_version="0.1.0-dev.3",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -471,10 +650,10 @@ def _generate_corridor_episode(
         region_mask_changes=mask_changes,
         ecological_visibility_events=UnavailableEcologicalVisibilityEvents(
             status="unavailable",
-            reason_category="optical_transport_and_boundary_ownership_unavailable",
+            reason_category="oriented_boundary_ownership_unavailable",
             reason=(
-                "Ecological accretion/deletion events are unavailable until optical transport "
-                "and oriented boundary ownership are implemented."
+                "Ecological accretion/deletion events remain unavailable until oriented "
+                "boundary ownership is implemented; analytic transport alone is insufficient."
             ),
         ),
         occlusion=UnavailableOcclusionAnnotation(
@@ -486,14 +665,7 @@ def _generate_corridor_episode(
             ),
         ),
         boundary_structures=boundaries,
-        dense_optical_flow=UnavailableAnnotation(
-            field="dense_optical_flow",
-            status="unavailable",
-            reason=(
-                "Dense flow is remaining Gate 0B work; this corridor slice records exact "
-                "region correspondence and visibility changes without fabricating flow values."
-            ),
-        ),
+        analytic_optical_transport=analytic_transport,
         ecological_label_sha256="0" * 64,
     )
     transition = TransitionRecord.model_validate(
@@ -529,7 +701,7 @@ def _generate_corridor_episode(
             )
         )
     instrumentation = CorridorInstrumentation(
-        schema_version="0.1.0-dev.2",
+        schema_version="0.1.0-dev.3",
         scene_family=SceneFamily.CORRIDOR,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,
@@ -548,6 +720,11 @@ def _generate_corridor_episode(
         raw_segmentation_frames=tuple(raw_segmentation_evidence),  # type: ignore[arg-type]
         geometry_sampling_rule="uniform_width_length_v1",
         appearance_rule="solid_colour_variant_v1",
+        analytic_transport_diagnostics=_analytic_transport_diagnostics(
+            rendered.analytic_transport,
+            rendered.before.raw_geom_segmentation,
+            rendered.after.raw_geom_segmentation,
+        ),
     )
     instrumentation_path = episode_directory / "instrumentation.json"
     write_canonical_json(instrumentation_path, instrumentation)
@@ -572,6 +749,7 @@ def _generate_corridor_episode(
         ),
         scene_content_sha256=scene_content_sha256,
         ecological_label_sha256=transition.ecological_label_sha256,
+        analytic_transport_sha256=analytic_transport.analytic_transport_sha256,
         rgb_logical_sha256=(before.rgb.logical_sha256, after.rgb.logical_sha256),
     )
 
@@ -628,7 +806,7 @@ def generate_dataset(config: BenchmarkConfig, episodes: int, output: Path) -> Da
         renderer_provenance
     )
     manifest = DatasetManifest(
-        schema_version="0.1.0-dev.2",
+        schema_version="0.1.0-dev.3",
         generator_version="0.1.0",
         scene_family=config.scene_family,
         root_seed=config.seed,

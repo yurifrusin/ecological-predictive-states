@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +12,8 @@ from PIL import Image
 from epsbench.data.paths import resolve_dataset_manifest
 from epsbench.schema import (
     Action,
+    AnalyticBoundaryAmbiguityRule,
+    AvailableDenseOpticalTransport,
     CameraInstrumentation,
     CorridorInstrumentation,
     CorridorSampledGeometry,
@@ -20,6 +23,7 @@ from epsbench.schema import (
     FrameRecord,
     Modality,
     ModalityPermissionSet,
+    OpticalTransportCoordinateConvention,
     PrivilegedInstrumentation,
     SceneFamily,
     TransitionRecord,
@@ -29,6 +33,31 @@ from epsbench.schema import (
 
 class PermissionDeniedError(PermissionError):
     """Raised before any unauthorised artifact is opened."""
+
+
+@dataclass(frozen=True)
+class LoadedAnalyticOpticalTransport:
+    """Complete public runtime bundle; validity semantics always accompany vectors."""
+
+    forward_vectors_fixed: npt.NDArray[np.int32]
+    forward_validity: npt.NDArray[np.uint8]
+    forward_reasons: npt.NDArray[np.uint8]
+    backward_vectors_fixed: npt.NDArray[np.int32]
+    backward_validity: npt.NDArray[np.uint8]
+    backward_reasons: npt.NDArray[np.uint8]
+    fixed_point_scale: int
+    method: str
+    coordinate_convention: OpticalTransportCoordinateConvention
+    boundary_ambiguity: AnalyticBoundaryAmbiguityRule
+    analytic_transport_sha256: str
+
+    @property
+    def forward_flow_pixels(self) -> npt.NDArray[np.float64]:
+        return self.forward_vectors_fixed.astype(np.float64) / self.fixed_point_scale
+
+    @property
+    def backward_flow_pixels(self) -> npt.NDArray[np.float64]:
+        return self.backward_vectors_fixed.astype(np.float64) / self.fixed_point_scale
 
 
 class DatasetLoader:
@@ -105,6 +134,7 @@ class DatasetLoader:
             Modality.ECOLOGICAL_VISIBILITY_EVENTS,
             Modality.OCCLUSION_ANNOTATION,
             Modality.BOUNDARY_STRUCTURE,
+            Modality.ANALYTIC_OPTICAL_TRANSPORT,
         )
         transition = self._transition(episode_index)
         return EcologicalTransitionView(
@@ -117,8 +147,43 @@ class DatasetLoader:
             ecological_visibility_events=transition.ecological_visibility_events,
             occlusion=transition.occlusion,
             boundary_structures=transition.boundary_structures,
-            dense_optical_flow=transition.dense_optical_flow,
+            analytic_optical_transport=transition.analytic_optical_transport,
             ecological_label_sha256=transition.ecological_label_sha256,
+        )
+
+    def read_analytic_optical_transport(
+        self,
+        episode_index: int,
+    ) -> LoadedAnalyticOpticalTransport:
+        self._require(Modality.ANALYTIC_OPTICAL_TRANSPORT)
+        transport = self._transition(episode_index).analytic_optical_transport
+        if not isinstance(transport, AvailableDenseOpticalTransport):
+            raise ValueError(f"analytic optical transport is unavailable: {transport.reason}")
+
+        def load_int32(relative_path: str) -> npt.NDArray[np.int32]:
+            return np.asarray(
+                np.load(self._path(relative_path), allow_pickle=False),
+                dtype=np.int32,
+            )
+
+        def load_uint8(relative_path: str) -> npt.NDArray[np.uint8]:
+            return np.asarray(
+                np.load(self._path(relative_path), allow_pickle=False),
+                dtype=np.uint8,
+            )
+
+        return LoadedAnalyticOpticalTransport(
+            forward_vectors_fixed=load_int32(transport.forward.vectors_fixed.path),
+            forward_validity=load_uint8(transport.forward.validity.path),
+            forward_reasons=load_uint8(transport.forward.reasons.path),
+            backward_vectors_fixed=load_int32(transport.backward.vectors_fixed.path),
+            backward_validity=load_uint8(transport.backward.validity.path),
+            backward_reasons=load_uint8(transport.backward.reasons.path),
+            fixed_point_scale=transport.quantisation.fixed_point_scale,
+            method=transport.method,
+            coordinate_convention=transport.coordinate_convention,
+            boundary_ambiguity=transport.boundary_ambiguity,
+            analytic_transport_sha256=transport.analytic_transport_sha256,
         )
 
     def read_rgb(self, episode_index: int, frame_index: int) -> npt.NDArray[np.uint8]:

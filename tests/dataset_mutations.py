@@ -9,12 +9,14 @@ from typing import Any
 import numpy as np
 
 from epsbench.data.identity import (
+    compute_analytic_transport_hash,
     compute_content_provenance_binding,
     compute_dataset_logical_hash,
     compute_ecological_label_hash,
 )
 from epsbench.schema import (
     ArtifactRecord,
+    AvailableDenseOpticalTransport,
     DatasetManifest,
     PrivilegedInstrumentation,
     TransitionRecord,
@@ -97,6 +99,18 @@ def commit_episode_payloads(
     manifest = load_manifest(root)
     episode = manifest.episodes[episode_index]
     transition = TransitionRecord.model_validate_json(canonical_json_bytes(transition_payload))
+    if isinstance(transition.analytic_optical_transport, AvailableDenseOpticalTransport):
+        analytic_transport = transition.analytic_optical_transport.model_copy(
+            update={"analytic_transport_sha256": "0" * 64}
+        )
+        analytic_transport = analytic_transport.model_copy(
+            update={
+                "analytic_transport_sha256": compute_analytic_transport_hash(analytic_transport)
+            }
+        )
+        transition = transition.model_copy(
+            update={"analytic_optical_transport": analytic_transport}
+        )
     transition = TransitionRecord.model_validate(
         {
             **transition.model_dump(mode="python"),
@@ -122,6 +136,14 @@ def commit_episode_payloads(
             "transition": transition_record,
             "privileged_instrumentation": instrumentation_record,
             "ecological_label_sha256": transition.ecological_label_sha256,
+            "analytic_transport_sha256": (
+                transition.analytic_optical_transport.analytic_transport_sha256
+                if isinstance(
+                    transition.analytic_optical_transport,
+                    AvailableDenseOpticalTransport,
+                )
+                else episode.analytic_transport_sha256
+            ),
             "rgb_logical_sha256": (
                 transition.before.rgb.logical_sha256,
                 transition.after.rgb.logical_sha256,

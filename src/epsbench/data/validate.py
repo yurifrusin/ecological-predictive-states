@@ -9,7 +9,14 @@ from typing import Any, cast
 import numpy as np
 from PIL import Image
 
-from epsbench.annotations import derive_boundary_structure, derive_visibility
+from epsbench.annotations import (
+    ANALYTIC_TRANSPORT_METHOD,
+    AnalyticTransportArrays,
+    DirectionalTransportArrays,
+    TransportReasonCode,
+    derive_boundary_structure,
+    derive_visibility,
+)
 from epsbench.config import (
     BenchmarkConfig,
     CorridorConfig,
@@ -17,6 +24,7 @@ from epsbench.config import (
     parse_config,
 )
 from epsbench.data.identity import (
+    compute_analytic_transport_hash,
     compute_content_provenance_binding,
     compute_dataset_logical_hash,
     compute_ecological_label_hash,
@@ -26,11 +34,16 @@ from epsbench.data.identity import (
 from epsbench.data.paths import UnsafeDatasetManifestError, resolve_dataset_manifest
 from epsbench.schema import (
     Action,
+    AnalyticRendererFrameDiagnostic,
+    AnalyticTransportDiagnostics,
     ArtifactRecord,
+    AvailableDenseOpticalTransport,
     AvailableOcclusionAnnotation,
     CameraInstrumentation,
     CorridorInstrumentation,
     DatasetManifest,
+    DirectionalOpticalTransport,
+    DirectionalTransportDiagnostic,
     OcclusionRelation,
     PrivilegedInstrumentation,
     SingleOccluderInstrumentation,
@@ -42,6 +55,8 @@ from epsbench.sim import (
     CORRIDOR_SURFACE_NAMES,
     compile_corridor_scene_contract,
     compile_single_occluder_scene_contract,
+    compute_corridor_analytic_transport,
+    compute_single_occluder_analytic_transport,
     corridor_generation_seeds,
 )
 from epsbench.sim.compiled import CompiledSceneContract
@@ -160,6 +175,147 @@ def _load_npy(
         raise DatasetValidationError(f"unreadable NumPy artifact: {record.path}") from error
     _verify_array(root, record, array)
     return array
+
+
+def _load_transport_direction(
+    root: Path,
+    direction: DirectionalOpticalTransport,
+    expected_shape: tuple[int, int],
+    registry: _ArtifactRegistry,
+) -> DirectionalTransportArrays:
+    vectors = _load_npy(root, direction.vectors_fixed, registry)
+    validity = _load_npy(root, direction.validity, registry)
+    reasons = _load_npy(root, direction.reasons, registry)
+    if vectors.dtype != np.dtype("int32") or vectors.shape != (*expected_shape, 2):
+        raise DatasetValidationError("analytic transport vector dtype or shape is invalid")
+    if validity.dtype != np.dtype("uint8") or validity.shape != expected_shape:
+        raise DatasetValidationError("analytic transport validity dtype or shape is invalid")
+    if reasons.dtype != np.dtype("uint8") or reasons.shape != expected_shape:
+        raise DatasetValidationError("analytic transport reason dtype or shape is invalid")
+    if not np.all(np.isin(validity, (0, 1))):
+        raise DatasetValidationError("analytic transport validity contains a value outside {0,1}")
+    allowed_reason_codes = tuple(int(code) for code in TransportReasonCode)
+    if not np.all(np.isin(reasons, allowed_reason_codes)):
+        raise DatasetValidationError("analytic transport contains an unknown reason code")
+    valid = validity == 1
+    if not np.array_equal(valid, reasons == int(TransportReasonCode.VALID_TRANSPORT)):
+        raise DatasetValidationError(
+            "analytic transport validity and reason masks are inconsistent"
+        )
+    if np.any(vectors[~valid] != 0):
+        raise DatasetValidationError("invalid analytic transport vectors must be canonical zero")
+    return DirectionalTransportArrays(
+        vectors_fixed=np.asarray(vectors, dtype=np.int32),
+        validity=np.asarray(validity, dtype=np.uint8),
+        reasons=np.asarray(reasons, dtype=np.uint8),
+    )
+
+
+def _load_analytic_transport(
+    root: Path,
+    transition: TransitionRecord,
+    expected_shape: tuple[int, int],
+    registry: _ArtifactRegistry,
+) -> tuple[DirectionalTransportArrays, DirectionalTransportArrays]:
+    transport = transition.analytic_optical_transport
+    if not isinstance(transport, AvailableDenseOpticalTransport):
+        raise DatasetValidationError(
+            "generated scene families require available analytic transport"
+        )
+    if compute_analytic_transport_hash(transport) != transport.analytic_transport_sha256:
+        raise DatasetValidationError("analytic transport identity mismatch")
+    forward = _load_transport_direction(root, transport.forward, expected_shape, registry)
+    backward = _load_transport_direction(root, transport.backward, expected_shape, registry)
+    return forward, backward
+
+
+def _require_exact_transport_recomputation(
+    observed: tuple[DirectionalTransportArrays, DirectionalTransportArrays],
+    expected: AnalyticTransportArrays,
+) -> None:
+    for direction_name, actual, recomputed in (
+        ("forward", observed[0], expected.forward),
+        ("backward", observed[1], expected.backward),
+    ):
+        if not np.array_equal(actual.vectors_fixed, recomputed.vectors_fixed):
+            raise DatasetValidationError(
+                f"{direction_name} analytic transport vectors differ from recomputation"
+            )
+        if not np.array_equal(actual.validity, recomputed.validity):
+            raise DatasetValidationError(
+                f"{direction_name} analytic transport validity differs from recomputation"
+            )
+        if not np.array_equal(actual.reasons, recomputed.reasons):
+            raise DatasetValidationError(
+                f"{direction_name} analytic transport reasons differ from recomputation"
+            )
+
+
+def _reconstruct_raw_segmentation(
+    transition: TransitionRecord,
+    instrumentation: PrivilegedInstrumentation,
+    public_segmentation: np.ndarray[Any, Any],
+) -> np.ndarray[Any, Any]:
+    labels = {surface.surface_id: surface.segmentation_label for surface in transition.surfaces}
+    raw = np.full(public_segmentation.shape, -1, dtype=np.int32)
+    for raw_id_text, opaque_id in instrumentation.raw_to_opaque_surface_ids.items():
+        raw[public_segmentation == labels[opaque_id]] = int(raw_id_text)
+    return raw
+
+
+def _directional_transport_diagnostic(
+    arrays: DirectionalTransportArrays,
+) -> DirectionalTransportDiagnostic:
+    total = int(arrays.validity.size)
+    valid = int(np.count_nonzero(arrays.validity))
+    counts = np.bincount(arrays.reasons.reshape(-1), minlength=5)
+    return DirectionalTransportDiagnostic(
+        total_pixels=total,
+        valid_transport_pixels=valid,
+        valid_transport_fraction=valid / total,
+        reason_code_counts=tuple(int(count) for count in counts[:5]),  # type: ignore[arg-type]
+    )
+
+
+def _expected_analytic_transport_diagnostics(
+    arrays: AnalyticTransportArrays,
+    raw_segmentations: tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]],
+) -> AnalyticTransportDiagnostics:
+    frame_diagnostics: list[AnalyticRendererFrameDiagnostic] = []
+    for frame_index, (assignment, boundary, rendered) in enumerate(
+        (
+            (
+                arrays.before_surface_assignment,
+                arrays.before_boundary_ambiguous,
+                raw_segmentations[0],
+            ),
+            (
+                arrays.after_surface_assignment,
+                arrays.after_boundary_ambiguous,
+                raw_segmentations[1],
+            ),
+        )
+    ):
+        interior = ~boundary
+        compared = int(np.count_nonzero(interior))
+        agreeing = int(np.count_nonzero((assignment == rendered) & interior))
+        frame_diagnostics.append(
+            AnalyticRendererFrameDiagnostic(
+                frame_index=frame_index,  # type: ignore[arg-type]
+                compared_interior_pixels=compared,
+                agreeing_interior_pixels=agreeing,
+                interior_agreement_rate=agreeing / compared,
+                excluded_analytic_boundary_pixels=int(np.count_nonzero(boundary)),
+            )
+        )
+    return AnalyticTransportDiagnostics(
+        method=ANALYTIC_TRANSPORT_METHOD,
+        renderer_cross_check="non_authoritative_interior_segmentation_agreement_v1",
+        minimum_interior_agreement_rate=0.9,
+        frames=tuple(frame_diagnostics),  # type: ignore[arg-type]
+        forward=_directional_transport_diagnostic(arrays.forward),
+        backward=_directional_transport_diagnostic(arrays.backward),
+    )
 
 
 def _require_camera_action_alignment(
@@ -641,7 +797,13 @@ def validate_dataset(root: Path) -> DatasetManifest:
             raise DatasetValidationError("ecological-label hash mismatch")
         if transition.ecological_label_sha256 != episode.ecological_label_sha256:
             raise DatasetValidationError("episode ecological-label hash mismatch")
-
+        if not isinstance(transition.analytic_optical_transport, AvailableDenseOpticalTransport):
+            raise DatasetValidationError("analytic optical transport must be available")
+        if (
+            transition.analytic_optical_transport.analytic_transport_sha256
+            != episode.analytic_transport_sha256
+        ):
+            raise DatasetValidationError("episode analytic transport identity mismatch")
         instrumentation_payload = _verify_json(
             resolved_root,
             episode.privileged_instrumentation,
@@ -699,6 +861,7 @@ def validate_dataset(root: Path) -> DatasetManifest:
             compiled_scene = compile_single_occluder_scene_contract(config)
             _require_compiled_apparatus_contract(instrumentation, compiled_scene)
             expected_scene_content_sha256 = _single_occluder_scene_content_hash(config)
+            expected_analytic_transport = compute_single_occluder_analytic_transport(config)
         elif isinstance(instrumentation, CorridorInstrumentation):
             if not isinstance(config, CorridorConfig):
                 raise DatasetValidationError("corridor instrumentation/configuration mismatch")
@@ -712,6 +875,11 @@ def validate_dataset(root: Path) -> DatasetManifest:
             expected_scene_content_sha256 = _corridor_scene_content_hash(
                 config,
                 instrumentation,
+            )
+            expected_analytic_transport = compute_corridor_analytic_transport(
+                config,
+                instrumentation.sampled_geometry,
+                instrumentation.generation_seeds.appearance_seed,
             )
         else:
             raise DatasetValidationError("unsupported scene instrumentation")
@@ -772,6 +940,16 @@ def validate_dataset(root: Path) -> DatasetManifest:
             (cameras[0], cameras[1]),
             instrumentation,
             compiled_scene,
+        )
+        observed_analytic_transport = _load_analytic_transport(
+            resolved_root,
+            transition,
+            expected_raster_shape,
+            registry,
+        )
+        _require_exact_transport_recomputation(
+            observed_analytic_transport,
+            expected_analytic_transport,
         )
 
         if tuple(item[0].shape for item in frame_arrays) != (
@@ -842,4 +1020,14 @@ def validate_dataset(root: Path) -> DatasetManifest:
         )
         if derived_boundaries != transition.boundary_structures:
             raise DatasetValidationError("boundary annotations are inconsistent")
+        reconstructed_raw = (
+            _reconstruct_raw_segmentation(transition, instrumentation, frame_arrays[0][2]),
+            _reconstruct_raw_segmentation(transition, instrumentation, frame_arrays[1][2]),
+        )
+        expected_diagnostics = _expected_analytic_transport_diagnostics(
+            expected_analytic_transport,
+            reconstructed_raw,
+        )
+        if instrumentation.analytic_transport_diagnostics != expected_diagnostics:
+            raise DatasetValidationError("analytic transport diagnostics are inconsistent")
     return manifest

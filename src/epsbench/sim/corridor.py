@@ -8,6 +8,7 @@ import mujoco
 import numpy as np
 import numpy.typing as npt
 
+from epsbench.annotations import AnalyticCamera, AnalyticTransportArrays, compute_analytic_transport
 from epsbench.config import CorridorConfig
 from epsbench.schema import CorridorSampledGeometry
 from epsbench.sim.compiled import CompiledSceneContract, extract_compiled_scene_contract
@@ -41,6 +42,7 @@ class CorridorRenderedTransition:
     raw_geom_ids: dict[str, int]
     raw_geom_positions: dict[str, tuple[float, float, float]]
     raw_geom_compiled_sizes: dict[str, tuple[float, float, float]]
+    analytic_transport: AnalyticTransportArrays
 
 
 def corridor_generation_seeds(episode_seed: int) -> tuple[int, int, int]:
@@ -166,6 +168,58 @@ def compile_corridor_scene_contract(
     )
 
 
+def _analytic_camera(
+    position: tuple[float, float, float],
+    rotation: tuple[float, ...],
+    vertical_field_of_view_degrees: float,
+) -> AnalyticCamera:
+    return AnalyticCamera(
+        world_position=position,
+        world_rotation_row_major=rotation,
+        vertical_field_of_view_degrees=vertical_field_of_view_degrees,
+    )
+
+
+def compute_corridor_analytic_transport(
+    config: CorridorConfig,
+    geometry: CorridorSampledGeometry,
+    appearance_seed: int,
+) -> AnalyticTransportArrays:
+    """Independently compile and recompute transport for whole-dataset validation."""
+
+    model = mujoco.MjModel.from_xml_string(
+        build_corridor_scene_xml(config, geometry, appearance_seed)
+    )
+    data = mujoco.MjData(model)
+    camera_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "monocular_camera")
+    model.cam_pos[camera_id, 1] = geometry.camera_before_forward_position
+    mujoco.mj_forward(model, data)
+    before_camera = _analytic_camera(
+        tuple(float(value) for value in data.cam_xpos[camera_id]),  # type: ignore[arg-type]
+        tuple(float(value) for value in data.cam_xmat[camera_id].reshape(-1)),
+        float(model.cam_fovy[camera_id]),
+    )
+    model.cam_pos[camera_id, 1] = geometry.camera_after_forward_position
+    mujoco.mj_forward(model, data)
+    after_camera = _analytic_camera(
+        tuple(float(value) for value in data.cam_xpos[camera_id]),  # type: ignore[arg-type]
+        tuple(float(value) for value in data.cam_xmat[camera_id].reshape(-1)),
+        float(model.cam_fovy[camera_id]),
+    )
+    controlled_geom_ids = tuple(
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name) for name in CORRIDOR_SURFACE_NAMES
+    )
+    return compute_analytic_transport(
+        model,
+        data,
+        controlled_geom_ids,
+        config.render.width,
+        config.render.height,
+        before_camera,
+        after_camera,
+    )
+
+
 def _render_raw_segmentation(
     renderer: mujoco.Renderer,
     data: mujoco.MjData,
@@ -255,10 +309,28 @@ def render_corridor_transition(
         )
     finally:
         renderer.close()
+    analytic_transport = compute_analytic_transport(
+        model,
+        data,
+        tuple(compiled.raw_geom_ids[name] for name in CORRIDOR_SURFACE_NAMES),
+        config.render.width,
+        config.render.height,
+        _analytic_camera(
+            before.camera_world_position,
+            before.camera_world_rotation_row_major,
+            compiled.camera_field_of_view_degrees,
+        ),
+        _analytic_camera(
+            after.camera_world_position,
+            after.camera_world_rotation_row_major,
+            compiled.camera_field_of_view_degrees,
+        ),
+    )
     return CorridorRenderedTransition(
         before=before,
         after=after,
         raw_geom_ids=compiled.raw_geom_ids,
         raw_geom_positions=compiled.raw_geom_world_positions,
         raw_geom_compiled_sizes=compiled.raw_geom_compiled_sizes,
+        analytic_transport=analytic_transport,
     )

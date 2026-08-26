@@ -13,19 +13,6 @@ from epsbench.data.validate import validate_dataset
 from epsbench.schema import ModalityPermissionSet
 
 
-def _depth_image(depth: np.ndarray) -> Image.Image:
-    finite = np.isfinite(depth)
-    if not np.any(finite):
-        scaled = np.zeros(depth.shape, dtype=np.uint8)
-    else:
-        lower, upper = np.percentile(depth[finite], (2, 98))
-        if upper <= lower:
-            upper = lower + 1.0
-        normalised = np.clip((depth - lower) / (upper - lower), 0.0, 1.0)
-        scaled = np.asarray((1.0 - normalised) * 255.0, dtype=np.uint8)
-    return Image.fromarray(scaled, mode="L").convert("RGB")
-
-
 def _segmentation_image(segmentation: np.ndarray) -> Image.Image:
     output = np.zeros((*segmentation.shape, 3), dtype=np.uint8)
     for label in np.unique(segmentation):
@@ -36,37 +23,86 @@ def _segmentation_image(segmentation: np.ndarray) -> Image.Image:
     return Image.fromarray(output, mode="RGB")
 
 
+def _flow_image(
+    flow_pixels: np.ndarray,
+    validity: np.ndarray,
+) -> Image.Image:
+    valid = validity == 1
+    horizontal = flow_pixels[..., 0]
+    vertical = flow_pixels[..., 1]
+    magnitude = np.hypot(horizontal, vertical)
+    if np.any(valid):
+        scale = float(np.percentile(magnitude[valid], 98))
+    else:
+        scale = 1.0
+    if scale <= 0.0:
+        scale = 1.0
+    angle = np.mod(np.arctan2(vertical, horizontal) / (2.0 * np.pi), 1.0)
+    hsv = np.zeros((*valid.shape, 3), dtype=np.uint8)
+    hsv[..., 0] = np.asarray(angle * 255.0, dtype=np.uint8)
+    hsv[..., 1] = np.asarray(np.clip(magnitude / scale, 0.0, 1.0) * 255.0, dtype=np.uint8)
+    hsv[..., 2] = np.where(valid, 255, 30).astype(np.uint8)
+    return Image.fromarray(hsv, mode="HSV").convert("RGB")
+
+
+def _reason_image(reasons: np.ndarray) -> Image.Image:
+    palette = np.asarray(
+        (
+            (58, 190, 92),
+            (20, 20, 20),
+            (245, 190, 55),
+            (214, 62, 67),
+            (140, 78, 190),
+        ),
+        dtype=np.uint8,
+    )
+    return Image.fromarray(palette[reasons], mode="RGB")
+
+
 def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> Path:
     root = dataset.resolve()
     resolved_output = output.resolve()
     if resolved_output.is_relative_to(root):
         raise ValueError("inspection output must be outside the immutable dataset directory")
-    manifest = validate_dataset(root)
+    validate_dataset(root)
     loader = DatasetLoader(root, ModalityPermissionSet.all_modalities())
     before_rgb = Image.fromarray(loader.read_rgb(episode_index, 0), mode="RGB")
     after_rgb = Image.fromarray(loader.read_rgb(episode_index, 1), mode="RGB")
-    before_depth = _depth_image(loader.read_depth(episode_index, 0))
-    after_depth = _depth_image(loader.read_depth(episode_index, 1))
     before_segmentation = _segmentation_image(loader.read_segmentation(episode_index, 0))
     after_segmentation = _segmentation_image(loader.read_segmentation(episode_index, 1))
+    transport = loader.read_analytic_optical_transport(episode_index)
+    forward_flow = _flow_image(
+        transport.forward_flow_pixels,
+        transport.forward_validity,
+    )
+    backward_flow = _flow_image(
+        transport.backward_flow_pixels,
+        transport.backward_validity,
+    )
+    forward_reasons = _reason_image(transport.forward_reasons)
+    backward_reasons = _reason_image(transport.backward_reasons)
     panels = (
         ("RGB before", before_rgb),
         ("RGB after", after_rgb),
-        ("Depth before (near=white)", before_depth),
-        ("Depth after (near=white)", after_depth),
         ("Opaque surface labels before", before_segmentation),
         ("Opaque surface labels after", after_segmentation),
+        ("Forward transport (valid pixels)", forward_flow),
+        ("Backward transport (valid pixels)", backward_flow),
+        ("Forward validity/reason codes", forward_reasons),
+        ("Backward validity/reason codes", backward_reasons),
     )
     width, height = before_rgb.size
     label_height = 24
-    header_height = 24
+    header_height = 58
     canvas = Image.new(
         "RGB",
-        (2 * width, header_height + 3 * (height + label_height)),
+        (2 * width, header_height + 4 * (height + label_height)),
         "white",
     )
     draw = ImageDraw.Draw(canvas)
-    draw.text((6, 5), f"Scene family: {manifest.scene_family.value}", fill="black")
+    draw.text((6, 4), f"Analytic transport: {transport.method}", fill="black")
+    draw.text((6, 20), f"Identity: {transport.analytic_transport_sha256[:32]}", fill="black")
+    draw.text((6, 36), f"          {transport.analytic_transport_sha256[32:]}", fill="black")
     for panel_index, (label, panel) in enumerate(panels):
         column = panel_index % 2
         row = panel_index // 2
