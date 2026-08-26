@@ -32,6 +32,10 @@ def generate(
         f"Generated {len(manifest.episodes)} {manifest.scene_family.value} episode(s); "
         f"dataset logical hash {manifest.dataset_logical_sha256}"
     )
+    typer.echo(
+        "Analytic transport identities: "
+        + ", ".join(episode.analytic_transport_sha256 for episode in manifest.episodes)
+    )
 
 
 @app.command(name="validate")
@@ -49,6 +53,10 @@ def validate_command(
         f"Valid {manifest.scene_family.value} dataset: {len(manifest.episodes)} episode(s); "
         f"logical hash {manifest.dataset_logical_sha256}"
     )
+    typer.echo(
+        "Analytic transport identities: "
+        + ", ".join(episode.analytic_transport_sha256 for episode in manifest.episodes)
+    )
 
 
 @app.command(name="inspect")
@@ -57,7 +65,7 @@ def inspect_command(
     output: Annotated[Path, typer.Option(dir_okay=False)],
     episode: Annotated[int, typer.Option(min=0)] = 0,
 ) -> None:
-    """Write a labelled RGB/depth/segmentation composite outside the dataset."""
+    """Write an RGB/segmentation/transport composite outside the dataset."""
 
     try:
         result = create_inspection_image(dataset, episode, output)

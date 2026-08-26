@@ -93,6 +93,7 @@ class Modality(StrEnum):
     REGION_MASK_CHANGES = "region_mask_changes"
     ECOLOGICAL_VISIBILITY_EVENTS = "ecological_visibility_events"
     OCCLUSION_ANNOTATION = "occlusion_annotation"
+    ANALYTIC_OPTICAL_TRANSPORT = "analytic_optical_transport"
     DEPTH = "depth"
     LOCAL_METRIC_ARRAYS = "local_metric_arrays"
     CAMERA_WORLD_TRANSFORM = "camera_world_transform"
@@ -115,6 +116,7 @@ class Modality(StrEnum):
             Modality.REGION_MASK_CHANGES,
             Modality.ECOLOGICAL_VISIBILITY_EVENTS,
             Modality.OCCLUSION_ANNOTATION,
+            Modality.ANALYTIC_OPTICAL_TRANSPORT,
         }:
             return ModalityClass.ECOLOGICAL_ORACLE
         if self in {Modality.DEPTH, Modality.LOCAL_METRIC_ARRAYS}:
@@ -212,7 +214,7 @@ class RegionMaskChange(StrictModel):
 
 class UnavailableEcologicalVisibilityEvents(StrictModel):
     status: Literal["unavailable"]
-    reason_category: Literal["optical_transport_and_boundary_ownership_unavailable"]
+    reason_category: Literal["oriented_boundary_ownership_unavailable"]
     reason: str = Field(min_length=1)
 
 
@@ -349,14 +351,109 @@ class FrameRecord(StrictModel):
         return self
 
 
-class UnavailableAnnotation(StrictModel):
-    field: Literal["dense_optical_flow"]
+class OpticalTransportCoordinateConvention(StrictModel):
+    pixel_sample: Literal["centre_of_pixel"]
+    pixel_centre_x: Literal["column_plus_0.5"]
+    pixel_centre_y: Literal["row_plus_0.5"]
+    x_axis: Literal["increases_right"]
+    y_axis: Literal["increases_down"]
+    flow_definition: Literal["target_pixel_centre_minus_source_pixel_centre"]
+    units: Literal["image_pixels"]
+
+
+class OpticalTransportQuantisation(StrictModel):
+    dtype: Literal["int32"]
+    fixed_point_scale: Literal[1024]
+    rounding: Literal["nearest_ties_to_even"]
+
+
+class AnalyticIntersectionVisibilityContract(StrictModel):
+    surface_intersection_rule: Literal["compiled_plane_and_oriented_box_nearest_hit_v3"]
+    finite_plane_extent_rule: Literal["finite_plane_visual_extent_v2"]
+    finite_plane_edge_comparison_rule: Literal["inclusive_extent_plus_scaled_binary64_epsilon_v1"]
+    finite_plane_edge_binary64_epsilon: float = Field(
+        ge=2.220446049250313e-16,
+        le=2.220446049250313e-16,
+    )
+    finite_plane_edge_tolerance_multiplier: float = Field(ge=16.0, le=16.0)
+    finite_plane_edge_minimum_tolerance_scale: float = Field(ge=1.0, le=1.0)
+    target_visibility_rule: Literal["same_surface_point_nearest_hit_v1"]
+    visibility_relative_tolerance: float = Field(ge=1e-7, le=1e-7)
+    visibility_minimum_tolerance_scale: float = Field(ge=1.0, le=1.0)
+    ray_direction_epsilon: float = Field(ge=1e-12, le=1e-12)
+
+
+class AnalyticBoundaryAmbiguityRule(StrictModel):
+    rule: Literal["four_neighbour_assignment_band_v1"]
+    width_pixels: Literal[1]
+    connectivity: Literal["four_neighbour"]
+    application: Literal["source_and_projected_target"]
+
+
+class DirectionalOpticalTransport(StrictModel):
+    source_frame_index: Literal[0, 1]
+    target_frame_index: Literal[0, 1]
+    vectors_fixed: ArtifactRecord
+    validity: ArtifactRecord
+    reasons: ArtifactRecord
+
+    @model_validator(mode="after")
+    def artifacts_are_complete_and_aligned(self) -> DirectionalOpticalTransport:
+        if self.source_frame_index == self.target_frame_index:
+            raise ValueError("optical transport source and target frames must differ")
+        artifacts = (self.vectors_fixed, self.validity, self.reasons)
+        if any(artifact.modality != Modality.ANALYTIC_OPTICAL_TRANSPORT for artifact in artifacts):
+            raise ValueError("all optical transport artifacts require the analytic modality")
+        if self.vectors_fixed.dtype != "int32" or len(self.vectors_fixed.shape) != 3:
+            raise ValueError("optical transport vectors must be a three-dimensional int32 array")
+        height, width, components = self.vectors_fixed.shape
+        if components != 2:
+            raise ValueError("optical transport vectors must contain x/y components")
+        expected_mask_shape = (height, width)
+        if self.validity.dtype != "uint8" or self.validity.shape != expected_mask_shape:
+            raise ValueError("optical transport validity mask has an invalid dtype or shape")
+        if self.reasons.dtype != "uint8" or self.reasons.shape != expected_mask_shape:
+            raise ValueError("optical transport reason mask has an invalid dtype or shape")
+        return self
+
+
+class AvailableDenseOpticalTransport(StrictModel):
+    status: Literal["available"]
+    method: Literal["analytic_static_scene_transport_v3"]
+    coordinate_convention: OpticalTransportCoordinateConvention
+    quantisation: OpticalTransportQuantisation
+    intersection_visibility: AnalyticIntersectionVisibilityContract
+    boundary_ambiguity: AnalyticBoundaryAmbiguityRule
+    reason_code_domain: Literal["analytic_transport_reason_codes_v1"]
+    forward: DirectionalOpticalTransport
+    backward: DirectionalOpticalTransport
+    analytic_transport_sha256: Sha256
+
+    @model_validator(mode="after")
+    def directions_are_forward_then_backward(self) -> AvailableDenseOpticalTransport:
+        if (self.forward.source_frame_index, self.forward.target_frame_index) != (0, 1):
+            raise ValueError("forward optical transport must map frame 0 to frame 1")
+        if (self.backward.source_frame_index, self.backward.target_frame_index) != (1, 0):
+            raise ValueError("backward optical transport must map frame 1 to frame 0")
+        if self.forward.vectors_fixed.shape != self.backward.vectors_fixed.shape:
+            raise ValueError("forward and backward optical transport dimensions must match")
+        return self
+
+
+class UnavailableDenseOpticalTransport(StrictModel):
     status: Literal["unavailable"]
+    reason_category: Literal["analytic_transport_unavailable"]
     reason: str = Field(min_length=1)
 
 
+DenseOpticalTransport = Annotated[
+    AvailableDenseOpticalTransport | UnavailableDenseOpticalTransport,
+    Field(discriminator="status"),
+]
+
+
 class TransitionRecord(StrictModel):
-    schema_version: Literal["0.1.0-dev.2"]
+    schema_version: Literal["0.1.0-dev.5"]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     action: Action
     surfaces: tuple[SurfaceReference, ...] = Field(min_length=1)
@@ -368,7 +465,7 @@ class TransitionRecord(StrictModel):
     ecological_visibility_events: UnavailableEcologicalVisibilityEvents
     occlusion: OcclusionAnnotation
     boundary_structures: tuple[BoundaryStructure, ...] = Field(min_length=2, max_length=2)
-    dense_optical_flow: UnavailableAnnotation
+    analytic_optical_transport: DenseOpticalTransport
     ecological_label_sha256: Sha256
 
     @model_validator(mode="after")
@@ -411,6 +508,12 @@ class TransitionRecord(StrictModel):
             raise ValueError("transition frames must be ordered before then after")
         if {item.frame_index for item in self.boundary_structures} != {0, 1}:
             raise ValueError("boundary structures must describe both frames")
+        if isinstance(self.analytic_optical_transport, AvailableDenseOpticalTransport):
+            expected_shape = (self.before.height, self.before.width, 2)
+            if self.analytic_optical_transport.forward.vectors_fixed.shape != expected_shape:
+                raise ValueError("analytic optical transport must align with both raster frames")
+            if (self.before.width, self.before.height) != (self.after.width, self.after.height):
+                raise ValueError("analytic optical transport requires aligned frame dimensions")
         return self
 
 
@@ -426,7 +529,7 @@ class EcologicalTransitionView(StrictModel):
     ecological_visibility_events: UnavailableEcologicalVisibilityEvents
     occlusion: OcclusionAnnotation
     boundary_structures: tuple[BoundaryStructure, ...]
-    dense_optical_flow: UnavailableAnnotation
+    analytic_optical_transport: DenseOpticalTransport
     ecological_label_sha256: Sha256
 
 
@@ -438,6 +541,7 @@ class EpisodeManifest(StrictModel):
     privileged_instrumentation: ArtifactRecord
     scene_content_sha256: Sha256
     ecological_label_sha256: Sha256
+    analytic_transport_sha256: Sha256
     rgb_logical_sha256: tuple[Sha256, Sha256]
 
     @model_validator(mode="after")
@@ -557,8 +661,67 @@ class CorridorSampledGeometry(StrictModel):
         return self
 
 
+class AnalyticRendererFrameDiagnostic(StrictModel):
+    frame_index: Literal[0, 1]
+    compared_interior_pixels: int = Field(gt=0)
+    agreeing_interior_pixels: int = Field(ge=0)
+    interior_agreement_rate: float = Field(ge=0.0, le=1.0)
+    unexplained_interior_disagreement_pixels: int = Field(ge=0)
+    excluded_analytic_boundary_pixels: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def agreement_rate_matches_counts(self) -> AnalyticRendererFrameDiagnostic:
+        if self.agreeing_interior_pixels > self.compared_interior_pixels:
+            raise ValueError("renderer agreement count cannot exceed compared pixels")
+        expected = self.agreeing_interior_pixels / self.compared_interior_pixels
+        if not math.isclose(self.interior_agreement_rate, expected, abs_tol=1e-15, rel_tol=0.0):
+            raise ValueError("renderer agreement rate must equal the declared counts")
+        if self.unexplained_interior_disagreement_pixels != (
+            self.compared_interior_pixels - self.agreeing_interior_pixels
+        ):
+            raise ValueError("renderer disagreement count must equal compared minus agreeing")
+        return self
+
+
+class DirectionalTransportDiagnostic(StrictModel):
+    total_pixels: int = Field(gt=0)
+    valid_transport_pixels: int = Field(ge=0)
+    valid_transport_fraction: float = Field(ge=0.0, le=1.0)
+    reason_code_counts: tuple[int, int, int, int, int]
+
+    @model_validator(mode="after")
+    def counts_and_fraction_are_consistent(self) -> DirectionalTransportDiagnostic:
+        if any(count < 0 for count in self.reason_code_counts):
+            raise ValueError("transport diagnostic reason counts must be non-negative")
+        if sum(self.reason_code_counts) != self.total_pixels:
+            raise ValueError("transport diagnostic reason counts must cover every pixel")
+        if self.reason_code_counts[0] != self.valid_transport_pixels:
+            raise ValueError("valid transport count must equal reason-code zero count")
+        expected = self.valid_transport_pixels / self.total_pixels
+        if not math.isclose(self.valid_transport_fraction, expected, abs_tol=1e-15, rel_tol=0.0):
+            raise ValueError("valid transport fraction must equal the declared counts")
+        return self
+
+
+class AnalyticTransportDiagnostics(StrictModel):
+    method: Literal["analytic_static_scene_transport_v3"]
+    renderer_cross_check: Literal["non_authoritative_exact_interior_agreement_v2"]
+    interior_agreement_requirement: Literal["zero_unexplained_disagreement_v1"]
+    frames: tuple[AnalyticRendererFrameDiagnostic, AnalyticRendererFrameDiagnostic]
+    forward: DirectionalTransportDiagnostic
+    backward: DirectionalTransportDiagnostic
+
+    @model_validator(mode="after")
+    def frames_are_complete_and_exact(self) -> AnalyticTransportDiagnostics:
+        if {frame.frame_index for frame in self.frames} != {0, 1}:
+            raise ValueError("analytic renderer diagnostics must cover both frames")
+        if any(frame.unexplained_interior_disagreement_pixels != 0 for frame in self.frames):
+            raise ValueError("analytic/renderer interior agreement must be exact")
+        return self
+
+
 class SingleOccluderInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.2"]
+    schema_version: Literal["0.1.0-dev.5"]
     scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]
@@ -567,6 +730,7 @@ class SingleOccluderInstrumentation(StrictModel):
     raw_geom_world_positions: dict[str, tuple[float, float, float]]
     raw_geom_compiled_sizes: dict[str, tuple[float, float, float]]
     occlusion_oracle: OcclusionOracleEvidence
+    analytic_transport_diagnostics: AnalyticTransportDiagnostics
 
     @model_validator(mode="after")
     def apparatus_mapping_is_exact_and_finite(self) -> SingleOccluderInstrumentation:
@@ -600,7 +764,7 @@ class SingleOccluderInstrumentation(StrictModel):
 
 
 class CorridorInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.2"]
+    schema_version: Literal["0.1.0-dev.5"]
     scene_family: Literal[SceneFamily.CORRIDOR]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]
@@ -619,6 +783,7 @@ class CorridorInstrumentation(StrictModel):
     ]
     geometry_sampling_rule: Literal["uniform_width_length_v1"]
     appearance_rule: Literal["solid_colour_variant_v1"]
+    analytic_transport_diagnostics: AnalyticTransportDiagnostics
 
     @model_validator(mode="after")
     def apparatus_mapping_and_evidence_are_exact(self) -> CorridorInstrumentation:
@@ -746,7 +911,7 @@ class RendererProvenance(StrictModel):
 
 
 class DatasetManifest(StrictModel):
-    schema_version: Literal["0.1.0-dev.2"]
+    schema_version: Literal["0.1.0-dev.3"]
     generator_version: Literal["0.1.0"]
     scene_family: SceneFamily
     root_seed: int = Field(ge=0)

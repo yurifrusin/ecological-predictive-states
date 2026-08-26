@@ -8,6 +8,7 @@ from epsbench.schema import Modality, ModalityPermissionSet
 
 def test_ecological_permission_set_excludes_metric_and_instrumentation() -> None:
     permissions = ModalityPermissionSet.ecological_only()
+    assert permissions.permits(Modality.ANALYTIC_OPTICAL_TRANSPORT)
     assert permissions.permits(Modality.REGION_MASK_CHANGES)
     assert permissions.permits(Modality.ECOLOGICAL_VISIBILITY_EVENTS)
     assert permissions.permits(Modality.OCCLUSION_ANNOTATION)

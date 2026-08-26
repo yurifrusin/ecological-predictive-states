@@ -4,6 +4,7 @@ from typing import Any
 
 from epsbench.config import CorridorConfig, SingleOccluderConfig
 from epsbench.schema import (
+    AvailableDenseOpticalTransport,
     CorridorSampledGeometry,
     DatasetManifest,
     RendererProvenance,
@@ -40,12 +41,52 @@ def ecological_label_domain(transition: TransitionRecord) -> dict[str, Any]:
         "boundary_structures": [
             item.model_dump(mode="json") for item in transition.boundary_structures
         ],
-        "dense_optical_flow": transition.dense_optical_flow.model_dump(mode="json"),
+        "analytic_optical_transport": (
+            {
+                **analytic_transport_domain(transition.analytic_optical_transport),
+                "analytic_transport_sha256": (
+                    transition.analytic_optical_transport.analytic_transport_sha256
+                ),
+            }
+            if isinstance(
+                transition.analytic_optical_transport,
+                AvailableDenseOpticalTransport,
+            )
+            else transition.analytic_optical_transport.model_dump(mode="json")
+        ),
     }
 
 
 def compute_ecological_label_hash(transition: TransitionRecord) -> str:
     return sha256_bytes(canonical_json_bytes(ecological_label_domain(transition)))
+
+
+def analytic_transport_domain(transport: AvailableDenseOpticalTransport) -> dict[str, Any]:
+    """Return the backend-independent optical-transport logical identity domain."""
+
+    def direction_domain(direction: Any) -> dict[str, Any]:
+        return {
+            "source_frame_index": direction.source_frame_index,
+            "target_frame_index": direction.target_frame_index,
+            "vectors_fixed_logical_sha256": direction.vectors_fixed.logical_sha256,
+            "validity_logical_sha256": direction.validity.logical_sha256,
+            "reasons_logical_sha256": direction.reasons.logical_sha256,
+        }
+
+    return {
+        "method": transport.method,
+        "coordinate_convention": transport.coordinate_convention.model_dump(mode="json"),
+        "quantisation": transport.quantisation.model_dump(mode="json"),
+        "intersection_visibility": transport.intersection_visibility.model_dump(mode="json"),
+        "boundary_ambiguity": transport.boundary_ambiguity.model_dump(mode="json"),
+        "reason_code_domain": transport.reason_code_domain,
+        "forward": direction_domain(transport.forward),
+        "backward": direction_domain(transport.backward),
+    }
+
+
+def compute_analytic_transport_hash(transport: AvailableDenseOpticalTransport) -> str:
+    return sha256_bytes(canonical_json_bytes(analytic_transport_domain(transport)))
 
 
 def single_occluder_scene_content_domain(config: SingleOccluderConfig) -> dict[str, Any]:
@@ -157,6 +198,7 @@ def dataset_logical_domain(manifest: DatasetManifest) -> dict[str, Any]:
                 "episode_seed": episode.episode_seed,
                 "scene_content_sha256": episode.scene_content_sha256,
                 "ecological_label_sha256": episode.ecological_label_sha256,
+                "analytic_transport_sha256": episode.analytic_transport_sha256,
                 "rgb_logical_sha256": list(episode.rgb_logical_sha256),
             }
             for episode in manifest.episodes
