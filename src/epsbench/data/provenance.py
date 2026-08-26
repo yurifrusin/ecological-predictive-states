@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Protocol
 
 from epsbench import __version__
-from epsbench.schema import GitAvailabilityStatus, SourceProvenance
+from epsbench.schema import GitAvailabilityStatus, SourceProvenance, sanitize_git_repository
 from epsbench.utils.canonical import sha256_bytes, sha256_file
 
 EXPECTED_GOVERNING_HASHES = {
@@ -97,7 +97,7 @@ class SubprocessGitStateProvider:
                 + b"".join(untracked_entries)
             )
         return GitState(
-            repository=repository,
+            repository=sanitize_git_repository(repository),
             commit=commit,
             dirty=dirty,
             dirty_diff_sha256=dirty_hash,
@@ -152,7 +152,7 @@ def collect_source_provenance(
         git_availability_status = GitAvailabilityStatus.UNAVAILABLE
         git_unavailable_reason = str(error)
     else:
-        git_repository = git_state.repository
+        git_repository = sanitize_git_repository(git_state.repository)
         git_commit = git_state.commit
         git_dirty = git_state.dirty
         dirty_diff_sha256 = git_state.dirty_diff_sha256

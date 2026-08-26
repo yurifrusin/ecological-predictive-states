@@ -10,7 +10,12 @@ import numpy as np
 import pytest
 
 from epsbench.data import DatasetValidationError, validate_dataset
-from epsbench.schema import ArtifactRecord
+from epsbench.data.identity import (
+    compute_content_provenance_binding,
+    compute_dataset_logical_hash,
+    compute_renderer_execution_provenance_hash,
+)
+from epsbench.schema import ArtifactRecord, RendererProvenance
 from epsbench.utils.canonical import (
     canonical_json_bytes,
     logical_array_hash,
@@ -18,8 +23,10 @@ from epsbench.utils.canonical import (
 )
 from tests.dataset_mutations import (
     commit_episode_payloads,
+    commit_raw_instrumentation_payload,
     commit_raw_transition_payload,
     load_episode_payloads,
+    load_manifest,
     replace_string,
     rewrite_array_artifact,
     rewrite_json_artifact,
@@ -89,7 +96,90 @@ def test_relation_referring_to_frame_without_oracle_evidence_is_rejected(
     )
     commit_episode_payloads(broken, 0, transition, instrumentation)
 
-    with pytest.raises(DatasetValidationError, match="counterfactual evidence"):
+    with pytest.raises(DatasetValidationError, match="occluder footprint"):
+        validate_dataset(broken)
+
+
+@pytest.mark.parametrize(
+    "fabrication",
+    ["occluder_present", "outside_footprint_change", "fabricated_reveal"],
+)
+def test_fully_hash_rebuilt_counterfactual_fabrication_is_rejected(
+    smoke_dataset: Path,
+    tmp_path: Path,
+    fabrication: str,
+) -> None:
+    broken = _copy_dataset(smoke_dataset, tmp_path, f"counterfactual-{fabrication}")
+    transition, instrumentation = load_episode_payloads(broken, 0)
+    oracle = instrumentation["occlusion_oracle"]
+    frame_evidence = oracle["frames"][0]
+    artifact = _artifact(frame_evidence["counterfactual_segmentation"])
+    counterfactual = np.load(broken / artifact.path, allow_pickle=False)
+    ordinary_segmentation = np.load(
+        broken / transition["before"]["segmentation"]["path"],
+        allow_pickle=False,
+    )
+    labels_by_surface = {
+        surface["surface_id"]: surface["segmentation_label"] for surface in transition["surfaces"]
+    }
+    raw_by_surface = {
+        surface_id: int(raw_id)
+        for raw_id, surface_id in instrumentation["raw_to_opaque_surface_ids"].items()
+    }
+    ordinary_raw = np.full(ordinary_segmentation.shape, -1, dtype=np.int32)
+    for surface_id, raw_id in raw_by_surface.items():
+        ordinary_raw[ordinary_segmentation == labels_by_surface[surface_id]] = raw_id
+    occluder_raw_id = oracle["candidate_occluder_raw_geom_id"]
+    background_raw_id = oracle["candidate_occluded_raw_geom_id"]
+    if fabrication == "occluder_present":
+        row, column = np.argwhere(ordinary_raw == occluder_raw_id)[0]
+        counterfactual[row, column] = occluder_raw_id
+    elif fabrication == "outside_footprint_change":
+        row, column = np.argwhere((ordinary_raw != occluder_raw_id) & (ordinary_raw != -1))[0]
+        counterfactual[row, column] = -1
+    else:
+        row, column = np.argwhere(
+            (ordinary_raw != occluder_raw_id) & (ordinary_raw != background_raw_id)
+        )[0]
+        counterfactual[row, column] = background_raw_id
+
+    updated_artifact = rewrite_array_artifact(broken, artifact, counterfactual)
+    frame_evidence["counterfactual_segmentation"] = updated_artifact.model_dump(mode="json")
+    background_surface_id = instrumentation["raw_to_opaque_surface_ids"][str(background_raw_id)]
+    claimed_reveal = (counterfactual == background_raw_id) & (
+        ordinary_segmentation != labels_by_surface[background_surface_id]
+    )
+    frame_evidence["revealed_pixel_count"] = int(np.count_nonzero(claimed_reveal))
+    frame_evidence["reveal_mask_logical_sha256"] = logical_array_hash(claimed_reveal)
+    commit_episode_payloads(broken, 0, transition, instrumentation)
+
+    expected_error = "excluded occluder" if fabrication == "occluder_present" else "footprint"
+    with pytest.raises(DatasetValidationError, match=expected_error):
+        validate_dataset(broken)
+
+
+@pytest.mark.parametrize("corruption", ["extra_surface", "non_bijective"])
+def test_hash_rebuilt_inexact_apparatus_mapping_is_rejected(
+    smoke_dataset: Path,
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    broken = _copy_dataset(smoke_dataset, tmp_path, f"apparatus-{corruption}")
+    _, instrumentation = load_episode_payloads(broken, 0)
+    if corruption == "extra_surface":
+        instrumentation["raw_geom_ids"]["fabricated_surface"] = 99
+        instrumentation["raw_geom_world_positions"]["fabricated_surface"] = [0.0, 0.0, 0.0]
+        instrumentation["raw_to_opaque_surface_ids"]["99"] = next(
+            iter(instrumentation["raw_to_opaque_surface_ids"].values())
+        )
+    else:
+        mapping_values = list(instrumentation["raw_to_opaque_surface_ids"].values())
+        first_key, second_key = tuple(instrumentation["raw_to_opaque_surface_ids"])[:2]
+        instrumentation["raw_to_opaque_surface_ids"][first_key] = mapping_values[0]
+        instrumentation["raw_to_opaque_surface_ids"][second_key] = mapping_values[0]
+    commit_raw_instrumentation_payload(broken, 0, instrumentation)
+
+    with pytest.raises(DatasetValidationError, match="instrumentation failed schema validation"):
         validate_dataset(broken)
 
 
@@ -151,6 +241,51 @@ def test_tampered_inline_provenance_is_rejected(
 
     with pytest.raises(DatasetValidationError, match="source provenance hash mismatch"):
         validate_dataset(broken)
+
+
+@pytest.mark.parametrize("rehash_renderer", [False, True])
+def test_renderer_execution_provenance_tampering_is_rejected(
+    smoke_dataset: Path,
+    tmp_path: Path,
+    rehash_renderer: bool,
+) -> None:
+    broken = _copy_dataset(smoke_dataset, tmp_path, f"renderer-tamper-{rehash_renderer}")
+    manifest_path = broken / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["renderer_provenance"]["backend"] = "fabricated-backend"
+    if rehash_renderer:
+        renderer = RendererProvenance.model_validate_json(
+            canonical_json_bytes(manifest["renderer_provenance"])
+        )
+        manifest["renderer_execution_provenance_sha256"] = (
+            compute_renderer_execution_provenance_hash(renderer)
+        )
+    write_canonical_json(manifest_path, manifest)
+
+    expected = "content/provenance binding" if rehash_renderer else "renderer/execution"
+    with pytest.raises(DatasetValidationError, match=expected):
+        validate_dataset(broken)
+
+
+def test_renderer_execution_provenance_is_bound_but_not_scientific_content(
+    smoke_dataset: Path,
+) -> None:
+    manifest = load_manifest(smoke_dataset)
+    changed_renderer = manifest.renderer_provenance.model_copy(
+        update={"backend": "different-execution-backend"}
+    )
+    changed_manifest = manifest.model_copy(update={"renderer_provenance": changed_renderer})
+    assert compute_dataset_logical_hash(changed_manifest) == manifest.dataset_logical_sha256
+    changed_execution_hash = compute_renderer_execution_provenance_hash(changed_renderer)
+    assert changed_execution_hash != manifest.renderer_execution_provenance_sha256
+    assert (
+        compute_content_provenance_binding(
+            manifest.dataset_logical_sha256,
+            manifest.source_provenance_sha256,
+            changed_execution_hash,
+        )
+        != manifest.content_provenance_binding_sha256
+    )
 
 
 @pytest.mark.parametrize("invalid_value", [float("nan"), float("inf"), -1.0])

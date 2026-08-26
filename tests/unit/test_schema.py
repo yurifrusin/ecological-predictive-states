@@ -5,8 +5,10 @@ import pytest
 from pydantic import ValidationError
 
 from epsbench.schema import (
+    ArtifactRecord,
     CameraInstrumentation,
     DatasetManifest,
+    Modality,
     OcclusionRelation,
     TransitionRecord,
     VisibilityState,
@@ -72,4 +74,22 @@ def test_nonfinite_or_nonorthonormal_camera_pose_fails(
             frame_index=0,
             camera_world_position=position,
             camera_world_rotation_row_major=rotation,
+        )
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["C:/dataset/rgb.png", "C:dataset/rgb.png", "z:rgb.png", "Z:/rgb.png"],
+)
+def test_windows_drive_artifact_paths_fail_on_every_platform(path: str) -> None:
+    with pytest.raises(ValidationError, match="Windows drive"):
+        ArtifactRecord(
+            path=path,
+            modality=Modality.RGB,
+            media_type="image/png",
+            dtype="uint8",
+            shape=(1, 1, 3),
+            logical_sha256="0" * 64,
+            file_sha256="0" * 64,
+            byte_count=1,
         )

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import math
+import re
 from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 import numpy as np
 from pydantic import (
@@ -20,6 +22,45 @@ from pydantic import (
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 GitCommit = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 SurfaceId = Annotated[str, StringConstraints(pattern=r"^surface-[0-9a-f]{16}$")]
+
+LOCAL_REPOSITORY_REDACTION = "local-repository-redacted"
+UNCLASSIFIED_REPOSITORY_REDACTION = "unclassified-repository-redacted"
+_WINDOWS_DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
+_SCP_STYLE_ORIGIN = re.compile(r"^(?:[^@/:]+@)?(?P<host>[^@/:]+):(?P<path>.+)$")
+
+
+def sanitize_git_repository(value: str) -> str:
+    """Return a credential-free, non-local repository reference for serialization."""
+
+    candidate = value.strip()
+    lowered = candidate.lower()
+    if candidate in {LOCAL_REPOSITORY_REDACTION, UNCLASSIFIED_REPOSITORY_REDACTION}:
+        return candidate
+    if (
+        not candidate
+        or lowered.startswith("file:")
+        or _WINDOWS_DRIVE_PREFIX.match(candidate)
+        or candidate.startswith(("/", "\\", "./", "../", "~"))
+    ):
+        return LOCAL_REPOSITORY_REDACTION
+
+    scp_match = _SCP_STYLE_ORIGIN.fullmatch(candidate)
+    if scp_match is not None and "://" not in candidate:
+        host = scp_match.group("host")
+        path = scp_match.group("path").lstrip("/")
+        return f"ssh://{host}/{path}"
+
+    try:
+        parsed = urlsplit(candidate)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return UNCLASSIFIED_REPOSITORY_REDACTION
+    if parsed.scheme not in {"http", "https", "ssh", "git"} or hostname is None:
+        return UNCLASSIFIED_REPOSITORY_REDACTION
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    netloc = f"{host}:{port}" if port is not None else host
+    return urlunsplit((parsed.scheme.lower(), netloc, parsed.path, "", ""))
 
 
 class StrictModel(BaseModel):
@@ -206,6 +247,8 @@ class ArtifactRecord(StrictModel):
     def path_is_safe_and_relative(cls, value: str) -> str:
         if "\\" in value:
             raise ValueError("artifact paths must use POSIX separators")
+        if _WINDOWS_DRIVE_PREFIX.match(value):
+            raise ValueError("artifact paths must not be Windows drive-qualified or drive-relative")
         path = PurePosixPath(value)
         if path.is_absolute() or ".." in path.parts or value in {"", "."}:
             raise ValueError("artifact path must be a safe dataset-relative path")
@@ -411,7 +454,19 @@ class PrivilegedInstrumentation(StrictModel):
     occlusion_oracle: OcclusionOracleEvidence
 
     @model_validator(mode="after")
-    def raw_coordinates_are_finite(self) -> PrivilegedInstrumentation:
+    def apparatus_mapping_is_exact_and_finite(self) -> PrivilegedInstrumentation:
+        expected_names = {"support_surface", "occluding_surface", "background_surface"}
+        if set(self.raw_geom_ids) != expected_names:
+            raise ValueError("raw geom IDs must describe exactly the single-occluder apparatus")
+        raw_ids = set(self.raw_geom_ids.values())
+        if len(raw_ids) != len(expected_names) or any(raw_id < 0 for raw_id in raw_ids):
+            raise ValueError("apparatus raw geom IDs must be distinct and non-negative")
+        if set(self.raw_geom_world_positions) != expected_names:
+            raise ValueError("raw geom positions must describe exactly the apparatus surfaces")
+        if set(self.raw_to_opaque_surface_ids) != {str(raw_id) for raw_id in raw_ids}:
+            raise ValueError("raw-to-opaque mapping must cover exactly the apparatus raw IDs")
+        if len(set(self.raw_to_opaque_surface_ids.values())) != len(expected_names):
+            raise ValueError("raw-to-opaque apparatus mapping must be bijective")
         if not all(
             math.isfinite(coordinate)
             for position in self.raw_geom_world_positions.values()
@@ -440,6 +495,13 @@ class SourceProvenance(StrictModel):
     codex_handoff_sha256: Sha256
     package_version: str = Field(min_length=1)
     python_version: str = Field(min_length=1)
+
+    @field_validator("git_repository")
+    @classmethod
+    def repository_reference_is_sanitized(cls, value: str | None) -> str | None:
+        if value is not None and value != sanitize_git_repository(value):
+            raise ValueError("Git repository reference must be sanitized before serialization")
+        return value
 
     @model_validator(mode="after")
     def git_state_is_truthful(self) -> SourceProvenance:
@@ -486,6 +548,7 @@ class DatasetManifest(StrictModel):
     appearance_variant: Literal["base", "alternate"]
     resolved_config: ArtifactRecord
     renderer_provenance: RendererProvenance
+    renderer_execution_provenance_sha256: Sha256
     episodes: tuple[EpisodeManifest, ...] = Field(min_length=1)
     dataset_logical_sha256: Sha256
     source_provenance: SourceProvenance

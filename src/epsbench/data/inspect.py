@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from epsbench.data.loader import DatasetLoader
+from epsbench.data.validate import validate_dataset
 from epsbench.schema import ModalityPermissionSet
 
 
@@ -40,6 +41,7 @@ def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> 
     resolved_output = output.resolve()
     if resolved_output.is_relative_to(root):
         raise ValueError("inspection output must be outside the immutable dataset directory")
+    validate_dataset(root)
     loader = DatasetLoader(root, ModalityPermissionSet.all_modalities())
     before_rgb = Image.fromarray(loader.read_rgb(episode_index, 0), mode="RGB")
     after_rgb = Image.fromarray(loader.read_rgb(episode_index, 1), mode="RGB")

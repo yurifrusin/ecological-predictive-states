@@ -145,6 +145,27 @@ def commit_raw_transition_payload(
     _write_manifest(root, manifest, episodes)
 
 
+def commit_raw_instrumentation_payload(
+    root: Path,
+    episode_index: int,
+    instrumentation_payload: dict[str, Any],
+) -> None:
+    """Rebuild hashes while intentionally retaining an invalid instrumentation schema."""
+
+    manifest = load_manifest(root)
+    episode = manifest.episodes[episode_index]
+    instrumentation_record = rewrite_json_artifact(
+        root,
+        episode.privileged_instrumentation,
+        instrumentation_payload,
+    )
+    episodes = list(manifest.episodes)
+    episodes[episode_index] = episode.model_copy(
+        update={"privileged_instrumentation": instrumentation_record}
+    )
+    _write_manifest(root, manifest, episodes)
+
+
 def _write_manifest(
     root: Path,
     manifest: DatasetManifest,
@@ -161,6 +182,7 @@ def _write_manifest(
             "content_provenance_binding_sha256": compute_content_provenance_binding(
                 dataset_hash,
                 provisional.source_provenance_sha256,
+                provisional.renderer_execution_provenance_sha256,
             ),
         }
     )

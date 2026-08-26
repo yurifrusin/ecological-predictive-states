@@ -15,6 +15,7 @@ from epsbench.data.identity import (
     compute_content_provenance_binding,
     compute_dataset_logical_hash,
     compute_ecological_label_hash,
+    compute_renderer_execution_provenance_hash,
     compute_source_provenance_hash,
 )
 from epsbench.schema import (
@@ -215,6 +216,9 @@ def _require_occlusion_oracle(
     labels = {surface.surface_id: surface.segmentation_label for surface in transition.surfaces}
     if occluder_id not in labels or occluded_id not in labels:
         raise DatasetValidationError("occlusion candidates map outside declared surfaces")
+    opaque_to_raw = {opaque_id: int(raw_id) for raw_id, opaque_id in mapping.items()}
+    if set(opaque_to_raw) != set(labels) or len(opaque_to_raw) != len(mapping):
+        raise DatasetValidationError("apparatus raw-to-opaque mapping is not exact and bijective")
 
     evidence_by_frame = sorted(oracle.frames, key=lambda item: item.frame_index)
     supported_frames: list[int] = []
@@ -233,8 +237,21 @@ def _require_occlusion_oracle(
         observed_raw_ids = {int(value) for value in np.unique(counterfactual)}
         if not observed_raw_ids.issubset(raw_ids | {-1}):
             raise DatasetValidationError("counterfactual segmentation contains an unknown raw ID")
-        reveal_mask = (counterfactual == oracle.candidate_occluded_raw_geom_id) & (
-            ordinary_segmentation != labels[occluded_id]
+        ordinary_raw = np.full(ordinary_segmentation.shape, -1, dtype=np.int32)
+        for opaque_id, raw_id in opaque_to_raw.items():
+            ordinary_raw[ordinary_segmentation == labels[opaque_id]] = raw_id
+        if np.any(counterfactual == oracle.candidate_occluder_raw_geom_id):
+            raise DatasetValidationError(
+                "counterfactual segmentation still contains the excluded occluder"
+            )
+        ordinary_occluder_mask = ordinary_raw == oracle.candidate_occluder_raw_geom_id
+        changed_mask = counterfactual != ordinary_raw
+        if not np.array_equal(changed_mask, ordinary_occluder_mask):
+            raise DatasetValidationError(
+                "counterfactual changes are not confined exactly to the occluder footprint"
+            )
+        reveal_mask = ordinary_occluder_mask & (
+            counterfactual == oracle.candidate_occluded_raw_geom_id
         )
         count = int(np.count_nonzero(reveal_mask))
         if count != evidence.revealed_pixel_count:
@@ -271,10 +288,16 @@ def validate_dataset(root: Path) -> DatasetManifest:
     source_provenance_sha256 = compute_source_provenance_hash(manifest.source_provenance)
     if source_provenance_sha256 != manifest.source_provenance_sha256:
         raise DatasetValidationError("source provenance hash mismatch")
+    renderer_execution_provenance_sha256 = compute_renderer_execution_provenance_hash(
+        manifest.renderer_provenance
+    )
+    if renderer_execution_provenance_sha256 != manifest.renderer_execution_provenance_sha256:
+        raise DatasetValidationError("renderer/execution provenance hash mismatch")
     if (
         compute_content_provenance_binding(
             manifest.dataset_logical_sha256,
             manifest.source_provenance_sha256,
+            manifest.renderer_execution_provenance_sha256,
         )
         != manifest.content_provenance_binding_sha256
     ):

@@ -31,3 +31,19 @@ def test_cli_exits_nonzero_for_invalid_dataset(tmp_path: Path) -> None:
     invalid.mkdir()
     result = runner.invoke(app, ["validate", str(invalid)])
     assert result.exit_code != 0
+
+
+def test_cli_inspection_validates_first_and_writes_nothing_for_invalid_dataset(
+    tmp_path: Path,
+) -> None:
+    runner = CliRunner()
+    invalid = tmp_path / "invalid-inspection"
+    invalid.mkdir()
+    output = tmp_path / "must-not-exist.png"
+    result = runner.invoke(
+        app,
+        ["inspect", str(invalid), "--episode", "0", "--output", str(output)],
+    )
+    assert result.exit_code != 0
+    assert "Inspection failed" in result.output
+    assert not output.exists()

@@ -22,6 +22,7 @@ from epsbench.data.identity import (
     compute_content_provenance_binding,
     compute_dataset_logical_hash,
     compute_ecological_label_hash,
+    compute_renderer_execution_provenance_hash,
     compute_source_provenance_hash,
 )
 from epsbench.data.provenance import collect_source_provenance
@@ -251,8 +252,8 @@ def _generate_episode(
             Modality.PRIVILEGED_GENERATION_RECORDS,
             "application/x-npy",
         )
-        reveal_mask = (frame.counterfactual_raw_geom_segmentation == occluded_raw_id) & (
-            frame.raw_geom_segmentation != occluded_raw_id
+        reveal_mask = (frame.raw_geom_segmentation == occluder_raw_id) & (
+            frame.counterfactual_raw_geom_segmentation == occluded_raw_id
         )
         revealed_pixel_count = int(np.count_nonzero(reveal_mask))
         if revealed_pixel_count > 0:
@@ -381,6 +382,10 @@ def generate_dataset(config: BenchmarkConfig, episodes: int, output: Path) -> Da
     episode_manifests = tuple(
         _generate_episode(output, config, episode_index) for episode_index in range(episodes)
     )
+    renderer_provenance = _renderer_provenance()
+    renderer_execution_provenance_sha256 = compute_renderer_execution_provenance_hash(
+        renderer_provenance
+    )
     manifest = DatasetManifest(
         schema_version="0.1.0-dev.1",
         generator_version="0.1.0",
@@ -388,7 +393,8 @@ def generate_dataset(config: BenchmarkConfig, episodes: int, output: Path) -> Da
         config_logical_sha256=sha256_bytes(canonical_json_bytes(config)),
         appearance_variant=config.appearance.variant,
         resolved_config=resolved_config_artifact,
-        renderer_provenance=_renderer_provenance(),
+        renderer_provenance=renderer_provenance,
+        renderer_execution_provenance_sha256=renderer_execution_provenance_sha256,
         episodes=episode_manifests,
         dataset_logical_sha256="0" * 64,
         source_provenance=source_provenance,
@@ -403,6 +409,7 @@ def generate_dataset(config: BenchmarkConfig, episodes: int, output: Path) -> Da
             "content_provenance_binding_sha256": compute_content_provenance_binding(
                 dataset_logical_sha256,
                 source_provenance_sha256,
+                renderer_execution_provenance_sha256,
             ),
         }
     )

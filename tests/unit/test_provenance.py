@@ -84,3 +84,34 @@ def test_unavailable_git_is_not_reported_as_clean(provenance_repository: Path) -
     assert provenance.git_dirty is None
     assert provenance.git_commit is None
     assert provenance.git_unavailable_reason == "Git unavailable for source"
+
+
+@pytest.mark.parametrize(
+    ("origin", "expected"),
+    [
+        (
+            "https://user:secret@example.invalid/org/repo.git?access_token=secret#private",
+            "https://example.invalid/org/repo.git",
+        ),
+        (
+            "ssh://git:secret@example.invalid:2222/org/repo.git",
+            "ssh://example.invalid:2222/org/repo.git",
+        ),
+        ("git@example.invalid:org/repo.git", "ssh://example.invalid/org/repo.git"),
+        ("file:///C:/Users/private/repo", "local-repository-redacted"),
+        ("C:/Users/private/repo", "local-repository-redacted"),
+        ("../private/repo", "local-repository-redacted"),
+    ],
+)
+def test_git_origin_is_sanitized_before_serialization(
+    provenance_repository: Path,
+    origin: str,
+    expected: str,
+) -> None:
+    _git(provenance_repository, "remote", "set-url", "origin", origin)
+    provenance = collect_source_provenance(provenance_repository)
+    assert provenance.git_repository == expected
+    serialized = provenance.model_dump_json()
+    assert "secret" not in serialized
+    assert "Users/private" not in serialized
+    assert "../private" not in serialized
