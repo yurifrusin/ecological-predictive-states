@@ -26,7 +26,10 @@ def _camera(x: float = 0.0, z: float = 0.0) -> AnalyticCamera:
     )
 
 
-def _plane_model(with_foreground: bool = False) -> tuple[mujoco.MjModel, mujoco.MjData]:
+def _plane_model(
+    with_foreground: bool = False,
+    plane_half_extent: float = 20.0,
+) -> tuple[mujoco.MjModel, mujoco.MjData]:
     foreground = (
         '<geom name="foreground" type="box" pos="0 0 -2" size="0.35 0.8 0.8"/>'
         if with_foreground
@@ -34,7 +37,8 @@ def _plane_model(with_foreground: bool = False) -> tuple[mujoco.MjModel, mujoco.
     )
     model = mujoco.MjModel.from_xml_string(
         "<mujoco><worldbody>"
-        '<geom name="background" type="plane" pos="0 0 -5" size="20 20 0.1"/>'
+        f'<geom name="background" type="plane" pos="0 0 -5" '
+        f'size="{plane_half_extent} {plane_half_extent} 0.1"/>'
         f"{foreground}</worldbody></mujoco>"
     )
     return model, mujoco.MjData(model)
@@ -102,6 +106,73 @@ def test_static_camera_produces_valid_zero_transport() -> None:
     assert np.all(transport.forward.vectors_fixed == 0)
 
 
+def test_finite_visual_plane_rejects_source_hits_outside_xy_extent() -> None:
+    model, data = _plane_model(plane_half_extent=0.5)
+    transport = compute_analytic_transport(
+        model,
+        data,
+        (0,),
+        WIDTH,
+        HEIGHT,
+        _camera(),
+        _camera(),
+    )
+    outside = transport.before_surface_assignment == -1
+    assert np.any(outside)
+    assert np.any(~outside)
+    assert np.all(
+        transport.forward.reasons[outside] == TransportReasonCode.NO_CONTROLLED_SOURCE_SURFACE
+    )
+    assert np.all(transport.forward.validity[outside] == 0)
+    assert np.all(transport.forward.vectors_fixed[outside] == 0)
+
+
+def test_finite_visual_plane_edge_participates_in_analytic_boundary_band() -> None:
+    model, data = _plane_model(plane_half_extent=0.5)
+    transport = compute_analytic_transport(
+        model,
+        data,
+        (0,),
+        WIDTH,
+        HEIGHT,
+        _camera(),
+        _camera(),
+    )
+    controlled = transport.before_surface_assignment == 0
+    boundary = transport.before_boundary_ambiguous
+    assert np.any(boundary & controlled)
+    assert np.any(boundary & ~controlled)
+    assert np.all(
+        transport.forward.reasons[boundary & controlled]
+        == TransportReasonCode.ANALYTIC_BOUNDARY_AMBIGUOUS
+    )
+
+
+def test_finite_plane_extent_changes_label_defining_transport_arrays() -> None:
+    small_model, small_data = _plane_model(plane_half_extent=0.5)
+    large_model, large_data = _plane_model(plane_half_extent=1.0)
+    small = compute_analytic_transport(
+        small_model,
+        small_data,
+        (0,),
+        WIDTH,
+        HEIGHT,
+        _camera(),
+        _camera(),
+    )
+    large = compute_analytic_transport(
+        large_model,
+        large_data,
+        (0,),
+        WIDTH,
+        HEIGHT,
+        _camera(),
+        _camera(),
+    )
+    assert not np.array_equal(small.forward.validity, large.forward.validity)
+    assert not np.array_equal(small.forward.reasons, large.forward.reasons)
+
+
 def test_frame_exit_has_explicit_reason_and_canonical_zero_vector() -> None:
     model, data = _plane_model()
     transport = compute_analytic_transport(
@@ -153,8 +224,10 @@ def test_analytic_assignment_discontinuity_is_boundary_ambiguous() -> None:
     assert np.all(transport.forward.validity[ambiguous] == 0)
 
 
-def test_forward_backward_plane_transport_is_consistent_within_quantisation_tolerance() -> None:
+def test_integer_pixel_transport_uses_backward_flow_at_the_correspondence() -> None:
     model, data = _plane_model()
+    focal_x, _ = focal_scales_from_vertical_fov(WIDTH, HEIGHT, FOV_DEGREES)
+    one_pixel_translation = 5.0 / focal_x
     transport = compute_analytic_transport(
         model,
         data,
@@ -162,10 +235,36 @@ def test_forward_backward_plane_transport_is_consistent_within_quantisation_tole
         WIDTH,
         HEIGHT,
         _camera(),
-        _camera(x=0.1),
+        _camera(x=one_pixel_translation),
     )
-    forward = transport.forward.vectors_fixed.astype(np.float64) / FLOW_FIXED_POINT_SCALE
-    backward = transport.backward.vectors_fixed.astype(np.float64) / FLOW_FIXED_POINT_SCALE
-    mutually_valid = (transport.forward.validity == 1) & (transport.backward.validity == 1)
-    error = np.abs(forward[mutually_valid] + backward[mutually_valid])
-    assert np.all(error <= 1.0 / FLOW_FIXED_POINT_SCALE)
+    source_rows, source_columns = np.nonzero(transport.forward.validity == 1)
+    forward_fixed = transport.forward.vectors_fixed[source_rows, source_columns]
+    assert np.all(forward_fixed[:, 0] == -FLOW_FIXED_POINT_SCALE)
+    assert np.all(forward_fixed[:, 1] == 0)
+    destination_rows = source_rows + forward_fixed[:, 1] // FLOW_FIXED_POINT_SCALE
+    destination_columns = source_columns + forward_fixed[:, 0] // FLOW_FIXED_POINT_SCALE
+    assert np.all(transport.backward.validity[destination_rows, destination_columns] == 1)
+    backward_at_correspondence = transport.backward.vectors_fixed[
+        destination_rows,
+        destination_columns,
+    ]
+    round_trip_fixed = forward_fixed + backward_at_correspondence
+    assert np.all(round_trip_fixed == 0)
+    assert np.all(np.abs(round_trip_fixed / FLOW_FIXED_POINT_SCALE) <= 1.0 / FLOW_FIXED_POINT_SCALE)
+
+
+def test_continuous_radial_inverse_is_evaluated_at_expanded_correspondence() -> None:
+    depth = 5.0
+    forward_translation = 1.0
+    source_offsets = np.asarray((-18.5, -7.25, 3.5, 16.75), dtype=np.float64)
+    destination_offsets = source_offsets * depth / (depth - forward_translation)
+    forward_flow = destination_offsets - source_offsets
+    backward_at_destination = (
+        destination_offsets * (depth - forward_translation) / depth - destination_offsets
+    )
+    assert np.allclose(
+        forward_flow + backward_at_destination,
+        0.0,
+        atol=np.finfo(np.float64).eps * 8,
+        rtol=0.0,
+    )

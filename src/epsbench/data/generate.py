@@ -19,9 +19,15 @@ from epsbench import __version__
 from epsbench.annotations import (
     ANALYTIC_BOUNDARY_RULE,
     ANALYTIC_BOUNDARY_WIDTH_PIXELS,
+    ANALYTIC_SURFACE_INTERSECTION_RULE,
     ANALYTIC_TRANSPORT_METHOD,
+    FINITE_PLANE_EXTENT_RULE,
     FLOW_FIXED_POINT_SCALE,
     FLOW_QUANTISATION_ROUNDING,
+    RAY_DIRECTION_EPSILON,
+    TARGET_VISIBILITY_RULE,
+    VISIBILITY_MINIMUM_TOLERANCE_SCALE,
+    VISIBILITY_RELATIVE_TOLERANCE,
     AnalyticTransportArrays,
     DirectionalTransportArrays,
     derive_boundary_structure,
@@ -42,6 +48,7 @@ from epsbench.data.provenance import collect_source_provenance
 from epsbench.schema import (
     Action,
     AnalyticBoundaryAmbiguityRule,
+    AnalyticIntersectionVisibilityContract,
     AnalyticRendererFrameDiagnostic,
     AnalyticTransportDiagnostics,
     ArtifactRecord,
@@ -293,6 +300,14 @@ def _write_analytic_transport(
             fixed_point_scale=FLOW_FIXED_POINT_SCALE,
             rounding=FLOW_QUANTISATION_ROUNDING,
         ),
+        intersection_visibility=AnalyticIntersectionVisibilityContract(
+            surface_intersection_rule=ANALYTIC_SURFACE_INTERSECTION_RULE,
+            finite_plane_extent_rule=FINITE_PLANE_EXTENT_RULE,
+            target_visibility_rule=TARGET_VISIBILITY_RULE,
+            visibility_relative_tolerance=VISIBILITY_RELATIVE_TOLERANCE,
+            visibility_minimum_tolerance_scale=VISIBILITY_MINIMUM_TOLERANCE_SCALE,
+            ray_direction_epsilon=RAY_DIRECTION_EPSILON,
+        ),
         boundary_ambiguity=AnalyticBoundaryAmbiguityRule(
             rule=ANALYTIC_BOUNDARY_RULE,
             width_pixels=ANALYTIC_BOUNDARY_WIDTH_PIXELS,
@@ -369,13 +384,14 @@ def _analytic_transport_diagnostics(
                 compared_interior_pixels=compared,
                 agreeing_interior_pixels=agreeing,
                 interior_agreement_rate=agreeing / compared,
+                unexplained_interior_disagreement_pixels=compared - agreeing,
                 excluded_analytic_boundary_pixels=int(np.count_nonzero(boundary)),
             )
         )
     return AnalyticTransportDiagnostics(
         method=ANALYTIC_TRANSPORT_METHOD,
-        renderer_cross_check="non_authoritative_interior_segmentation_agreement_v1",
-        minimum_interior_agreement_rate=0.9,
+        renderer_cross_check="non_authoritative_exact_interior_agreement_v2",
+        interior_agreement_requirement="zero_unexplained_disagreement_v1",
         frames=tuple(frame_diagnostics),  # type: ignore[arg-type]
         forward=_directional_diagnostic(arrays.forward),
         backward=_directional_diagnostic(arrays.backward),
@@ -481,7 +497,7 @@ def _generate_single_occluder_episode(
     if not relation_frame_indices:
         raise RuntimeError("counterfactual oracle found no foreground/background occlusion")
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.3",
+        schema_version="0.1.0-dev.4",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -523,7 +539,7 @@ def _generate_single_occluder_episode(
     write_canonical_json(transition_path, transition)
 
     instrumentation = SingleOccluderInstrumentation(
-        schema_version="0.1.0-dev.3",
+        schema_version="0.1.0-dev.4",
         scene_family=SceneFamily.SINGLE_OCCLUDER,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,
@@ -639,7 +655,7 @@ def _generate_corridor_episode(
         rendered.analytic_transport,
     )
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.3",
+        schema_version="0.1.0-dev.4",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -701,7 +717,7 @@ def _generate_corridor_episode(
             )
         )
     instrumentation = CorridorInstrumentation(
-        schema_version="0.1.0-dev.3",
+        schema_version="0.1.0-dev.4",
         scene_family=SceneFamily.CORRIDOR,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,

@@ -11,12 +11,16 @@ import mujoco
 import numpy as np
 import numpy.typing as npt
 
-ANALYTIC_TRANSPORT_METHOD: Final = "analytic_static_scene_transport_v1"
+ANALYTIC_TRANSPORT_METHOD: Final = "analytic_static_scene_transport_v2"
 ANALYTIC_BOUNDARY_RULE: Final = "four_neighbour_assignment_band_v1"
 ANALYTIC_BOUNDARY_WIDTH_PIXELS: Final = 1
+ANALYTIC_SURFACE_INTERSECTION_RULE: Final = "compiled_plane_and_oriented_box_nearest_hit_v2"
+FINITE_PLANE_EXTENT_RULE: Final = "finite_plane_visual_extent_v1"
+TARGET_VISIBILITY_RULE: Final = "same_surface_point_nearest_hit_v1"
 FLOW_FIXED_POINT_SCALE: Final = 1024
 FLOW_QUANTISATION_ROUNDING: Final = "nearest_ties_to_even"
-VISIBILITY_ABSOLUTE_TOLERANCE: Final = 1e-7
+VISIBILITY_RELATIVE_TOLERANCE: Final = 1e-7
+VISIBILITY_MINIMUM_TOLERANCE_SCALE: Final = 1.0
 RAY_DIRECTION_EPSILON: Final = 1e-12
 
 FloatArray = npt.NDArray[np.float64]
@@ -151,7 +155,15 @@ def _nearest_controlled_intersections(
             denominator = local_directions[..., 2]
             non_parallel = np.abs(denominator) > RAY_DIRECTION_EPSILON
             candidate = np.where(non_parallel, -local_origin[2] / denominator, np.inf)
-            candidate = np.where(candidate > RAY_DIRECTION_EPSILON, candidate, np.inf)
+            positive = np.isfinite(candidate) & (candidate > RAY_DIRECTION_EPSILON)
+            finite_candidate = np.where(positive, candidate, 0.0)
+            local_hit_x = local_origin[0] + finite_candidate * local_directions[..., 0]
+            local_hit_y = local_origin[1] + finite_candidate * local_directions[..., 1]
+            visual_half_extent = np.asarray(model.geom_size[geom_id, :2], dtype=np.float64)
+            inside_visual_extent = (np.abs(local_hit_x) <= visual_half_extent[0]) & (
+                np.abs(local_hit_y) <= visual_half_extent[1]
+            )
+            candidate = np.where(positive & inside_visual_extent, candidate, np.inf)
         elif geom_type == int(mujoco.mjtGeom.mjGEOM_BOX):
             half_size = np.asarray(model.geom_size[geom_id], dtype=np.float64)
             parallel = np.abs(local_directions) <= RAY_DIRECTION_EPSILON
@@ -237,7 +249,10 @@ def _directional_transport(
         target_origin,
         target_directions,
     )
-    visibility_tolerance = VISIBILITY_ABSOLUTE_TOLERANCE * np.maximum(1.0, point_distances)
+    visibility_tolerance = VISIBILITY_RELATIVE_TOLERANCE * np.maximum(
+        VISIBILITY_MINIMUM_TOLERANCE_SCALE,
+        point_distances,
+    )
     same_surface_point_visible = (
         (target_hit_assignment == source_assignment)
         & np.isfinite(target_hit_distance)

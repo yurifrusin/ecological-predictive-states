@@ -305,13 +305,14 @@ def _expected_analytic_transport_diagnostics(
                 compared_interior_pixels=compared,
                 agreeing_interior_pixels=agreeing,
                 interior_agreement_rate=agreeing / compared,
+                unexplained_interior_disagreement_pixels=compared - agreeing,
                 excluded_analytic_boundary_pixels=int(np.count_nonzero(boundary)),
             )
         )
     return AnalyticTransportDiagnostics(
         method=ANALYTIC_TRANSPORT_METHOD,
-        renderer_cross_check="non_authoritative_interior_segmentation_agreement_v1",
-        minimum_interior_agreement_rate=0.9,
+        renderer_cross_check="non_authoritative_exact_interior_agreement_v2",
+        interior_agreement_requirement="zero_unexplained_disagreement_v1",
         frames=tuple(frame_diagnostics),  # type: ignore[arg-type]
         forward=_directional_transport_diagnostic(arrays.forward),
         backward=_directional_transport_diagnostic(arrays.backward),

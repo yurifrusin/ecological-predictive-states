@@ -25,16 +25,16 @@ HISTORICAL_DEV_2_CORRIDOR_ECOLOGICAL_HASHES_BY_BACKEND = {
         "65ed70d5ad141313070978217d84a73e8504c17be95be193568d569940e71189",
     ),
 }
-EXPECTED_DEV_3_SINGLE_OCCLUDER_EPISODE_0_ECOLOGICAL_HASH_BY_BACKEND = {
+REJECTED_PR5_SINGLE_OCCLUDER_EPISODE_0_ECOLOGICAL_HASH_BY_BACKEND = {
     "wgl-default": "028ff38f7465ef4147635230db4427f7522e8771b32d5d77bba54859949ce70c",
 }
-EXPECTED_DEV_3_CORRIDOR_ECOLOGICAL_HASHES_BY_BACKEND = {
+REJECTED_PR5_CORRIDOR_ECOLOGICAL_HASHES_BY_BACKEND = {
     "wgl-default": (
         "56f7a53536ed91a6ce97b1e20bdd9f2d1b4a796655faaec961335ad0879243d0",
         "cd057369c7d2750021ca9e9eba27671f4cc10ca80d54d8a347a8ae34da417d38",
     ),
 }
-EXPECTED_DEV_3_CROSS_PLATFORM_ANALYTIC_HASHES = {
+REJECTED_PR5_CROSS_PLATFORM_ANALYTIC_HASHES = {
     "single_occluder": (
         "e6d5fc664957c4e68b3c249ce5bd32113755b1c86d5fff8dbeaafc75b550c7cd",
         "e6d5fc664957c4e68b3c249ce5bd32113755b1c86d5fff8dbeaafc75b550c7cd",
@@ -46,31 +46,33 @@ EXPECTED_DEV_3_CROSS_PLATFORM_ANALYTIC_HASHES = {
 }
 
 
-def test_ecological_label_hash_matches_locked_cross_platform_regression(
+def test_corrected_ecological_label_does_not_reuse_rejected_pr5_identity(
     smoke_dataset: Path,
 ) -> None:
     manifest = DatasetManifest.model_validate_json(
         (smoke_dataset / "manifest.json").read_text(encoding="utf-8")
     )
-    expected = EXPECTED_DEV_3_SINGLE_OCCLUDER_EPISODE_0_ECOLOGICAL_HASH_BY_BACKEND.get(
+    rejected = REJECTED_PR5_SINGLE_OCCLUDER_EPISODE_0_ECOLOGICAL_HASH_BY_BACKEND.get(
         manifest.renderer_provenance.backend
     )
-    if expected is not None:
-        assert manifest.episodes[0].ecological_label_sha256 == expected
+    if rejected is not None:
+        assert manifest.episodes[0].ecological_label_sha256 != rejected
 
 
-def test_corridor_ecological_hashes_match_locked_regressions(corridor_dataset: Path) -> None:
+def test_corrected_corridor_labels_do_not_reuse_rejected_pr5_identities(
+    corridor_dataset: Path,
+) -> None:
     manifest = DatasetManifest.model_validate_json(
         (corridor_dataset / "manifest.json").read_text(encoding="utf-8")
     )
-    expected = EXPECTED_DEV_3_CORRIDOR_ECOLOGICAL_HASHES_BY_BACKEND.get(
+    rejected = REJECTED_PR5_CORRIDOR_ECOLOGICAL_HASHES_BY_BACKEND.get(
         manifest.renderer_provenance.backend
     )
-    if expected is not None:
-        assert tuple(episode.ecological_label_sha256 for episode in manifest.episodes) == expected
+    if rejected is not None:
+        assert tuple(episode.ecological_label_sha256 for episode in manifest.episodes) != rejected
 
 
-def test_single_occluder_analytic_hash_matches_locked_cross_platform_regression(
+def test_single_occluder_corrected_analytic_hash_rejects_reviewed_revision(
     smoke_dataset: Path,
 ) -> None:
     manifest = DatasetManifest.model_validate_json(
@@ -78,11 +80,11 @@ def test_single_occluder_analytic_hash_matches_locked_cross_platform_regression(
     )
     assert (
         tuple(episode.analytic_transport_sha256 for episode in manifest.episodes)
-        == EXPECTED_DEV_3_CROSS_PLATFORM_ANALYTIC_HASHES["single_occluder"]
+        != REJECTED_PR5_CROSS_PLATFORM_ANALYTIC_HASHES["single_occluder"]
     )
 
 
-def test_corridor_analytic_hashes_match_locked_cross_platform_regression(
+def test_corridor_corrected_analytic_hashes_reject_reviewed_revision(
     corridor_dataset: Path,
 ) -> None:
     manifest = DatasetManifest.model_validate_json(
@@ -90,7 +92,7 @@ def test_corridor_analytic_hashes_match_locked_cross_platform_regression(
     )
     assert (
         tuple(episode.analytic_transport_sha256 for episode in manifest.episodes)
-        == EXPECTED_DEV_3_CROSS_PLATFORM_ANALYTIC_HASHES["corridor"]
+        != REJECTED_PR5_CROSS_PLATFORM_ANALYTIC_HASHES["corridor"]
     )
 
 
@@ -102,6 +104,11 @@ def test_historical_slice_1_identity_is_recorded_as_migration_evidence() -> None
     assert all(
         value in notes
         for values in HISTORICAL_DEV_2_CORRIDOR_ECOLOGICAL_HASHES_BY_BACKEND.values()
+        for value in values
+    )
+    assert all(
+        value in notes
+        for values in REJECTED_PR5_CROSS_PLATFORM_ANALYTIC_HASHES.values()
         for value in values
     )
 

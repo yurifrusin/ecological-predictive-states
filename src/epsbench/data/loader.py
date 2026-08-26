@@ -13,6 +13,7 @@ from epsbench.data.paths import resolve_dataset_manifest
 from epsbench.schema import (
     Action,
     AnalyticBoundaryAmbiguityRule,
+    AnalyticIntersectionVisibilityContract,
     AvailableDenseOpticalTransport,
     CameraInstrumentation,
     CorridorInstrumentation,
@@ -48,6 +49,7 @@ class LoadedAnalyticOpticalTransport:
     fixed_point_scale: int
     method: str
     coordinate_convention: OpticalTransportCoordinateConvention
+    intersection_visibility: AnalyticIntersectionVisibilityContract
     boundary_ambiguity: AnalyticBoundaryAmbiguityRule
     analytic_transport_sha256: str
 
@@ -182,6 +184,7 @@ class DatasetLoader:
             fixed_point_scale=transport.quantisation.fixed_point_scale,
             method=transport.method,
             coordinate_convention=transport.coordinate_convention,
+            intersection_visibility=transport.intersection_visibility,
             boundary_ambiguity=transport.boundary_ambiguity,
             analytic_transport_sha256=transport.analytic_transport_sha256,
         )

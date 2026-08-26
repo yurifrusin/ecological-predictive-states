@@ -367,6 +367,15 @@ class OpticalTransportQuantisation(StrictModel):
     rounding: Literal["nearest_ties_to_even"]
 
 
+class AnalyticIntersectionVisibilityContract(StrictModel):
+    surface_intersection_rule: Literal["compiled_plane_and_oriented_box_nearest_hit_v2"]
+    finite_plane_extent_rule: Literal["finite_plane_visual_extent_v1"]
+    target_visibility_rule: Literal["same_surface_point_nearest_hit_v1"]
+    visibility_relative_tolerance: float = Field(ge=1e-7, le=1e-7)
+    visibility_minimum_tolerance_scale: float = Field(ge=1.0, le=1.0)
+    ray_direction_epsilon: float = Field(ge=1e-12, le=1e-12)
+
+
 class AnalyticBoundaryAmbiguityRule(StrictModel):
     rule: Literal["four_neighbour_assignment_band_v1"]
     width_pixels: Literal[1]
@@ -403,9 +412,10 @@ class DirectionalOpticalTransport(StrictModel):
 
 class AvailableDenseOpticalTransport(StrictModel):
     status: Literal["available"]
-    method: Literal["analytic_static_scene_transport_v1"]
+    method: Literal["analytic_static_scene_transport_v2"]
     coordinate_convention: OpticalTransportCoordinateConvention
     quantisation: OpticalTransportQuantisation
+    intersection_visibility: AnalyticIntersectionVisibilityContract
     boundary_ambiguity: AnalyticBoundaryAmbiguityRule
     reason_code_domain: Literal["analytic_transport_reason_codes_v1"]
     forward: DirectionalOpticalTransport
@@ -436,7 +446,7 @@ DenseOpticalTransport = Annotated[
 
 
 class TransitionRecord(StrictModel):
-    schema_version: Literal["0.1.0-dev.3"]
+    schema_version: Literal["0.1.0-dev.4"]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     action: Action
     surfaces: tuple[SurfaceReference, ...] = Field(min_length=1)
@@ -649,6 +659,7 @@ class AnalyticRendererFrameDiagnostic(StrictModel):
     compared_interior_pixels: int = Field(gt=0)
     agreeing_interior_pixels: int = Field(ge=0)
     interior_agreement_rate: float = Field(ge=0.0, le=1.0)
+    unexplained_interior_disagreement_pixels: int = Field(ge=0)
     excluded_analytic_boundary_pixels: int = Field(ge=0)
 
     @model_validator(mode="after")
@@ -658,6 +669,10 @@ class AnalyticRendererFrameDiagnostic(StrictModel):
         expected = self.agreeing_interior_pixels / self.compared_interior_pixels
         if not math.isclose(self.interior_agreement_rate, expected, abs_tol=1e-15, rel_tol=0.0):
             raise ValueError("renderer agreement rate must equal the declared counts")
+        if self.unexplained_interior_disagreement_pixels != (
+            self.compared_interior_pixels - self.agreeing_interior_pixels
+        ):
+            raise ValueError("renderer disagreement count must equal compared minus agreeing")
         return self
 
 
@@ -682,27 +697,24 @@ class DirectionalTransportDiagnostic(StrictModel):
 
 
 class AnalyticTransportDiagnostics(StrictModel):
-    method: Literal["analytic_static_scene_transport_v1"]
-    renderer_cross_check: Literal["non_authoritative_interior_segmentation_agreement_v1"]
-    minimum_interior_agreement_rate: float = Field(ge=0.9, le=0.9)
+    method: Literal["analytic_static_scene_transport_v2"]
+    renderer_cross_check: Literal["non_authoritative_exact_interior_agreement_v2"]
+    interior_agreement_requirement: Literal["zero_unexplained_disagreement_v1"]
     frames: tuple[AnalyticRendererFrameDiagnostic, AnalyticRendererFrameDiagnostic]
     forward: DirectionalTransportDiagnostic
     backward: DirectionalTransportDiagnostic
 
     @model_validator(mode="after")
-    def frames_are_complete_and_above_threshold(self) -> AnalyticTransportDiagnostics:
+    def frames_are_complete_and_exact(self) -> AnalyticTransportDiagnostics:
         if {frame.frame_index for frame in self.frames} != {0, 1}:
             raise ValueError("analytic renderer diagnostics must cover both frames")
-        if any(
-            frame.interior_agreement_rate < self.minimum_interior_agreement_rate
-            for frame in self.frames
-        ):
-            raise ValueError("broad analytic/renderer interior disagreement exceeds threshold")
+        if any(frame.unexplained_interior_disagreement_pixels != 0 for frame in self.frames):
+            raise ValueError("analytic/renderer interior agreement must be exact")
         return self
 
 
 class SingleOccluderInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.3"]
+    schema_version: Literal["0.1.0-dev.4"]
     scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]
@@ -745,7 +757,7 @@ class SingleOccluderInstrumentation(StrictModel):
 
 
 class CorridorInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.3"]
+    schema_version: Literal["0.1.0-dev.4"]
     scene_family: Literal[SceneFamily.CORRIDOR]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]

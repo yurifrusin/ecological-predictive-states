@@ -77,6 +77,7 @@ def analytic_transport_domain(transport: AvailableDenseOpticalTransport) -> dict
         "method": transport.method,
         "coordinate_convention": transport.coordinate_convention.model_dump(mode="json"),
         "quantisation": transport.quantisation.model_dump(mode="json"),
+        "intersection_visibility": transport.intersection_visibility.model_dump(mode="json"),
         "boundary_ambiguity": transport.boundary_ambiguity.model_dump(mode="json"),
         "reason_code_domain": transport.reason_code_domain,
         "forward": direction_domain(transport.forward),

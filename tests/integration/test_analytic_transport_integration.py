@@ -24,7 +24,9 @@ from epsbench.schema import (
     TransitionRecord,
     UnavailableOcclusionAnnotation,
 )
+from epsbench.sim import compute_single_occluder_analytic_transport
 from tests.dataset_mutations import (
+    commit_declared_transport_identity_corruption,
     commit_episode_payloads,
     commit_raw_transition_payload,
     load_episode_payloads,
@@ -208,10 +210,62 @@ def test_loader_returns_complete_typed_transport_bundle(
     assert bundle.forward_validity.dtype == bundle.forward_reasons.dtype == np.uint8
     assert bundle.backward_validity.dtype == bundle.backward_reasons.dtype == np.uint8
     assert bundle.fixed_point_scale == 1024
+    assert bundle.method == "analytic_static_scene_transport_v2"
+    assert bundle.intersection_visibility.finite_plane_extent_rule == (
+        "finite_plane_visual_extent_v1"
+    )
+    assert bundle.intersection_visibility.visibility_relative_tolerance == 1e-7
     assert np.array_equal(bundle.forward_validity == 1, bundle.forward_reasons == 0)
     assert np.array_equal(bundle.backward_validity == 1, bundle.backward_reasons == 0)
     assert np.all(bundle.forward_vectors_fixed[bundle.forward_validity == 0] == 0)
     assert np.all(bundle.backward_vectors_fixed[bundle.backward_validity == 0] == 0)
+
+
+def test_renderer_cross_check_has_zero_unexplained_interior_disagreement(
+    smoke_dataset: Path,
+    corridor_dataset: Path,
+) -> None:
+    for root in (smoke_dataset, corridor_dataset):
+        for episode_index in (0, 1):
+            _, instrumentation = load_episode_payloads(root, episode_index)
+            diagnostics = instrumentation["analytic_transport_diagnostics"]
+            assert diagnostics["interior_agreement_requirement"] == (
+                "zero_unexplained_disagreement_v1"
+            )
+            for frame in diagnostics["frames"]:
+                assert frame["unexplained_interior_disagreement_pixels"] == 0
+                assert frame["agreeing_interior_pixels"] == frame["compared_interior_pixels"]
+                assert frame["interior_agreement_rate"] == 1.0
+
+
+def test_single_occluder_has_no_valid_source_transport_on_renderer_background(
+    benchmark_config: SingleOccluderConfig,
+    smoke_dataset: Path,
+) -> None:
+    loader = DatasetLoader(smoke_dataset, ModalityPermissionSet.all_modalities())
+    transport = loader.read_analytic_optical_transport(0)
+    recomputed = compute_single_occluder_analytic_transport(benchmark_config)
+    for frame_index, validity, assignment, boundary in (
+        (
+            0,
+            transport.forward_validity,
+            recomputed.before_surface_assignment,
+            recomputed.before_boundary_ambiguous,
+        ),
+        (
+            1,
+            transport.backward_validity,
+            recomputed.after_surface_assignment,
+            recomputed.after_boundary_ambiguous,
+        ),
+    ):
+        analytic_interior = ~boundary
+        renderer_background = loader.read_segmentation(0, frame_index) == 0
+        assert not np.any((validity == 1) & renderer_background & analytic_interior)
+        assert np.array_equal(
+            assignment[analytic_interior] >= 0,
+            ~renderer_background[analytic_interior],
+        )
 
 
 @pytest.mark.parametrize("fixture_name", ["smoke_dataset", "corridor_dataset"])
@@ -271,6 +325,9 @@ def test_ecological_transport_view_has_no_metric_semantic_or_boundary_ownership_
         "reason",
         "unknown_reason",
         "scale",
+        "method",
+        "extent_rule",
+        "identity",
         "swapped_directions",
         "foreign_episode_artifact",
     ],
@@ -325,6 +382,20 @@ def test_hash_rebuilt_transport_corruption_is_rejected(
         transport["quantisation"]["fixed_point_scale"] = 2048
         commit_raw_transition_payload(broken, 0, transition)
         with pytest.raises(DatasetValidationError, match="transition failed schema validation"):
+            validate_dataset(broken)
+        return
+    elif corruption in {"method", "extent_rule"}:
+        if corruption == "method":
+            transport["method"] = "analytic_static_scene_transport_v1"
+        else:
+            transport["intersection_visibility"]["finite_plane_extent_rule"] = "infinite_plane_v0"
+        commit_raw_transition_payload(broken, 0, transition)
+        with pytest.raises(DatasetValidationError, match="transition failed schema validation"):
+            validate_dataset(broken)
+        return
+    elif corruption == "identity":
+        commit_declared_transport_identity_corruption(broken, 0, "f" * 64)
+        with pytest.raises(DatasetValidationError, match="analytic transport identity mismatch"):
             validate_dataset(broken)
         return
     elif corruption == "swapped_directions":
