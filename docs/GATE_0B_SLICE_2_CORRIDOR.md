@@ -8,8 +8,10 @@ metric state. It adds a minimal corridor before dense flow so that later flow an
 boundary-ownership definitions must work across both lateral occlusion disclosure and forward
 corridor motion.
 
-This is apparatus implementation pending independent review. It is not full Gate 0B completion,
-Gate 0C authorisation, or a scientific result.
+This slice is canonical after engineering and scientific review of exact implementation head
+`4eb754e16dd8bb80eb0873be01060f39fddcbe44`, merge of PR #3, and its linked documentation
+closeout. This does not establish full Gate 0B completion, Gate 0C authorisation, or a scientific
+result.
 
 ## Minimal corridor ontology
 
@@ -182,6 +184,20 @@ head Ubuntu/OSMesa run `32929169048`, which failed at the then-unpinned regressi
 dataset-command step. Run `32929628787` passed all checks and dataset commands on engineering-
 reviewed head `5451f21c6fd7df99c41758bdea647954b556c18a`. The resulting engineering request for changes and
 all later corrections require renewed exact-head review; the successful run is not an approval.
+
+## Canonical review evidence
+
+Final engineering corrections produced exact reviewed head
+`4eb754e16dd8bb80eb0873be01060f39fddcbe44`. Its reviewed apparatus binds privileged semantic
+names, raw IDs, positions, compiled sizes, camera pose, and field of view to the compiled MuJoCo
+scene; checks all raster artifacts against resolved render dimensions; encapsulates full manifest
+access behind privileged typed permissions; and rejects unsafe root-manifest aliases and escapes.
+Exact-head Ubuntu CI run `32939498541` succeeded with all 149 tests and both scene-family dataset
+workflows, and that head received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`.
+
+Corridor ecological identities remain backend-specific, and RGB byte identity across backends is
+not claimed. Full Gate 0B remains incomplete; no Gate 0C authorisation or scientific result
+follows from this closeout.
 
 ## Remaining Gate 0B work
 

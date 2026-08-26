@@ -91,6 +91,14 @@ Cross-platform RGB byte identity is not claimed. At the original reviewed schema
 
 The corridor uses the same identity separation. Its solid-colour appearance rerender changes RGB while preserving scene-content and ecological-label identity for fixed geometry, camera, and action. The canonical single-occluder scene-content hash is `57e8b2f1df42d0a3d13e2fe3403d903a24bf7d8b5b7ce410291afcd091fdc351`; corridor episode-0 and episode-1 scene-content hashes are `16a1f5a214577c3d189be6a2c0e47eb4ee3dbe0dfd913b4739b3c6b8832b9525` and `1de8d8a877a29695958917251e76044bc267616bd4da5050ac49ea909e65bffd` for the canonical configuration. A seed-only change with fixed sampled content does not change these domains.
 
+## PR #3 closeout evidence
+
+The final reviewed implementation head was `4eb754e16dd8bb80eb0873be01060f39fddcbe44`; it received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`. Exact-head Ubuntu CI run `32939498541` passed all 149 tests and both the single-occluder and corridor dataset workflows.
+
+The final reviewed apparatus independently checks compiled positions, sizes, camera pose, and field of view. Resolved render dimensions are bound to every public and privileged raster artifact. Full manifest access is privileged through the typed API, and root-manifest aliases and escapes fail closed. The scene-content and ecological-identity hashes remain the values already recorded above.
+
+This evidence does not establish full Gate 0B completion, authorise Gate 0C, or establish a scientific result.
+
 ## Remaining Gate 0B work
 
 - Implement geometry-derived or analytic dense optical flow and its alignment tests.
