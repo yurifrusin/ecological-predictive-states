@@ -1,4 +1,5 @@
-schema_version: "0.1.0-dev.1"
+schema_version: "0.1.0-dev.2"
+scene_family: single_occluder
 seed: 1729
 render:
   width: 160

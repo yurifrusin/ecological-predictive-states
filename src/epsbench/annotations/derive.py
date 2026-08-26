@@ -7,26 +7,34 @@ import numpy as np
 from epsbench.schema import (
     BoundaryContact,
     BoundaryStructure,
+    MaskChangeKind,
     RegionCorrespondence,
+    RegionMaskChange,
     SurfaceReference,
-    VisibilityEvent,
-    VisibilityEventKind,
     VisibilityState,
 )
 
 
-def classify_visibility_event(before_pixels: int, after_pixels: int) -> VisibilityEventKind:
-    """Classify region visibility change from exact segmentation pixel counts."""
+def classify_mask_changes(
+    before_pixels: int,
+    after_pixels: int,
+    gained_image_pixels: int,
+    lost_image_pixels: int,
+) -> tuple[MaskChangeKind, ...]:
+    """Classify neutral same-coordinate mask changes without assigning an optical cause."""
 
     if before_pixels == 0 and after_pixels > 0:
-        return VisibilityEventKind.APPEARING
+        return (MaskChangeKind.REGION_APPEARED,)
     if before_pixels > 0 and after_pixels == 0:
-        return VisibilityEventKind.DISAPPEARING
-    if after_pixels > before_pixels:
-        return VisibilityEventKind.ACCRETING
-    if after_pixels < before_pixels:
-        return VisibilityEventKind.DELETING
-    return VisibilityEventKind.STABLE
+        return (MaskChangeKind.REGION_DISAPPEARED,)
+    changes: list[MaskChangeKind] = []
+    if gained_image_pixels:
+        changes.append(MaskChangeKind.GAINED_IMAGE_PIXELS)
+    if lost_image_pixels:
+        changes.append(MaskChangeKind.LOST_IMAGE_PIXELS)
+    if not changes:
+        changes.append(MaskChangeKind.MASK_UNCHANGED)
+    return tuple(changes)
 
 
 def derive_visibility(
@@ -36,14 +44,14 @@ def derive_visibility(
 ) -> tuple[
     tuple[VisibilityState, ...],
     tuple[RegionCorrespondence, ...],
-    tuple[VisibilityEvent, ...],
+    tuple[RegionMaskChange, ...],
 ]:
     if before.shape != after.shape or before.ndim != 2:
         raise ValueError("before and after segmentation arrays must be aligned 2D images")
     pixel_total = before.size
     states: list[VisibilityState] = []
     correspondence: list[RegionCorrespondence] = []
-    events: list[VisibilityEvent] = []
+    mask_changes: list[RegionMaskChange] = []
     for surface in surfaces:
         before_mask = before == surface.segmentation_label
         after_mask = after == surface.segmentation_label
@@ -69,48 +77,33 @@ def derive_visibility(
         )
         added_count = int(np.count_nonzero(after_mask & ~before_mask))
         removed_count = int(np.count_nonzero(before_mask & ~after_mask))
-        if before_count == 0 and after_count > 0:
-            events.append(
-                VisibilityEvent(
+        change_kinds = classify_mask_changes(
+            before_count,
+            after_count,
+            added_count,
+            removed_count,
+        )
+        for change_kind in change_kinds:
+            if change_kind in {
+                MaskChangeKind.GAINED_IMAGE_PIXELS,
+                MaskChangeKind.REGION_APPEARED,
+            }:
+                affected_image_pixels = added_count
+            elif change_kind in {
+                MaskChangeKind.LOST_IMAGE_PIXELS,
+                MaskChangeKind.REGION_DISAPPEARED,
+            }:
+                affected_image_pixels = removed_count
+            else:
+                affected_image_pixels = 0
+            mask_changes.append(
+                RegionMaskChange(
                     surface_id=surface.surface_id,
-                    event=VisibilityEventKind.APPEARING,
-                    affected_pixels=after_count,
+                    change=change_kind,
+                    affected_image_pixels=affected_image_pixels,
                 )
             )
-        elif before_count > 0 and after_count == 0:
-            events.append(
-                VisibilityEvent(
-                    surface_id=surface.surface_id,
-                    event=VisibilityEventKind.DISAPPEARING,
-                    affected_pixels=before_count,
-                )
-            )
-        else:
-            if added_count:
-                events.append(
-                    VisibilityEvent(
-                        surface_id=surface.surface_id,
-                        event=VisibilityEventKind.ACCRETING,
-                        affected_pixels=added_count,
-                    )
-                )
-            if removed_count:
-                events.append(
-                    VisibilityEvent(
-                        surface_id=surface.surface_id,
-                        event=VisibilityEventKind.DELETING,
-                        affected_pixels=removed_count,
-                    )
-                )
-            if not added_count and not removed_count and before_count:
-                events.append(
-                    VisibilityEvent(
-                        surface_id=surface.surface_id,
-                        event=VisibilityEventKind.STABLE,
-                        affected_pixels=before_count,
-                    )
-                )
-    return tuple(states), tuple(correspondence), tuple(events)
+    return tuple(states), tuple(correspondence), tuple(mask_changes)
 
 
 def derive_boundary_structure(

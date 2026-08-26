@@ -8,9 +8,12 @@ import numpy as np
 import numpy.typing as npt
 from PIL import Image
 
+from epsbench.data.paths import resolve_dataset_manifest
 from epsbench.schema import (
     Action,
     CameraInstrumentation,
+    CorridorInstrumentation,
+    CorridorSampledGeometry,
     DatasetManifest,
     EcologicalTransitionView,
     EpisodeManifest,
@@ -18,7 +21,9 @@ from epsbench.schema import (
     Modality,
     ModalityPermissionSet,
     PrivilegedInstrumentation,
+    SceneFamily,
     TransitionRecord,
+    parse_privileged_instrumentation_json,
 )
 
 
@@ -30,10 +35,9 @@ class DatasetLoader:
     """Dataset reader that requires a declared permission set at construction."""
 
     def __init__(self, root: Path, permissions: ModalityPermissionSet) -> None:
-        self.root = root.resolve()
+        self.root, manifest_path = resolve_dataset_manifest(root)
         self.permissions = permissions
-        manifest_path = self.root / "manifest.json"
-        self.manifest = DatasetManifest.model_validate_json(
+        self._manifest = DatasetManifest.model_validate_json(
             manifest_path.read_text(encoding="utf-8")
         )
 
@@ -53,7 +57,7 @@ class DatasetLoader:
         try:
             return next(
                 episode
-                for episode in self.manifest.episodes
+                for episode in self._manifest.episodes
                 if episode.episode_index == episode_index
             )
         except StopIteration as error:
@@ -77,14 +81,29 @@ class DatasetLoader:
         self._require(Modality.EXECUTED_ACTION)
         return self._transition(episode_index).action
 
+    def read_scene_family(self) -> SceneFamily:
+        self._require(Modality.SCENE_FAMILY)
+        return self._manifest.scene_family
+
+    def read_dataset_manifest(self) -> DatasetManifest:
+        """Return full control metadata only to explicitly privileged callers."""
+
+        self._require(
+            Modality.TRANSITION_RECORD,
+            Modality.SCENE_FAMILY,
+            Modality.PRIVILEGED_GENERATION_RECORDS,
+        )
+        return self._manifest.model_copy(deep=True)
+
     def read_ecological_transition(self, episode_index: int) -> EcologicalTransitionView:
         self._require(
             Modality.EXECUTED_ACTION,
             Modality.SURFACE_REGIONS,
             Modality.VISIBILITY_FRACTIONS,
             Modality.REGION_CORRESPONDENCE,
-            Modality.VISIBILITY_EVENTS,
-            Modality.OCCLUSION_RELATION,
+            Modality.REGION_MASK_CHANGES,
+            Modality.ECOLOGICAL_VISIBILITY_EVENTS,
+            Modality.OCCLUSION_ANNOTATION,
             Modality.BOUNDARY_STRUCTURE,
         )
         transition = self._transition(episode_index)
@@ -94,8 +113,9 @@ class DatasetLoader:
             surfaces=transition.surfaces,
             visibility_states=transition.visibility_states,
             region_correspondence=transition.region_correspondence,
-            visibility_events=transition.visibility_events,
-            occlusion_relations=transition.occlusion_relations,
+            region_mask_changes=transition.region_mask_changes,
+            ecological_visibility_events=transition.ecological_visibility_events,
+            occlusion=transition.occlusion,
             boundary_structures=transition.boundary_structures,
             dense_optical_flow=transition.dense_optical_flow,
             ecological_label_sha256=transition.ecological_label_sha256,
@@ -136,7 +156,7 @@ class DatasetLoader:
 
     def _instrumentation(self, episode_index: int) -> PrivilegedInstrumentation:
         episode = self._episode(episode_index)
-        return PrivilegedInstrumentation.model_validate_json(
+        return parse_privileged_instrumentation_json(
             self._path(episode.privileged_instrumentation.path).read_text(encoding="utf-8")
         )
 
@@ -152,3 +172,18 @@ class DatasetLoader:
             Modality.PRIVILEGED_GENERATION_RECORDS,
         )
         return dict(self._instrumentation(episode_index).raw_geom_world_positions)
+
+    def read_sampled_corridor_geometry(self, episode_index: int) -> CorridorSampledGeometry:
+        self._require(
+            Modality.SAMPLED_SCENE_GEOMETRY,
+            Modality.PRIVILEGED_GENERATION_RECORDS,
+        )
+        instrumentation = self._instrumentation(episode_index)
+        if not isinstance(instrumentation, CorridorInstrumentation):
+            raise ValueError("sampled corridor geometry is unavailable for this scene family")
+        return instrumentation.sampled_geometry
+
+    def read_semantic_surface_names(self, episode_index: int) -> tuple[str, ...]:
+        self._require(Modality.PRIVILEGED_GENERATION_RECORDS)
+        instrumentation = self._instrumentation(episode_index)
+        return tuple(instrumentation.raw_geom_ids)

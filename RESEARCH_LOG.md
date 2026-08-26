@@ -21,3 +21,7 @@ The primary hypothesis concerns robustness under appearance change, so the data 
 ## 2026-08-26 — Deferring affordances and language
 
 Affordances require body-scaled action constraints and are explicitly later work. Language would add semantic targets and confounds before the optical substrate is tested. Both are deferred so the first benchmark isolates surface persistence, occlusion, and visibility transformation without semantic object recognition, language supervision, or a robot assumption.
+
+## 2026-08-26 — Minimal second scene family
+
+The smallest adequate second scene family is a four-surface closed corridor with prescribed forward observer motion; openings and navigation remain deferred. The implementation uses an open top only because validated wall height keeps the full optical field on the four controlled surfaces. This adds a structurally different action/scene pair without inventing an occlusion oracle outside the single-occluder counterfactual contract.

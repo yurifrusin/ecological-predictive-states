@@ -8,11 +8,18 @@ import mujoco
 import numpy as np
 import numpy.typing as npt
 
-from epsbench.config import BenchmarkConfig
+from epsbench.config import SingleOccluderConfig
+from epsbench.sim.compiled import CompiledSceneContract, extract_compiled_scene_contract
 
 RGBArray = npt.NDArray[np.uint8]
 DepthArray = npt.NDArray[np.float32]
 RawSegmentationArray = npt.NDArray[np.int32]
+
+SINGLE_OCCLUDER_SURFACE_NAMES = (
+    "support_surface",
+    "occluding_surface",
+    "background_surface",
+)
 
 
 @dataclass(frozen=True)
@@ -31,6 +38,7 @@ class RenderedTransition:
     after: RenderedFrame
     raw_geom_ids: dict[str, int]
     raw_geom_positions: dict[str, tuple[float, float, float]]
+    raw_geom_compiled_sizes: dict[str, tuple[float, float, float]]
 
 
 def _appearance_colours(variant: str) -> dict[str, str]:
@@ -47,7 +55,7 @@ def _appearance_colours(variant: str) -> dict[str, str]:
     }
 
 
-def build_scene_xml(config: BenchmarkConfig) -> str:
+def build_scene_xml(config: SingleOccluderConfig) -> str:
     """Generate the compact scene rather than loading an external model asset."""
 
     colours = _appearance_colours(config.appearance.variant)
@@ -77,6 +85,21 @@ def build_scene_xml(config: BenchmarkConfig) -> str:
   </worldbody>
 </mujoco>
 """.strip()
+
+
+def compile_single_occluder_scene_contract(
+    config: SingleOccluderConfig,
+) -> CompiledSceneContract:
+    """Compile the configured apparatus without rendering and extract its exact facts."""
+
+    model = mujoco.MjModel.from_xml_string(build_scene_xml(config))
+    data = mujoco.MjData(model)
+    return extract_compiled_scene_contract(
+        model,
+        data,
+        SINGLE_OCCLUDER_SURFACE_NAMES,
+        "monocular_camera",
+    )
 
 
 def _render_raw_segmentation(
@@ -137,24 +160,18 @@ def _render_frame(
     )
 
 
-def render_transition(config: BenchmarkConfig) -> RenderedTransition:
+def render_transition(config: SingleOccluderConfig) -> RenderedTransition:
     """Render one before/action/after camera transition with no dynamics or GPU requirement."""
 
     model = mujoco.MjModel.from_xml_string(build_scene_xml(config))
     data = mujoco.MjData(model)
     camera_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "monocular_camera")
-    surface_names = ("support_surface", "occluding_surface", "background_surface")
-    raw_geom_ids = {
-        name: mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name) for name in surface_names
-    }
-    raw_geom_positions = {
-        name: (
-            float(model.geom_pos[geom_id, 0]),
-            float(model.geom_pos[geom_id, 1]),
-            float(model.geom_pos[geom_id, 2]),
-        )
-        for name, geom_id in raw_geom_ids.items()
-    }
+    compiled = extract_compiled_scene_contract(
+        model,
+        data,
+        SINGLE_OCCLUDER_SURFACE_NAMES,
+        "monocular_camera",
+    )
     renderer = mujoco.Renderer(
         model,
         height=config.render.height,
@@ -185,6 +202,7 @@ def render_transition(config: BenchmarkConfig) -> RenderedTransition:
     return RenderedTransition(
         before=before,
         after=after,
-        raw_geom_ids=raw_geom_ids,
-        raw_geom_positions=raw_geom_positions,
+        raw_geom_ids=compiled.raw_geom_ids,
+        raw_geom_positions=compiled.raw_geom_world_positions,
+        raw_geom_compiled_sizes=compiled.raw_geom_compiled_sizes,
     )

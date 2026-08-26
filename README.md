@@ -4,9 +4,9 @@ Ecological Predictive States is a research repository for testing whether an act
 
 ## Current status
 
-Gate 0A (repository foundation) and a deliberately small Gate 0B vertical slice are implemented on the current development branch. The slice contains one deterministic single-occluder MuJoCo scene, a lateral monocular-camera action, before/after RGB, depth and opaque segmentation, minimal ecological-oracle annotations, fail-closed modality permissions, validation, and visual inspection.
+Gate 0A (repository foundation), the reviewed single-occluder Gate 0B slice, and a separately reviewable corridor apparatus slice are implemented on the current development branch. The corridor slice adds a deterministic four-surface scene, prescribed forward monocular-camera motion, scene-specific privileged instrumentation, and scene-aware generation, validation, inspection, and corruption tests. A bounded correction round now separates neutral raster mask changes from unavailable ecological visibility events, gives occlusion an explicit availability contract, and advances the changed transition schema.
 
-**No scientific result exists yet.** Successful generation and tests establish infrastructure only. Full Gate 0B completion is not claimed: corridor scenes, dense optical flow, and full boundary ownership remain incomplete. The next authorised work is the remainder of Gate 0B; Gate 0C and all model work are not authorised.
+**No scientific result exists yet.** Successful generation and tests establish infrastructure only. Engineering review requested changes on the prior correction head; the current bounded engineering corrections require renewed exact-head engineering review, and scientific re-review remains pending. Full Gate 0B completion is not claimed: dense optical flow and full oriented boundary ownership remain incomplete. Gate 0C and all model work are not authorised.
 
 The scientific authority is [the Research Charter](docs/RESEARCH_CHARTER.md), followed by [EPS-Bench v0](docs/EPS_BENCH_V0.md) and [Milestone 0](docs/MILESTONE_0.md). Architecture and current limits are recorded in [the implementation notes](docs/IMPLEMENTATION_NOTES.md); implementation, review, ownership, and closeout are separated by [the review protocol](docs/review-protocol.md).
 
@@ -37,6 +37,18 @@ uv run epsbench inspect `
   data/smoke `
   --episode 0 `
   --output artifacts/episode_0.png
+
+uv run epsbench generate `
+  --config configs/corridor_v0.yaml `
+  --episodes 2 `
+  --output data/corridor-smoke
+
+uv run epsbench validate data/corridor-smoke
+
+uv run epsbench inspect `
+  data/corridor-smoke `
+  --episode 0 `
+  --output artifacts/corridor-episode-0.png
 ```
 
 Generation refuses to overwrite a non-empty output directory. Inspection output must remain outside the dataset so it cannot change dataset identity.
@@ -58,10 +70,10 @@ Use `uv run ruff format .` to apply formatting intentionally.
 | Class | Current contents |
 | --- | --- |
 | Sensory | RGB and executed action |
-| Ecological oracle | Opaque surface regions, boundary contacts, visibility fractions/events, correspondence, and occlusion relation |
+| Ecological oracle | Opaque surface regions, boundary contacts, projected-image fractions, correspondence, neutral mask changes, typed unavailable ecological-visibility-event status, and typed occlusion availability/relations |
 | Metric baseline | Depth |
-| Instrumentation only | Camera world transforms, raw MuJoCo geom IDs, raw coordinates, and generation records |
-| Control metadata | Compound transition record; never treated as a learner input |
+| Instrumentation only | Camera world transforms, raw MuJoCo geom IDs, raw coordinates, sampled corridor geometry, and generation records |
+| Control metadata | Compound transition and scene-family records; never treated as learner inputs |
 
 `DatasetLoader` requires an explicit `ModalityPermissionSet`. Ecological-only access fails before depth, camera pose, raw IDs, or world-coordinate artifacts are opened.
 

@@ -24,6 +24,19 @@ def test_transition_and_manifest_round_trip(smoke_dataset: Path) -> None:
     transition_bytes = transition_path.read_bytes().rstrip(b"\n")
     transition = TransitionRecord.model_validate_json(transition_bytes)
     assert canonical_json_bytes(transition) == transition_bytes
+    assert manifest.schema_version == "0.1.0-dev.2"
+    assert transition.schema_version == "0.1.0-dev.2"
+
+
+def test_historical_transition_version_is_not_byte_compatible(smoke_dataset: Path) -> None:
+    manifest = DatasetManifest.model_validate_json(
+        (smoke_dataset / "manifest.json").read_text(encoding="utf-8")
+    )
+    transition_path = smoke_dataset / manifest.episodes[0].transition.path
+    payload = json.loads(transition_path.read_text(encoding="utf-8"))
+    payload["schema_version"] = "0.1.0-dev.1"
+    with pytest.raises(ValidationError):
+        TransitionRecord.model_validate(payload)
 
 
 def test_invalid_visibility_fraction_fails() -> None:

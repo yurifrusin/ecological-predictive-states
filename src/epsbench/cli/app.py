@@ -21,7 +21,7 @@ def generate(
     output: Annotated[Path, typer.Option(file_okay=False)],
     episodes: Annotated[int, typer.Option(min=1)] = 1,
 ) -> None:
-    """Generate a deterministic single-occluder dataset."""
+    """Generate a deterministic dataset for the configured scene family."""
 
     try:
         manifest = generate_dataset(load_config(config), episodes, output)
@@ -29,7 +29,7 @@ def generate(
         typer.echo(f"Generation failed: {error}", err=True)
         raise typer.Exit(code=1) from error
     typer.echo(
-        f"Generated {len(manifest.episodes)} episode(s); "
+        f"Generated {len(manifest.episodes)} {manifest.scene_family.value} episode(s); "
         f"dataset logical hash {manifest.dataset_logical_sha256}"
     )
 
@@ -46,7 +46,7 @@ def validate_command(
         typer.echo(f"Validation failed: {error}", err=True)
         raise typer.Exit(code=1) from error
     typer.echo(
-        f"Valid dataset: {len(manifest.episodes)} episode(s); "
+        f"Valid {manifest.scene_family.value} dataset: {len(manifest.episodes)} episode(s); "
         f"logical hash {manifest.dataset_logical_sha256}"
     )
 

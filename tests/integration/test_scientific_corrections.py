@@ -54,14 +54,14 @@ def test_occlusion_relation_corruption_is_rejected(
 ) -> None:
     broken = _copy_dataset(smoke_dataset, tmp_path, f"occlusion-{corruption}")
     transition, instrumentation = load_episode_payloads(broken, 0)
-    relation = transition["occlusion_relations"][0]
+    relation = transition["occlusion"]["relations"][0]
     if corruption == "reversed":
         relation["occluder_surface_id"], relation["occluded_surface_id"] = (
             relation["occluded_surface_id"],
             relation["occluder_surface_id"],
         )
     elif corruption == "omitted":
-        transition["occlusion_relations"] = []
+        transition["occlusion"]["relations"] = []
     elif corruption == "invented":
         used = {relation["occluder_surface_id"], relation["occluded_surface_id"]}
         support_id = next(
@@ -74,7 +74,7 @@ def test_occlusion_relation_corruption_is_rejected(
         relation["frame_indices"] = [0]
     commit_episode_payloads(broken, 0, transition, instrumentation)
 
-    with pytest.raises(DatasetValidationError, match="counterfactual evidence"):
+    with pytest.raises(DatasetValidationError, match="occlusion annotation"):
         validate_dataset(broken)
 
 

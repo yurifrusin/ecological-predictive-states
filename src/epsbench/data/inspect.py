@@ -41,7 +41,7 @@ def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> 
     resolved_output = output.resolve()
     if resolved_output.is_relative_to(root):
         raise ValueError("inspection output must be outside the immutable dataset directory")
-    validate_dataset(root)
+    manifest = validate_dataset(root)
     loader = DatasetLoader(root, ModalityPermissionSet.all_modalities())
     before_rgb = Image.fromarray(loader.read_rgb(episode_index, 0), mode="RGB")
     after_rgb = Image.fromarray(loader.read_rgb(episode_index, 1), mode="RGB")
@@ -59,13 +59,19 @@ def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> 
     )
     width, height = before_rgb.size
     label_height = 24
-    canvas = Image.new("RGB", (2 * width, 3 * (height + label_height)), "white")
+    header_height = 24
+    canvas = Image.new(
+        "RGB",
+        (2 * width, header_height + 3 * (height + label_height)),
+        "white",
+    )
     draw = ImageDraw.Draw(canvas)
+    draw.text((6, 5), f"Scene family: {manifest.scene_family.value}", fill="black")
     for panel_index, (label, panel) in enumerate(panels):
         column = panel_index % 2
         row = panel_index // 2
         x = column * width
-        y = row * (height + label_height)
+        y = header_height + row * (height + label_height)
         draw.text((x + 6, y + 5), label, fill="black")
         canvas.paste(panel, (x, y + label_height))
     output.parent.mkdir(parents=True, exist_ok=True)

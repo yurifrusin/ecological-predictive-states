@@ -18,6 +18,7 @@ from epsbench.schema import (
     DatasetManifest,
     PrivilegedInstrumentation,
     TransitionRecord,
+    parse_privileged_instrumentation_json,
 )
 from epsbench.utils.canonical import (
     canonical_json_bytes,
@@ -102,7 +103,7 @@ def commit_episode_payloads(
             "ecological_label_sha256": compute_ecological_label_hash(transition),
         }
     )
-    instrumentation = PrivilegedInstrumentation.model_validate_json(
+    instrumentation: PrivilegedInstrumentation = parse_privileged_instrumentation_json(
         canonical_json_bytes(instrumentation_payload)
     )
     transition_record = rewrite_json_artifact(
@@ -164,6 +165,27 @@ def commit_raw_instrumentation_payload(
         update={"privileged_instrumentation": instrumentation_record}
     )
     _write_manifest(root, manifest, episodes)
+
+
+def commit_resolved_config_payload(
+    root: Path,
+    config_payload: dict[str, Any],
+) -> None:
+    """Rewrite resolved configuration and every manifest identity that depends on it."""
+
+    manifest = load_manifest(root)
+    resolved_config = rewrite_json_artifact(
+        root,
+        manifest.resolved_config,
+        config_payload,
+    )
+    changed = manifest.model_copy(
+        update={
+            "resolved_config": resolved_config,
+            "config_logical_sha256": sha256_bytes(canonical_json_bytes(config_payload)),
+        }
+    )
+    _write_manifest(root, changed, list(changed.episodes))
 
 
 def _write_manifest(

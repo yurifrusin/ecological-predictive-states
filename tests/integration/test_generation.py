@@ -5,9 +5,10 @@ import pytest
 
 from epsbench.data import DatasetLoader, validate_dataset
 from epsbench.schema import (
+    AvailableOcclusionAnnotation,
     DatasetManifest,
     ModalityPermissionSet,
-    PrivilegedInstrumentation,
+    SingleOccluderInstrumentation,
     TransitionRecord,
 )
 
@@ -92,7 +93,7 @@ def test_persisted_camera_motion_exactly_matches_action(smoke_dataset: Path) -> 
 def test_counterfactual_oracle_derives_relation_frame_membership(smoke_dataset: Path) -> None:
     manifest = validate_dataset(smoke_dataset)
     episode = manifest.episodes[0]
-    instrumentation = PrivilegedInstrumentation.model_validate_json(
+    instrumentation = SingleOccluderInstrumentation.model_validate_json(
         (smoke_dataset / episode.privileged_instrumentation.path).read_text(encoding="utf-8")
     )
     transition = _transition(smoke_dataset, 0)
@@ -102,4 +103,14 @@ def test_counterfactual_oracle_derives_relation_frame_membership(smoke_dataset: 
         if evidence.revealed_pixel_count > 0
     )
     assert evidence_frames == (0, 1)
-    assert transition.occlusion_relations[0].frame_indices == evidence_frames
+    assert isinstance(transition.occlusion, AvailableOcclusionAnnotation)
+    assert transition.occlusion.oracle_rule == "counterfactual_occluder_exclusion_v1"
+    assert transition.occlusion.relations[0].frame_indices == evidence_frames
+
+
+def test_actual_ecological_visibility_events_remain_typed_unavailable(
+    smoke_dataset: Path,
+) -> None:
+    annotation = _transition(smoke_dataset, 0).ecological_visibility_events
+    assert annotation.status == "unavailable"
+    assert annotation.reason_category == ("optical_transport_and_boundary_ownership_unavailable")
