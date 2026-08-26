@@ -22,4 +22,5 @@ Follow `docs/review-protocol.md`. An agent implementing or correcting a work pac
 - Use `SCIENTIFIC_DESIGN_NO_GO` prospectively for PR-level scientific rejection; it has no empirical phase-gate effect.
 - Represent private evidence publicly only through non-reconstructive receipts; never disclose hidden item-level content or reconstructive metadata.
 - Treat work-package merge, engineering-milestone closeout, benchmark or preregistration freeze, and empirical gate evaluation as separate authorities.
+- A rejected, inconclusive, blocked, owner-rejected, or abandoned work package must not disappear because it cannot reach pass convergence. Preserve its final exact-head evidence through owner-authorised record-only closeout; never merge the terminal implementation as part of that archival action.
 - Machine-readable review-state automation remains unauthorised. Historical review records are immutable.

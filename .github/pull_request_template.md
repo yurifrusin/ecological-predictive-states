@@ -61,6 +61,15 @@ Do not add active review records to this implementation PR.
 | --- | --- | --- | --- |
 | | `PENDING` | `PENDING` | `PENDING` |
 
+## Terminal outcome, if applicable
+
+- Terminal reviewer disposition: `NOT APPLICABLE | PENDING`
+- Terminal reviewed SHA: `NOT APPLICABLE | PENDING`
+- Owner terminal decision: `NOT APPLICABLE | PENDING`
+- Owner terminal-decision exact SHA: `NOT APPLICABLE | PENDING`
+- Record-only closeout authority: `NOT AUTHORISED`
+- Implementation merge: `PENDING | NOT AUTHORISED | PROHIBITED`
+
 ## Approval and closeout
 
 - Owner approval: `PENDING — NOT AUTHORISED`

@@ -17,7 +17,8 @@ the design tests what it is intended to test
 
 CI supports review but does not substitute for engineering or scientific review. A PR-level
 `SCIENTIFIC_PASS` is not an empirical result, and successful closeout does not imply gate
-advancement. Exact-head owner approval remains mandatory before any authorised closeout.
+advancement. Exact-head owner authority remains mandatory before any closeout: implementation-merge
+approval for the merge path or an explicit record-only-closeout decision for the terminal path.
 
 The scientific authority order remains:
 
@@ -48,7 +49,8 @@ configuration; comparison fairness; gate logic; and future EPS/Unfrozen integrat
 `ENGINEERING_ONLY` is permitted only for narrowly mechanical work that cannot alter scientific
 interpretation. The PR must explain why scientific review is unnecessary. Examples include
 non-semantic tooling, path or security hardening, mechanical CI maintenance, and mechanically
-constrained closeout. When the classification is uncertain, use `DUAL_REVIEW`.
+constrained implementation work. It still requires a separate engineering reviewer and conveys no
+closeout authority. When the classification is uncertain, use `DUAL_REVIEW`.
 
 ### `SCIENTIFIC_ONLY`
 
@@ -58,7 +60,8 @@ no source, tests, dependencies, configurations, benchmark, or executable contrac
 ### `CLOSEOUT_ONLY`
 
 `CLOSEOUT_ONLY` permits only the exact merge, record, tag, release, and synchronisation actions
-named by owner approval.
+named by owner approval. It governs a separately authorised closeout PR and `CLOSEOUT_AGENT`; it is
+not a substitute for the review profile of an implementation or correction PR.
 
 ## Evidence classes
 
@@ -98,8 +101,10 @@ and assess the evidence on which the disposition depends.
 
 The owner/PI determines scientific scope, resolves substantive design decisions, accepts or rejects
 review findings, approves an exact pull-request number and head SHA, and authorises merge, tag,
-release, or gate advancement. No implementation, coordination, or review agent may infer or
-manufacture owner approval. Passing reviews do not oblige the owner to merge.
+release, record-only closeout, or gate advancement. The owner distinguishes approval of an exact
+head for implementation merge from a terminal decision that prohibits implementation merge. No
+implementation, coordination, or review agent may infer or manufacture owner authority. Passing
+reviews do not oblige the owner to merge.
 
 ### `IMPLEMENTATION_AGENT`
 
@@ -203,30 +208,36 @@ machinery but cannot decide the empirical gate before the frozen evidence exists
 
 ### `CLOSEOUT_AGENT`
 
-The closeout agent operates in a separate session after review convergence and exact-head owner
-approval. It revalidates the exact approved SHA, clean branch state, CI success, mergeability,
-unresolved findings, authorised scope, and approval validity. It may merge, record, tag, release, or
-synchronise only when explicitly authorised.
+The closeout agent operates in a separate session after either `MERGE_CONVERGENCE` and exact-head
+owner merge approval or `TERMINAL_DISPOSITION_CONVERGENCE` and an exact owner
+record-only-closeout decision. It revalidates the applicable exact SHA, clean branch state, CI
+status, unresolved findings, authorised scope, and owner authority. It may merge, record, tag,
+release, close, or synchronise only when explicitly authorised. A record-only closeout agent may
+not repair or reinterpret the terminal implementation.
 
 ## Active and canonical evidence lifecycle
 
 The governing rule is:
 
-> Active review records must not modify the implementation PR they review. Final immutable review
-> records may be canonicalised only in the separately authorised closeout PR after exact-head
-> convergence and owner approval.
+> Active review records must not modify the implementation PR they review. Final immutable records
+> may be canonicalised only through a separately authorised closeout PR: after
+> `MERGE_CONVERGENCE` and exact-head owner approval for an implementation that will merge, or after
+> `TERMINAL_DISPOSITION_CONVERGENCE` and an exact owner record-only-closeout decision for an
+> implementation that will not merge.
 
 Active review evidence may be a read-only reviewer chat, GitHub review or comment, isolated
 untracked review note, private evidence receipt, or the reviewer's final exact-head response.
 Canonical final evidence may be immutable final review records added by the linked closeout PR, an
-owner approval record, a closeout record, and canonical Git and GitHub history.
+owner approval or terminal-decision record, a closeout record, and canonical Git and GitHub
+history.
 
 Implementation and correction PRs do not create or update their own active
 `docs/reviews/pr-*.md` records. Correction evidence belongs in the worker response and PR body or
-comment. Active reviewers do not commit. Final records are historical documents about the reviewed
-SHA and need not have existed inside that SHA. They must not use self-referential placeholders.
-Prior historical records remain immutable. A governance file such as `docs/reviews/README.md` is
-directory policy, not an active review record.
+comment. Active reviewers do not commit. This active-record prohibition applies to both merge and
+terminal paths. Final records are historical documents about the reviewed SHA and need not have
+existed inside that SHA. They must not use self-referential placeholders. Prior historical records
+remain immutable. A governance file such as `docs/reviews/README.md` is directory policy, not an
+active review record.
 
 ## Exact-head rule and convergence
 
@@ -237,9 +248,33 @@ The review unit is:
 ```
 
 Any head change invalidates earlier dispositions not renewed for the new head. A bounded delta
-re-review is permitted, but it must still name and assess the new exact SHA. Review convergence
-requires every pass required by the selected review profile on the same SHA. A pass on SHA A plus a
-pass on SHA B is not convergence. Owner approval names the converged SHA.
+re-review is permitted, but it must still name and assess the new exact SHA.
+
+### `MERGE_CONVERGENCE`
+
+`MERGE_CONVERGENCE` requires every pass required by the selected review profile to name the same
+exact implementation SHA and the owner to approve that PR and SHA for implementation merge. A pass
+on SHA A plus a pass on SHA B is not merge convergence. Ordinary linked closeout may follow only
+under the exact actions authorised by the owner.
+
+### `TERMINAL_DISPOSITION_CONVERGENCE`
+
+`TERMINAL_DISPOSITION_CONVERGENCE` requires every final review disposition required by the selected
+profile—engineering and/or scientific—to name the same exact final implementation SHA. At least one
+terminal reviewer disposition or owner decision prevents implementation merge, and the owner
+explicitly authorises `RECORD_ONLY_CLOSEOUT` for that PR and SHA. No implementation commit from the
+terminal PR is merged.
+
+Terminal reviewer dispositions include `ENGINEERING_BLOCKED`, `SCIENTIFIC_INCONCLUSIVE`, and
+`SCIENTIFIC_DESIGN_NO_GO`. A request for changes can also end on this path when the distinct owner
+decision is `CORRECTION_NOT_AUTHORISED` or `CORRECTION_DECLINED_WITH_REASON`. Other owner terminal
+decisions include `OWNER_REJECTED` and `OWNER_ABANDONED`. `SCIENTIFIC_INCONCLUSIVE` or another
+non-pass disposition is terminal only when the exact owner decision ends the implementation path;
+otherwise correction or further review may continue.
+
+Reviewer disposition, owner decision, and implementation-merge authority are separate facts. A
+terminal disposition is not a pass, and a record-only-closeout decision is not approval of the
+implementation.
 
 ## Finding lifecycle
 
@@ -276,8 +311,30 @@ GitHub comments.
 ### Work-package closeout
 
 Gate 0B Slices 1, 2, and 3 and a governance amendment are examples of work packages. Typical
-closeout merges the implementation PR and a limited documentation closeout. It usually creates no
-tag or Release.
+merge closeout follows `MERGE_CONVERGENCE`, merges the implementation PR and a limited documentation
+closeout, and usually creates no tag or Release.
+
+### Terminal record-only closeout
+
+`RECORD_ONLY_CLOSEOUT` is the archival work-package path after
+`TERMINAL_DISPOSITION_CONVERGENCE`. It is a governance and evidence-preservation operation, not
+approval of the implementation. It must:
+
+1. begin on a new documentation branch from current canonical `main`, not from the terminal
+   implementation branch;
+2. leave the implementation PR unmerged and close it or leave it open only as the owner directs;
+3. add only immutable review, owner-decision, and terminal-closeout records through a separately
+   authorised documentation PR;
+4. record the repository, implementation PR, exact final head, canonical base, dispositions, stable
+   finding IDs, owner decision, and reason no implementation merge occurred;
+5. preserve the non-reconstructive public-record rules for private evidence;
+6. have no gate, benchmark-freeze, tag, Release, or scientific-result effect unless each effect is
+   separately authorised;
+7. prohibit the closeout agent from repairing, completing, or reinterpreting the terminal design;
+8. preserve the terminal head in GitHub history and bind any external exact-head review receipt.
+
+No commit from the rejected, inconclusive, blocked, owner-rejected, or abandoned implementation PR
+may be merged or cherry-picked as part of `RECORD_ONLY_CLOSEOUT`.
 
 ### Engineering milestone closeout
 
@@ -305,6 +362,16 @@ does not imply benchmark freeze
 
 benchmark freeze
 does not imply empirical success
+
+record-only closeout
+does not imply implementation acceptance
+
+record-only closeout
+does not merge the terminal implementation
+
+record-only closeout
+does not imply engineering milestone completion, benchmark freeze, empirical success,
+or a scientific result
 ```
 
 ## Machine-readable automation deferral
@@ -363,7 +430,9 @@ The repository is authoritative, not chat memory.
 10. Gate advancement is separate from CI, PR review, and ordinary closeout.
 11. Repository infrastructure success is not a scientific result.
 12. The owner may decline to merge despite passing reviews.
-13. Periodically assess whether the protocol is catching material problems.
+13. Preserve terminal negative outcomes through owner-authorised `RECORD_ONLY_CLOSEOUT`; do not
+    erase them merely because pass convergence is impossible.
+14. Periodically assess whether the protocol is catching material problems.
 
 ## Historical compatibility
 
@@ -371,4 +440,7 @@ Older records remain valid historical evidence under the protocol that governed 
 review files already committed in implementation PRs, including records that used the earlier
 `SCIENTIFIC_NO_GO` terminology, are grandfathered and must not be renamed, modified, or
 reinterpreted. The v2 active-record rule applies to this governance PR's own reviews and all future
-work packages. This implementation PR must not create a review record for itself.
+work packages. Older rejected or abandoned PR evidence may be canonicalised prospectively only
+through an owner-authorised `RECORD_ONLY_CLOSEOUT` from current canonical `main`; existing
+historical records remain unchanged. This implementation PR must not create a review record for
+itself.
