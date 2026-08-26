@@ -29,3 +29,9 @@ The smallest adequate second scene family is a four-surface closed corridor with
 ## 2026-08-26 — Analytic image-plane transport
 
 Gate 0B uses geometry-derived analytic image-plane transport rather than RGB matching, learned flow, or renderer-defined motion. Metric geometry is used only to generate and validate an ecological oracle expressed in image coordinates. The transport of an already visible static surface point remains distinct from oriented boundary ownership, accretion, deletion, and disocclusion.
+
+## 2026-08-27 — Independent review workflow v2
+
+Completed EPS review cycles showed that committing an active review record can change and therefore invalidate the exact implementation head the record describes. Broad coordination context is useful for tracking that convergence, but it must not collapse independent engineering, scientific, owner, closeout, or empirical-gate authority. Future hidden or licensed evidence also requires an exact review path whose public receipt cannot reconstruct private items or expected outputs.
+
+EPS therefore separates active external review evidence from immutable records added during linked closeout, declares both a review profile and evidence class for each work package, and distinguishes work-package closeout, engineering-milestone closeout, benchmark or preregistration freeze, and empirical decision gates. Machine-readable review-state automation is deferred until the amended human process completes a full work package without governance correction. These refinements incorporate cross-project learning developed while Unfrozen Schemas adopted the EPS review model, but that memorandum is not authoritative for EPS; EPS adopts the changes prospectively under its own owner authority.

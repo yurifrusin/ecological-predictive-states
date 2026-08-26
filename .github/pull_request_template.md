@@ -1,11 +1,15 @@
 ## Submission identity
 
-- Role of submitting session: `IMPLEMENTATION_AGENT` or `CORRECTION_IMPLEMENTER`
+- Role: `IMPLEMENTATION_AGENT` or `CORRECTION_IMPLEMENTER`
+- Review profile: `PENDING`
+- Evidence class: `PENDING`
+- Closeout boundary: `PENDING`
 - Authorised scope:
-- Base commit:
-- Head commit:
+- Prohibited scope:
+- Canonical base:
+- Exact head:
 
-## Scientific-document hashes
+## Governing-document hashes
 
 | Document | SHA-256 |
 | --- | --- |
@@ -17,30 +21,51 @@
 ## Implementation evidence
 
 - Commands and results:
+- Tests:
 - CI run for exact head: `PENDING`
+- Generated or inspected artifacts:
+- Known limitations:
+- Negative evidence:
 
-## Known limitations
+## Evidence posture
 
--
+### `PUBLIC_REPOSITORY_ONLY`
 
-## Reviews
+- Public evidence locations: `PENDING`
 
-- Engineering-review status: `PENDING`
-- Engineering-reviewed SHA: `PENDING`
-- Scientific-review status: `PENDING`
-- Scientific-reviewed SHA: `PENDING`
+### `PRIVATE_REVIEW_BUNDLE`
+
+- Private review-manifest logical root: `PENDING`
+- Private bundle SHA-256: `PENDING`
+- Reviewer access: `PENDING`
+- Aggregate coverage: `PENDING`
+- Non-reconstructive public receipt: `PENDING`
+
+Do not paste hidden prompts, labels, item IDs, per-item hashes, private renders, or licensed content
+into this PR.
+
+## Active reviews
+
+Do not add active review records to this implementation PR.
+
+- Engineering disposition: `PENDING`
+- Engineering reviewed SHA: `PENDING`
+- Engineering review/comment URL or external receipt: `PENDING`
+- Scientific disposition: `PENDING`
+- Scientific reviewed SHA: `PENDING`
+- Scientific review/comment URL or external receipt: `PENDING`
 
 ## Finding responses
 
-| Finding ID | Implementer status | Reviewer verification |
-| --- | --- | --- |
-| | `PENDING` | `PENDING` |
+| Finding ID | Implementer status | Correction commit | External reviewer verification |
+| --- | --- | --- | --- |
+| | `PENDING` | `PENDING` | `PENDING` |
 
 ## Approval and closeout
 
 - Owner approval: `PENDING — NOT AUTHORISED`
 - Owner-approved exact SHA: `PENDING`
 - Closeout status: `PENDING — NOT AUTHORISED`
-- Merge/tag/release: `NOT AUTHORISED`
-- Gate-advancement effect: `NONE — NOT AUTHORISED`
+- Merge/tag/release authority: `NOT AUTHORISED`
+- Gate effect: `NONE — NOT AUTHORISED`
 - Scientific-result claim: `NONE`
