@@ -26,14 +26,15 @@ from epsbench.data.identity import (
 from epsbench.schema import (
     Action,
     ArtifactRecord,
+    AvailableOcclusionAnnotation,
     CameraInstrumentation,
     CorridorInstrumentation,
     DatasetManifest,
     OcclusionRelation,
     PrivilegedInstrumentation,
-    SceneFamily,
     SingleOccluderInstrumentation,
     TransitionRecord,
+    UnavailableOcclusionAnnotation,
     parse_privileged_instrumentation_json,
 )
 from epsbench.sim import CORRIDOR_SURFACE_NAMES, corridor_generation_seeds
@@ -227,26 +228,81 @@ def _require_camera_action_alignment(
 
 
 def _corridor_scene_content_hash(
-    episode_seed: int,
+    config: CorridorConfig,
     instrumentation: CorridorInstrumentation,
 ) -> str:
+    geometry = instrumentation.sampled_geometry
     return sha256_bytes(
         canonical_json_bytes(
             {
-                "episode_seed": episode_seed,
-                "sampled_geometry": instrumentation.sampled_geometry.model_dump(mode="json"),
-                "scene_family": SceneFamily.CORRIDOR,
+                "scene_family": config.scene_family,
+                "apparatus_version": "corridor_v1",
+                "surfaces": {
+                    "surface_names": list(CORRIDOR_SURFACE_NAMES),
+                    "width": geometry.width,
+                    "length": geometry.length,
+                    "wall_height": geometry.wall_height,
+                    "wall_thickness": 0.05,
+                    "floor_thickness": 0.05,
+                },
+                "camera": {
+                    "before_position": [
+                        geometry.camera_lateral_position,
+                        geometry.camera_before_forward_position,
+                        geometry.camera_height,
+                    ],
+                    "after_position": [
+                        geometry.camera_lateral_position,
+                        geometry.camera_after_forward_position,
+                        geometry.camera_height,
+                    ],
+                    "orientation_rule": "xyaxes_1_0_0_0_0_1",
+                    "field_of_view_degrees": geometry.field_of_view_degrees,
+                },
+                "action": config.action.model_dump(mode="json"),
             }
         )
     )
 
 
-def _single_occluder_scene_content_hash(episode_seed: int) -> str:
+def _single_occluder_scene_content_hash(config: SingleOccluderConfig) -> str:
     return sha256_bytes(
         canonical_json_bytes(
             {
-                "episode_seed": episode_seed,
-                "scene_family": SceneFamily.SINGLE_OCCLUDER,
+                "scene_family": config.scene_family,
+                "apparatus_version": "single_occluder_v1",
+                "surfaces": {
+                    "support_surface": {
+                        "type": "plane",
+                        "position": [0.0, 0.0, 0.0],
+                        "size": [4.0, 7.0, 0.1],
+                    },
+                    "background_surface": {
+                        "type": "box",
+                        "position": [0.0, 2.5, 1.05],
+                        "half_size": [2.2, 0.05, 1.05],
+                    },
+                    "occluding_surface": {
+                        "type": "box",
+                        "position": [0.0, 0.8, 0.9],
+                        "half_size": [0.55, 0.05, 0.9],
+                    },
+                },
+                "camera": {
+                    "before_position": [
+                        config.camera.before_lateral,
+                        config.camera.forward,
+                        config.camera.height,
+                    ],
+                    "after_position": [
+                        config.camera.after_lateral,
+                        config.camera.forward,
+                        config.camera.height,
+                    ],
+                    "orientation_rule": "xyaxes_1_0_0_0_0.16_1",
+                    "field_of_view_degrees": config.camera.field_of_view_degrees,
+                },
+                "action": config.action.model_dump(mode="json"),
             }
         )
     )
@@ -439,15 +495,19 @@ def _require_occlusion_oracle(
         if count > 0:
             supported_frames.append(frame_index)
 
-    expected_relations = (
-        OcclusionRelation(
-            occluder_surface_id=occluder_id,
-            occluded_surface_id=occluded_id,
-            frame_indices=tuple(supported_frames),  # type: ignore[arg-type]
+    expected_occlusion = AvailableOcclusionAnnotation(
+        status="available",
+        oracle_rule="counterfactual_occluder_exclusion_v1",
+        relations=(
+            OcclusionRelation(
+                occluder_surface_id=occluder_id,
+                occluded_surface_id=occluded_id,
+                frame_indices=tuple(supported_frames),  # type: ignore[arg-type]
+            ),
         ),
     )
-    if not supported_frames or transition.occlusion_relations != expected_relations:
-        raise DatasetValidationError("occlusion relations do not match counterfactual evidence")
+    if not supported_frames or transition.occlusion != expected_occlusion:
+        raise DatasetValidationError("occlusion annotation does not match counterfactual evidence")
 
 
 def validate_dataset(root: Path) -> DatasetManifest:
@@ -565,15 +625,17 @@ def validate_dataset(root: Path) -> DatasetManifest:
         dataset_surface_ids.update(episode_surface_ids)
 
         if isinstance(instrumentation, SingleOccluderInstrumentation):
-            expected_scene_content_sha256 = _single_occluder_scene_content_hash(
-                episode.episode_seed
-            )
+            if not isinstance(config, SingleOccluderConfig):
+                raise DatasetValidationError(
+                    "single-occluder instrumentation/configuration mismatch"
+                )
+            expected_scene_content_sha256 = _single_occluder_scene_content_hash(config)
         elif isinstance(instrumentation, CorridorInstrumentation):
             if not isinstance(config, CorridorConfig):
                 raise DatasetValidationError("corridor instrumentation/configuration mismatch")
             _require_corridor_instrumentation(config, episode.episode_seed, instrumentation)
             expected_scene_content_sha256 = _corridor_scene_content_hash(
-                episode.episode_seed,
+                config,
                 instrumentation,
             )
         else:
@@ -670,9 +732,9 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 (frame_arrays[0][2], frame_arrays[1][2]),
                 registry,
             )
-        elif transition.occlusion_relations:
+        elif not isinstance(transition.occlusion, UnavailableOcclusionAnnotation):
             raise DatasetValidationError(
-                "corridor occlusion relations require controlled oracle evidence"
+                "corridor occlusion must remain unavailable without controlled oracle evidence"
             )
         else:
             _require_corridor_raw_segmentation(
@@ -683,15 +745,15 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 registry,
             )
 
-        derived_visibility, derived_correspondence, derived_events = derive_visibility(
+        derived_visibility, derived_correspondence, derived_mask_changes = derive_visibility(
             frame_arrays[0][2], frame_arrays[1][2], transition.surfaces
         )
         if derived_visibility != transition.visibility_states:
             raise DatasetValidationError("visibility-state annotations are inconsistent")
         if derived_correspondence != transition.region_correspondence:
             raise DatasetValidationError("region-correspondence annotations are inconsistent")
-        if derived_events != transition.visibility_events:
-            raise DatasetValidationError("visibility-event annotations are inconsistent")
+        if derived_mask_changes != transition.region_mask_changes:
+            raise DatasetValidationError("region mask-change annotations are inconsistent")
         derived_boundaries = (
             derive_boundary_structure(frame_arrays[0][2], transition.surfaces, 0),
             derive_boundary_structure(frame_arrays[1][2], transition.surfaces, 1),

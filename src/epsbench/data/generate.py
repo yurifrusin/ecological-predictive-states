@@ -20,15 +20,18 @@ from epsbench.annotations import derive_boundary_structure, derive_visibility
 from epsbench.config import BenchmarkConfig, CorridorConfig, SingleOccluderConfig
 from epsbench.data.identity import (
     compute_content_provenance_binding,
+    compute_corridor_scene_content_hash,
     compute_dataset_logical_hash,
     compute_ecological_label_hash,
     compute_renderer_execution_provenance_hash,
+    compute_single_occluder_scene_content_hash,
     compute_source_provenance_hash,
 )
 from epsbench.data.provenance import collect_source_provenance
 from epsbench.schema import (
     Action,
     ArtifactRecord,
+    AvailableOcclusionAnnotation,
     CameraInstrumentation,
     CorridorInstrumentation,
     DatasetManifest,
@@ -46,6 +49,8 @@ from epsbench.schema import (
     SurfaceReference,
     TransitionRecord,
     UnavailableAnnotation,
+    UnavailableEcologicalVisibilityEvents,
+    UnavailableOcclusionAnnotation,
 )
 from epsbench.sim import (
     CORRIDOR_SURFACE_NAMES,
@@ -256,7 +261,7 @@ def _generate_single_occluder_episode(
         after_segmentation,
         camera_after,
     )
-    visibility, correspondence, events = derive_visibility(
+    visibility, correspondence, mask_changes = derive_visibility(
         before_segmentation,
         after_segmentation,
         surfaces,
@@ -301,7 +306,7 @@ def _generate_single_occluder_episode(
     if not relation_frame_indices:
         raise RuntimeError("counterfactual oracle found no foreground/background occlusion")
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.1",
+        schema_version="0.1.0-dev.2",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -309,12 +314,24 @@ def _generate_single_occluder_episode(
         after=after,
         visibility_states=visibility,
         region_correspondence=correspondence,
-        visibility_events=events,
-        occlusion_relations=(
-            OcclusionRelation(
-                occluder_surface_id=references["occluding_surface"].surface_id,
-                occluded_surface_id=references["background_surface"].surface_id,
-                frame_indices=tuple(relation_frame_indices),  # type: ignore[arg-type]
+        region_mask_changes=mask_changes,
+        ecological_visibility_events=UnavailableEcologicalVisibilityEvents(
+            status="unavailable",
+            reason_category="optical_transport_and_boundary_ownership_unavailable",
+            reason=(
+                "Ecological accretion/deletion events are unavailable until optical transport "
+                "and oriented boundary ownership are implemented."
+            ),
+        ),
+        occlusion=AvailableOcclusionAnnotation(
+            status="available",
+            oracle_rule="counterfactual_occluder_exclusion_v1",
+            relations=(
+                OcclusionRelation(
+                    occluder_surface_id=references["occluding_surface"].surface_id,
+                    occluded_surface_id=references["background_surface"].surface_id,
+                    frame_indices=tuple(relation_frame_indices),  # type: ignore[arg-type]
+                ),
             ),
         ),
         boundary_structures=boundaries,
@@ -375,14 +392,7 @@ def _generate_single_occluder_episode(
             Modality.PRIVILEGED_GENERATION_RECORDS,
             "application/json",
         ),
-        scene_content_sha256=sha256_bytes(
-            canonical_json_bytes(
-                {
-                    "episode_seed": episode_seed,
-                    "scene_family": SceneFamily.SINGLE_OCCLUDER,
-                }
-            )
-        ),
+        scene_content_sha256=compute_single_occluder_scene_content_hash(config),
         ecological_label_sha256=transition.ecological_label_sha256,
         rgb_logical_sha256=(before.rgb.logical_sha256, after.rgb.logical_sha256),
     )
@@ -439,7 +449,7 @@ def _generate_corridor_episode(
         after_segmentation,
         camera_after,
     )
-    visibility, correspondence, events = derive_visibility(
+    visibility, correspondence, mask_changes = derive_visibility(
         before_segmentation,
         after_segmentation,
         surfaces,
@@ -449,7 +459,7 @@ def _generate_corridor_episode(
         derive_boundary_structure(after_segmentation, surfaces, 1),
     )
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.1",
+        schema_version="0.1.0-dev.2",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -457,8 +467,23 @@ def _generate_corridor_episode(
         after=after,
         visibility_states=visibility,
         region_correspondence=correspondence,
-        visibility_events=events,
-        occlusion_relations=(),
+        region_mask_changes=mask_changes,
+        ecological_visibility_events=UnavailableEcologicalVisibilityEvents(
+            status="unavailable",
+            reason_category="optical_transport_and_boundary_ownership_unavailable",
+            reason=(
+                "Ecological accretion/deletion events are unavailable until optical transport "
+                "and oriented boundary ownership are implemented."
+            ),
+        ),
+        occlusion=UnavailableOcclusionAnnotation(
+            status="unavailable",
+            reason_category="oriented_corridor_occlusion_oracle_unavailable",
+            reason=(
+                "Oriented corridor occlusion is unavailable until a controlled "
+                "boundary-ownership oracle is implemented."
+            ),
+        ),
         boundary_structures=boundaries,
         dense_optical_flow=UnavailableAnnotation(
             field="dense_optical_flow",
@@ -524,15 +549,7 @@ def _generate_corridor_episode(
     )
     instrumentation_path = episode_directory / "instrumentation.json"
     write_canonical_json(instrumentation_path, instrumentation)
-    scene_content_sha256 = sha256_bytes(
-        canonical_json_bytes(
-            {
-                "episode_seed": episode_seed,
-                "sampled_geometry": geometry.model_dump(mode="json"),
-                "scene_family": SceneFamily.CORRIDOR,
-            }
-        )
-    )
+    scene_content_sha256 = compute_corridor_scene_content_hash(config, geometry)
     return EpisodeManifest(
         episode_id=episode_id,
         episode_index=episode_index,

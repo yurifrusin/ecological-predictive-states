@@ -16,6 +16,7 @@ from epsbench.schema import (
     ModalityPermissionSet,
     SceneFamily,
     TransitionRecord,
+    UnavailableOcclusionAnnotation,
     parse_privileged_instrumentation_json,
 )
 
@@ -171,8 +172,26 @@ def test_corridor_appearance_changes_rgb_only(
     assert base_transition.before.segmentation == alternate_transition.before.segmentation
     assert base_transition.after.segmentation == alternate_transition.after.segmentation
     assert base_transition.region_correspondence == alternate_transition.region_correspondence
-    assert base_transition.visibility_events == alternate_transition.visibility_events
-    assert base_transition.occlusion_relations == alternate_transition.occlusion_relations == ()
+    assert base_transition.region_mask_changes == alternate_transition.region_mask_changes
+    assert base_transition.ecological_visibility_events == (
+        alternate_transition.ecological_visibility_events
+    )
+    assert isinstance(base_transition.occlusion, UnavailableOcclusionAnnotation)
+    assert base_transition.occlusion == alternate_transition.occlusion
+
+
+def test_corridor_visibility_and_occlusion_claims_are_typed_unavailable(
+    corridor_dataset: Path,
+) -> None:
+    transition = _transition(corridor_dataset, 0)
+    assert transition.ecological_visibility_events.status == "unavailable"
+    assert transition.ecological_visibility_events.reason_category == (
+        "optical_transport_and_boundary_ownership_unavailable"
+    )
+    assert isinstance(transition.occlusion, UnavailableOcclusionAnnotation)
+    assert transition.occlusion.reason_category == (
+        "oriented_corridor_occlusion_oracle_unavailable"
+    )
 
 
 def test_ecological_permissions_deny_corridor_privileged_data_before_open(

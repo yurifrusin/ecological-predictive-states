@@ -4,9 +4,9 @@ Ecological Predictive States is a research repository for testing whether an act
 
 ## Current status
 
-Gate 0A (repository foundation), the reviewed single-occluder Gate 0B slice, and a separately reviewable corridor apparatus slice are implemented on the current development branch. The corridor slice adds a deterministic four-surface scene, prescribed forward monocular-camera motion, scene-specific privileged instrumentation, and scene-aware generation, validation, inspection, and corruption tests while preserving the single-occluder contract.
+Gate 0A (repository foundation), the reviewed single-occluder Gate 0B slice, and a separately reviewable corridor apparatus slice are implemented on the current development branch. The corridor slice adds a deterministic four-surface scene, prescribed forward monocular-camera motion, scene-specific privileged instrumentation, and scene-aware generation, validation, inspection, and corruption tests. A bounded correction round now separates neutral raster mask changes from unavailable ecological visibility events, gives occlusion an explicit availability contract, and advances the changed transition schema.
 
-**No scientific result exists yet.** Successful generation and tests establish infrastructure only. The corridor slice is pending independent review. Full Gate 0B completion is not claimed: dense optical flow and full oriented boundary ownership remain incomplete. Gate 0C and all model work are not authorised.
+**No scientific result exists yet.** Successful generation and tests establish infrastructure only. The corridor correction is pending scientific re-review and engineering review. Full Gate 0B completion is not claimed: dense optical flow and full oriented boundary ownership remain incomplete. Gate 0C and all model work are not authorised.
 
 The scientific authority is [the Research Charter](docs/RESEARCH_CHARTER.md), followed by [EPS-Bench v0](docs/EPS_BENCH_V0.md) and [Milestone 0](docs/MILESTONE_0.md). Architecture and current limits are recorded in [the implementation notes](docs/IMPLEMENTATION_NOTES.md); implementation, review, ownership, and closeout are separated by [the review protocol](docs/review-protocol.md).
 
@@ -70,7 +70,7 @@ Use `uv run ruff format .` to apply formatting intentionally.
 | Class | Current contents |
 | --- | --- |
 | Sensory | RGB and executed action |
-| Ecological oracle | Opaque surface regions, boundary contacts, visibility fractions/events, correspondence, and occlusion relation |
+| Ecological oracle | Opaque surface regions, boundary contacts, projected-image fractions, correspondence, neutral mask changes, typed unavailable ecological-visibility-event status, and typed occlusion availability/relations |
 | Metric baseline | Depth |
 | Instrumentation only | Camera world transforms, raw MuJoCo geom IDs, raw coordinates, sampled corridor geometry, and generation records |
 | Control metadata | Compound transition and scene-family records; never treated as learner inputs |

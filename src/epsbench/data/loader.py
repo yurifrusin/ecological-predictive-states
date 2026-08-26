@@ -91,8 +91,9 @@ class DatasetLoader:
             Modality.SURFACE_REGIONS,
             Modality.VISIBILITY_FRACTIONS,
             Modality.REGION_CORRESPONDENCE,
-            Modality.VISIBILITY_EVENTS,
-            Modality.OCCLUSION_RELATION,
+            Modality.REGION_MASK_CHANGES,
+            Modality.ECOLOGICAL_VISIBILITY_EVENTS,
+            Modality.OCCLUSION_ANNOTATION,
             Modality.BOUNDARY_STRUCTURE,
         )
         transition = self._transition(episode_index)
@@ -102,8 +103,9 @@ class DatasetLoader:
             surfaces=transition.surfaces,
             visibility_states=transition.visibility_states,
             region_correspondence=transition.region_correspondence,
-            visibility_events=transition.visibility_events,
-            occlusion_relations=transition.occlusion_relations,
+            region_mask_changes=transition.region_mask_changes,
+            ecological_visibility_events=transition.ecological_visibility_events,
+            occlusion=transition.occlusion,
             boundary_structures=transition.boundary_structures,
             dense_optical_flow=transition.dense_optical_flow,
             ecological_label_sha256=transition.ecological_label_sha256,

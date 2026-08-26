@@ -90,8 +90,9 @@ class Modality(StrEnum):
     BOUNDARY_STRUCTURE = "boundary_structure"
     VISIBILITY_FRACTIONS = "visibility_fractions"
     REGION_CORRESPONDENCE = "region_correspondence"
-    OCCLUSION_RELATION = "occlusion_relation"
-    VISIBILITY_EVENTS = "visibility_events"
+    REGION_MASK_CHANGES = "region_mask_changes"
+    ECOLOGICAL_VISIBILITY_EVENTS = "ecological_visibility_events"
+    OCCLUSION_ANNOTATION = "occlusion_annotation"
     DEPTH = "depth"
     LOCAL_METRIC_ARRAYS = "local_metric_arrays"
     CAMERA_WORLD_TRANSFORM = "camera_world_transform"
@@ -111,8 +112,9 @@ class Modality(StrEnum):
             Modality.BOUNDARY_STRUCTURE,
             Modality.VISIBILITY_FRACTIONS,
             Modality.REGION_CORRESPONDENCE,
-            Modality.OCCLUSION_RELATION,
-            Modality.VISIBILITY_EVENTS,
+            Modality.REGION_MASK_CHANGES,
+            Modality.ECOLOGICAL_VISIBILITY_EVENTS,
+            Modality.OCCLUSION_ANNOTATION,
         }:
             return ModalityClass.ECOLOGICAL_ORACLE
         if self in {Modality.DEPTH, Modality.LOCAL_METRIC_ARRAYS}:
@@ -185,18 +187,33 @@ class VisibilityState(StrictModel):
     after_projected_image_fraction: float = Field(ge=0.0, le=1.0)
 
 
-class VisibilityEventKind(StrEnum):
-    STABLE = "stable"
-    ACCRETING = "accreting"
-    DELETING = "deleting"
-    APPEARING = "appearing"
-    DISAPPEARING = "disappearing"
+class MaskChangeKind(StrEnum):
+    GAINED_IMAGE_PIXELS = "gained_image_pixels"
+    LOST_IMAGE_PIXELS = "lost_image_pixels"
+    REGION_APPEARED = "region_appeared"
+    REGION_DISAPPEARED = "region_disappeared"
+    MASK_UNCHANGED = "mask_unchanged"
 
 
-class VisibilityEvent(StrictModel):
+class RegionMaskChange(StrictModel):
     surface_id: SurfaceId
-    event: VisibilityEventKind
-    affected_pixels: int = Field(gt=0)
+    change: MaskChangeKind
+    affected_image_pixels: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def count_matches_change_kind(self) -> RegionMaskChange:
+        if self.change == MaskChangeKind.MASK_UNCHANGED:
+            if self.affected_image_pixels != 0:
+                raise ValueError("unchanged masks must report zero affected image pixels")
+        elif self.affected_image_pixels == 0:
+            raise ValueError("changed masks must report positive affected image pixels")
+        return self
+
+
+class UnavailableEcologicalVisibilityEvents(StrictModel):
+    status: Literal["unavailable"]
+    reason_category: Literal["optical_transport_and_boundary_ownership_unavailable"]
+    reason: str = Field(min_length=1)
 
 
 class RegionCorrespondence(StrictModel):
@@ -244,6 +261,24 @@ class OcclusionRelation(StrictModel):
         if len(set(self.frame_indices)) != len(self.frame_indices):
             raise ValueError("occlusion frame indices must be unique")
         return self
+
+
+class AvailableOcclusionAnnotation(StrictModel):
+    status: Literal["available"]
+    oracle_rule: Literal["counterfactual_occluder_exclusion_v1"]
+    relations: tuple[OcclusionRelation, ...]
+
+
+class UnavailableOcclusionAnnotation(StrictModel):
+    status: Literal["unavailable"]
+    reason_category: Literal["oriented_corridor_occlusion_oracle_unavailable"]
+    reason: str = Field(min_length=1)
+
+
+OcclusionAnnotation = Annotated[
+    AvailableOcclusionAnnotation | UnavailableOcclusionAnnotation,
+    Field(discriminator="status"),
+]
 
 
 class ArtifactRecord(StrictModel):
@@ -321,7 +356,7 @@ class UnavailableAnnotation(StrictModel):
 
 
 class TransitionRecord(StrictModel):
-    schema_version: Literal["0.1.0-dev.1"]
+    schema_version: Literal["0.1.0-dev.2"]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     action: Action
     surfaces: tuple[SurfaceReference, ...] = Field(min_length=1)
@@ -329,8 +364,9 @@ class TransitionRecord(StrictModel):
     after: FrameRecord
     visibility_states: tuple[VisibilityState, ...] = Field(min_length=1)
     region_correspondence: tuple[RegionCorrespondence, ...] = Field(min_length=1)
-    visibility_events: tuple[VisibilityEvent, ...] = Field(min_length=1)
-    occlusion_relations: tuple[OcclusionRelation, ...]
+    region_mask_changes: tuple[RegionMaskChange, ...] = Field(min_length=1)
+    ecological_visibility_events: UnavailableEcologicalVisibilityEvents
+    occlusion: OcclusionAnnotation
     boundary_structures: tuple[BoundaryStructure, ...] = Field(min_length=2, max_length=2)
     dense_optical_flow: UnavailableAnnotation
     ecological_label_sha256: Sha256
@@ -352,18 +388,21 @@ class TransitionRecord(StrictModel):
                 raise ValueError("per-surface annotation references an unknown surface")
             if set(record_ids) != known:
                 raise ValueError("per-surface annotations must cover every declared surface")
-        event_keys = [(record.surface_id, record.event) for record in self.visibility_events]
-        if len(event_keys) != len(set(event_keys)):
-            raise ValueError("visibility event records must be unique")
-        if not {record.surface_id for record in self.visibility_events}.issubset(known):
-            raise ValueError("visibility event references an unknown surface")
-        if {record.surface_id for record in self.visibility_events} != known:
-            raise ValueError("visibility events must cover every declared surface")
-        for relation in self.occlusion_relations:
-            if relation.occluder_surface_id not in known:
-                raise ValueError("occlusion relation has an unknown occluder")
-            if relation.occluded_surface_id not in known:
-                raise ValueError("occlusion relation has an unknown occluded surface")
+        mask_change_keys = [
+            (record.surface_id, record.change) for record in self.region_mask_changes
+        ]
+        if len(mask_change_keys) != len(set(mask_change_keys)):
+            raise ValueError("region mask-change records must be unique")
+        if not {record.surface_id for record in self.region_mask_changes}.issubset(known):
+            raise ValueError("region mask change references an unknown surface")
+        if {record.surface_id for record in self.region_mask_changes} != known:
+            raise ValueError("region mask changes must cover every declared surface")
+        if isinstance(self.occlusion, AvailableOcclusionAnnotation):
+            for relation in self.occlusion.relations:
+                if relation.occluder_surface_id not in known:
+                    raise ValueError("occlusion relation has an unknown occluder")
+                if relation.occluded_surface_id not in known:
+                    raise ValueError("occlusion relation has an unknown occluded surface")
         for boundary in self.boundary_structures:
             for contact in boundary.contacts:
                 if {contact.first_surface_id, contact.second_surface_id} - known:
@@ -383,8 +422,9 @@ class EcologicalTransitionView(StrictModel):
     surfaces: tuple[SurfaceReference, ...]
     visibility_states: tuple[VisibilityState, ...]
     region_correspondence: tuple[RegionCorrespondence, ...]
-    visibility_events: tuple[VisibilityEvent, ...]
-    occlusion_relations: tuple[OcclusionRelation, ...]
+    region_mask_changes: tuple[RegionMaskChange, ...]
+    ecological_visibility_events: UnavailableEcologicalVisibilityEvents
+    occlusion: OcclusionAnnotation
     boundary_structures: tuple[BoundaryStructure, ...]
     dense_optical_flow: UnavailableAnnotation
     ecological_label_sha256: Sha256

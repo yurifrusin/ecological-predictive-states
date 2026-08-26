@@ -104,9 +104,16 @@ rehashed but fabricated raw-ID mapping from passing.
 
 The closed optical field of a corridor contains surface contacts, but this slice has no controlled
 counterfactual that establishes oriented occlusion relations at those contacts. Corridor
-`occlusion_relations` is therefore explicitly empty. An empty set is valid evidence of restraint,
-not a claim that all physical occlusion is absent. The single-occluder counterfactual rule is not
-reused outside its assumptions and remains unchanged for that scene.
+occlusion is therefore typed `status: unavailable` with reason category
+`oriented_corridor_occlusion_oracle_unavailable`. A future `status: available` with no relations
+would mean an oracle-supported known-empty result; it is deliberately distinct from unavailable.
+The single-occluder counterfactual rule is not reused outside its assumptions and remains
+available only for that scene.
+
+Same-image-coordinate mask differences are recorded neutrally as gained/lost image pixels,
+region appearance/disappearance, or an unchanged mask. They are not called accretion or deletion.
+The separate ecological-visibility-event annotation is typed unavailable because dense optical
+transport and oriented boundary ownership are not implemented.
 
 Dense optical flow remains a typed `unavailable` annotation with an explicit Gate 0B reason. The
 four-neighbour boundary-contact counts remain minimal boundary structure and are not described as
@@ -117,8 +124,8 @@ full oriented boundary ownership. Neither unavailable modality is represented by
 The corridor supports `base` and `alternate` solid-colour variants. Appearance selection does not
 enter geometry sampling or surface remapping. For identical seed, geometry, and action, the
 alternate variant changes RGB logical identity while preserving opaque surfaces, segmentation,
-correspondence, visibility events, empty occlusion relations, scene-content identity, and
-ecological-label identity.
+correspondence, neutral mask changes, typed unavailable visibility-event and occlusion records,
+scene-content identity, and ecological-label identity.
 
 This is only a minimal invariance contract. Solid-colour replacement does not complete the final
 texture-frequency, illumination-OOD, appearance-asset, or final-seed requirements.
@@ -130,7 +137,7 @@ The modality allocation remains:
 | Class | Records in this slice |
 | --- | --- |
 | Sensory | RGB and executed action |
-| Ecological oracle | Opaque surface regions, projected-image fractions, correspondence, visibility events, boundary contacts, and justified occlusion relations |
+| Ecological oracle | Opaque surface regions, projected-image fractions, correspondence, neutral mask changes, typed visibility-event availability, boundary contacts, and typed occlusion availability/relations |
 | Metric baseline | Depth |
 | Instrumentation only | Camera transforms, raw IDs, raw world positions, sampled corridor geometry, seed namespaces, and scene-generation evidence |
 | Control metadata | Compound transition and scene-family records |
@@ -141,26 +148,33 @@ Loader permission checks run before the corresponding artifact is resolved or op
 
 ## Identity and provenance
 
-The schema migration advances the dataset, resolved configuration, and privileged instrumentation
-contracts from `0.1.0-dev.1` to `0.1.0-dev.2`. The unchanged ecological transition record remains
-at `0.1.0-dev.1`; this cleanly preserves the reviewed single-occluder ecological identity rather
-than adding control metadata to a learner-facing label domain. The historical and current
-single-occluder episode-0 ecological hash is:
+The schema migration coherently advances the dataset, resolved configuration, privileged
+instrumentation, and ecological transition contracts to `0.1.0-dev.2`. Slice 1 transition
+`0.1.0-dev.1` had the historical single-occluder episode-0 ecological hash:
 
 ```text
 8f7c7a7e8f70f9e84bf2f256ecf93f8d94f5327abe536c01a6b8f7e87aef3df0
 ```
 
 `scene_family` is included in dataset scientific-content identity. Each episode also records a
-`scene_content_sha256`; for corridor episodes its domain contains the scene family, episode seed,
-and exact sampled geometry. Metric geometry therefore affects dataset content identity without
-entering the ecological-label hash. Meaningful rendered layout or visibility differences still
-change the ecological label through segmentation and derived ecological annotations.
+`scene_content_sha256`. Episode seed is excluded because it is generation history, not content.
+The corridor domain contains scene family/apparatus, exact sampled width and length, wall height
+and thicknesses, camera start/end/height/orientation, field of view, and action. The
+single-occluder domain contains its actual fixed three-surface apparatus and camera/action
+trajectory. Appearance, opaque IDs, labels, timestamps, and provenance are excluded. Metric
+geometry therefore affects dataset content identity without entering the ecological-label hash.
+
+Transition `0.1.0-dev.2` is not byte compatible with Slice 1. It preserves the meaning and exact
+measurements of unchanged observations while separating neutral raster facts from unavailable
+ecological claims. The expected new single-occluder episode-0 ecological hash is
+`0210bdbce412c6cf199c1cad58b5e8831b97d8a112a0e82f285b6ea1c20df4a3`; expected corridor episode-0
+and episode-1 hashes are `92e89e4e0eb23b2a50a39cb3803c490654899531a000a3c1ef139e875177f2f8`
+and `ea231fe400fabfeb1afea6f9ba58450700734d6b539cfd0a3d540b7ad3345980`.
 
 Artifact/container hashes, ecological-label identity, dataset scientific-content identity,
 source provenance, renderer/execution provenance, content/provenance binding, and volatile
 `run.json` metadata remain separate domains. RGB byte equality across WGL and OSMesa is not
-claimed. A corridor ecological regression hash will be pinned only after exact-head CI evidence.
+claimed. New regression identities require local and exact-head CI evidence.
 
 ## Remaining Gate 0B work
 

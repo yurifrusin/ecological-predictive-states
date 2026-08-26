@@ -208,20 +208,33 @@ def test_corridor_declared_surface_absent_from_both_frames_is_rejected(
         validate_dataset(broken)
 
 
-def test_corridor_cannot_claim_uncontrolled_occlusion_relation(
+@pytest.mark.parametrize("fabrication", ["available_empty", "available_relation"])
+def test_corridor_cannot_claim_available_occlusion_without_oracle(
     corridor_dataset: Path,
     tmp_path: Path,
+    fabrication: str,
 ) -> None:
-    broken = _copy_dataset(corridor_dataset, tmp_path, "corridor-fabricated-occlusion")
+    broken = _copy_dataset(
+        corridor_dataset,
+        tmp_path,
+        f"corridor-fabricated-occlusion-{fabrication}",
+    )
     transition, instrumentation = load_episode_payloads(broken, 0)
     first, second = (surface["surface_id"] for surface in transition["surfaces"][:2])
-    transition["occlusion_relations"] = [
-        {
-            "occluder_surface_id": first,
-            "occluded_surface_id": second,
-            "frame_indices": [0, 1],
-        }
-    ]
+    relations = []
+    if fabrication == "available_relation":
+        relations.append(
+            {
+                "occluder_surface_id": first,
+                "occluded_surface_id": second,
+                "frame_indices": [0, 1],
+            }
+        )
+    transition["occlusion"] = {
+        "status": "available",
+        "oracle_rule": "counterfactual_occluder_exclusion_v1",
+        "relations": relations,
+    }
     commit_episode_payloads(broken, 0, transition, instrumentation)
-    with pytest.raises(DatasetValidationError, match="controlled oracle evidence"):
+    with pytest.raises(DatasetValidationError, match="corridor occlusion"):
         validate_dataset(broken)

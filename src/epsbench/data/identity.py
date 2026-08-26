@@ -2,7 +2,9 @@
 
 from typing import Any
 
+from epsbench.config import CorridorConfig, SingleOccluderConfig
 from epsbench.schema import (
+    CorridorSampledGeometry,
     DatasetManifest,
     RendererProvenance,
     SourceProvenance,
@@ -28,12 +30,13 @@ def ecological_label_domain(transition: TransitionRecord) -> dict[str, Any]:
         "region_correspondence": [
             item.model_dump(mode="json") for item in transition.region_correspondence
         ],
-        "visibility_events": [
-            item.model_dump(mode="json") for item in transition.visibility_events
+        "region_mask_changes": [
+            item.model_dump(mode="json") for item in transition.region_mask_changes
         ],
-        "occlusion_relations": [
-            item.model_dump(mode="json") for item in transition.occlusion_relations
-        ],
+        "ecological_visibility_events": transition.ecological_visibility_events.model_dump(
+            mode="json"
+        ),
+        "occlusion": transition.occlusion.model_dump(mode="json"),
         "boundary_structures": [
             item.model_dump(mode="json") for item in transition.boundary_structures
         ],
@@ -43,6 +46,98 @@ def ecological_label_domain(transition: TransitionRecord) -> dict[str, Any]:
 
 def compute_ecological_label_hash(transition: TransitionRecord) -> str:
     return sha256_bytes(canonical_json_bytes(ecological_label_domain(transition)))
+
+
+def single_occluder_scene_content_domain(config: SingleOccluderConfig) -> dict[str, Any]:
+    """Describe fixed apparatus and trajectory content without appearance or seed history."""
+
+    return {
+        "scene_family": config.scene_family,
+        "apparatus_version": "single_occluder_v1",
+        "surfaces": {
+            "support_surface": {
+                "type": "plane",
+                "position": [0.0, 0.0, 0.0],
+                "size": [4.0, 7.0, 0.1],
+            },
+            "background_surface": {
+                "type": "box",
+                "position": [0.0, 2.5, 1.05],
+                "half_size": [2.2, 0.05, 1.05],
+            },
+            "occluding_surface": {
+                "type": "box",
+                "position": [0.0, 0.8, 0.9],
+                "half_size": [0.55, 0.05, 0.9],
+            },
+        },
+        "camera": {
+            "before_position": [
+                config.camera.before_lateral,
+                config.camera.forward,
+                config.camera.height,
+            ],
+            "after_position": [
+                config.camera.after_lateral,
+                config.camera.forward,
+                config.camera.height,
+            ],
+            "orientation_rule": "xyaxes_1_0_0_0_0.16_1",
+            "field_of_view_degrees": config.camera.field_of_view_degrees,
+        },
+        "action": config.action.model_dump(mode="json"),
+    }
+
+
+def corridor_scene_content_domain(
+    config: CorridorConfig,
+    geometry: CorridorSampledGeometry,
+) -> dict[str, Any]:
+    """Describe sampled corridor layout and trajectory without appearance or seed history."""
+
+    return {
+        "scene_family": config.scene_family,
+        "apparatus_version": "corridor_v1",
+        "surfaces": {
+            "surface_names": [
+                "corridor_floor",
+                "corridor_left_surface",
+                "corridor_right_surface",
+                "corridor_end_surface",
+            ],
+            "width": geometry.width,
+            "length": geometry.length,
+            "wall_height": geometry.wall_height,
+            "wall_thickness": 0.05,
+            "floor_thickness": 0.05,
+        },
+        "camera": {
+            "before_position": [
+                geometry.camera_lateral_position,
+                geometry.camera_before_forward_position,
+                geometry.camera_height,
+            ],
+            "after_position": [
+                geometry.camera_lateral_position,
+                geometry.camera_after_forward_position,
+                geometry.camera_height,
+            ],
+            "orientation_rule": "xyaxes_1_0_0_0_0_1",
+            "field_of_view_degrees": geometry.field_of_view_degrees,
+        },
+        "action": config.action.model_dump(mode="json"),
+    }
+
+
+def compute_single_occluder_scene_content_hash(config: SingleOccluderConfig) -> str:
+    return sha256_bytes(canonical_json_bytes(single_occluder_scene_content_domain(config)))
+
+
+def compute_corridor_scene_content_hash(
+    config: CorridorConfig,
+    geometry: CorridorSampledGeometry,
+) -> str:
+    return sha256_bytes(canonical_json_bytes(corridor_scene_content_domain(config, geometry)))
 
 
 def dataset_logical_domain(manifest: DatasetManifest) -> dict[str, Any]:
