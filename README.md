@@ -4,9 +4,9 @@ Ecological Predictive States is a research repository for testing whether an act
 
 ## Current status
 
-Gate 0A (repository foundation), the reviewed single-occluder Gate 0B slice, and a separately reviewable corridor apparatus slice are implemented on the current development branch. The corridor slice adds a deterministic four-surface scene, prescribed forward monocular-camera motion, scene-specific privileged instrumentation, and scene-aware generation, validation, inspection, and corruption tests. A bounded correction round now separates neutral raster mask changes from unavailable ecological visibility events, gives occlusion an explicit availability contract, and advances the changed transition schema.
+Gate 0A and the reviewed single-occluder Gate 0B slice are canonical. The reviewed corridor Gate 0B Slice 2 is canonical after PR #3 and its linked documentation closeout. Its exact reviewed implementation head was `4eb754e16dd8bb80eb0873be01060f39fddcbe44`, which received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`.
 
-**No scientific result exists yet.** Successful generation and tests establish infrastructure only. Engineering review requested changes on the prior correction head; the current bounded engineering corrections require renewed exact-head engineering review, and scientific re-review remains pending. Full Gate 0B completion is not claimed: dense optical flow and full oriented boundary ownership remain incomplete. Gate 0C and all model work are not authorised.
+**No scientific result exists yet.** Successful generation, validation, and tests establish infrastructure only. Full Gate 0B completion is not claimed: dense optical flow and full oriented boundary ownership remain incomplete. Gate 0C and all model work remain unauthorised.
 
 The scientific authority is [the Research Charter](docs/RESEARCH_CHARTER.md), followed by [EPS-Bench v0](docs/EPS_BENCH_V0.md) and [Milestone 0](docs/MILESTONE_0.md). Architecture and current limits are recorded in [the implementation notes](docs/IMPLEMENTATION_NOTES.md); implementation, review, ownership, and closeout are separated by [the review protocol](docs/review-protocol.md).
 
