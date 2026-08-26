@@ -87,7 +87,7 @@ The Slice 3 version matrix advances only changed wire contracts. Both resolved c
 
 Neither meaningful migration is byte compatible: canonical transition JSON, ecological identity domains, artifact hashes, dataset hashes, and schema validation change. Under historical `0.1.0-dev.2`, the expected single-occluder episode-0 ecological hash is `0210bdbce412c6cf199c1cad58b5e8831b97d8a112a0e82f285b6ea1c20df4a3` in both tested environments. Historical corridor raster boundaries differ between Windows/WGL and Ubuntu/OSMesa, so exact regression values remain recorded by backend: Windows/WGL episode 0/1 are `92e89e4e0eb23b2a50a39cb3803c490654899531a000a3c1ef139e875177f2f8` and `ea231fe400fabfeb1afea6f9ba58450700734d6b539cfd0a3d540b7ad3345980`; Ubuntu/OSMesa episode 0/1 are `8ca92d6161acc2029421f1182491a96837f01058486fb5ee0c0189a1c2ff9a22` and `65ed70d5ad141313070978217d84a73e8504c17be95be193568d569940e71189`. No public `0.1.0` scientific dataset is implied.
 
-Local Windows/WGL `0.1.0-dev.3` analytic identities are `e6d5fc664957c4e68b3c249ce5bd32113755b1c86d5fff8dbeaafc75b550c7cd` for both canonical single-occluder episodes, `12ea54fea0b8d9716d12189fcba89397156f7c8111fcb7a488702ffb8240f3bf` for corridor episode 0, and `9b41e6780bbf89654cda8c5f6d5f4d6326d64bac2594a1afb12db883f91395b6` for corridor episode 1. Exact-head Ubuntu/OSMesa comparison is required before these are claimed or pinned as shared cross-platform values.
+Windows/WGL `0.1.0-dev.3` analytic identities are `e6d5fc664957c4e68b3c249ce5bd32113755b1c86d5fff8dbeaafc75b550c7cd` for both canonical single-occluder episodes, `12ea54fea0b8d9716d12189fcba89397156f7c8111fcb7a488702ffb8240f3bf` for corridor episode 0, and `9b41e6780bbf89654cda8c5f6d5f4d6326d64bac2594a1afb12db883f91395b6` for corridor episode 1. Exact-head Ubuntu/OSMesa CI run `32950788201` at `04238d5a399ad89b3bc8195e2d53002e5facf346` reproduced all four values, passed 195 tests, and completed generation, validation, and inspection for both families. A shared locked-environment analytic regression is therefore pinned. This does not claim stability across arbitrary drivers, platforms, dependency versions, or future scene families.
 
 ## Determinism and rendering limits
 
@@ -109,7 +109,7 @@ This evidence does not establish full Gate 0B completion, authorise Gate 0C, or 
 
 - Define and serialise full oriented boundary ownership rather than only boundary contacts plus an occlusion edge.
 - Derive true ecological accretion/deletion and disocclusion only after oriented boundary ownership is reviewed.
-- Complete exact-head Windows/WGL and Ubuntu/OSMesa analytic-identity evidence, then extend the posture beyond those locked environments and define any required tolerances for later scenes.
+- Extend the cross-platform analytic-identity posture beyond the evidenced locked Windows/WGL and Ubuntu/OSMesa environments and define any required tolerances for later scenes.
 - Expand procedural appearances beyond solid-colour variants if texture-frequency testing is adopted.
 
 Gate 0B completion is therefore not claimed. Gate 0C should not begin until these items and every Gate 0B exit criterion have owner-reviewed evidence.

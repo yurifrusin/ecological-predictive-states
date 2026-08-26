@@ -113,7 +113,7 @@ Local Windows/WGL evidence for the canonical configuration is:
 | Corridor 0 | `12ea54fea0b8d9716d12189fcba89397156f7c8111fcb7a488702ffb8240f3bf` |
 | Corridor 1 | `9b41e6780bbf89654cda8c5f6d5f4d6326d64bac2594a1afb12db883f91395b6` |
 
-The intended Windows/WGL to Ubuntu/OSMesa equality is not assumed. Exact-head CI evidence must be compared before a shared cross-platform regression is claimed. Raster-derived ecological hashes may remain backend-specific.
+Exact-head Ubuntu/OSMesa CI run `32950788201` at implementation head `04238d5a399ad89b3bc8195e2d53002e5facf346` reproduced all four local Windows/WGL analytic identities exactly. Those values are therefore pinned as one shared regression for the two locked environments. The same run passed all 195 Linux tests and generated, validated, and inspected both two-episode families. This is evidence only for the recorded dependency set and those WGL/OSMesa environments; it does not imply identity across arbitrary drivers, platforms, dependency versions, or future scene families. Raster-derived ecological and dataset hashes remain distinct and may be backend-specific.
 
 ## Independent validation and tests
 

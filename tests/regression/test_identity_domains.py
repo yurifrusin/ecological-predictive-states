@@ -34,17 +34,15 @@ EXPECTED_DEV_3_CORRIDOR_ECOLOGICAL_HASHES_BY_BACKEND = {
         "cd057369c7d2750021ca9e9eba27671f4cc10ca80d54d8a347a8ae34da417d38",
     ),
 }
-EXPECTED_DEV_3_ANALYTIC_HASHES_BY_BACKEND = {
-    "wgl-default": {
-        "single_occluder": (
-            "e6d5fc664957c4e68b3c249ce5bd32113755b1c86d5fff8dbeaafc75b550c7cd",
-            "e6d5fc664957c4e68b3c249ce5bd32113755b1c86d5fff8dbeaafc75b550c7cd",
-        ),
-        "corridor": (
-            "12ea54fea0b8d9716d12189fcba89397156f7c8111fcb7a488702ffb8240f3bf",
-            "9b41e6780bbf89654cda8c5f6d5f4d6326d64bac2594a1afb12db883f91395b6",
-        ),
-    }
+EXPECTED_DEV_3_CROSS_PLATFORM_ANALYTIC_HASHES = {
+    "single_occluder": (
+        "e6d5fc664957c4e68b3c249ce5bd32113755b1c86d5fff8dbeaafc75b550c7cd",
+        "e6d5fc664957c4e68b3c249ce5bd32113755b1c86d5fff8dbeaafc75b550c7cd",
+    ),
+    "corridor": (
+        "12ea54fea0b8d9716d12189fcba89397156f7c8111fcb7a488702ffb8240f3bf",
+        "9b41e6780bbf89654cda8c5f6d5f4d6326d64bac2594a1afb12db883f91395b6",
+    ),
 }
 
 
@@ -72,36 +70,28 @@ def test_corridor_ecological_hashes_match_locked_regressions(corridor_dataset: P
         assert tuple(episode.ecological_label_sha256 for episode in manifest.episodes) == expected
 
 
-def test_single_occluder_analytic_hash_matches_evidenced_backend_regression(
+def test_single_occluder_analytic_hash_matches_locked_cross_platform_regression(
     smoke_dataset: Path,
 ) -> None:
     manifest = DatasetManifest.model_validate_json(
         (smoke_dataset / "manifest.json").read_text(encoding="utf-8")
     )
-    expected_by_family = EXPECTED_DEV_3_ANALYTIC_HASHES_BY_BACKEND.get(
-        manifest.renderer_provenance.backend
+    assert (
+        tuple(episode.analytic_transport_sha256 for episode in manifest.episodes)
+        == EXPECTED_DEV_3_CROSS_PLATFORM_ANALYTIC_HASHES["single_occluder"]
     )
-    if expected_by_family is not None:
-        assert (
-            tuple(episode.analytic_transport_sha256 for episode in manifest.episodes)
-            == expected_by_family["single_occluder"]
-        )
 
 
-def test_corridor_analytic_hashes_match_evidenced_backend_regression(
+def test_corridor_analytic_hashes_match_locked_cross_platform_regression(
     corridor_dataset: Path,
 ) -> None:
     manifest = DatasetManifest.model_validate_json(
         (corridor_dataset / "manifest.json").read_text(encoding="utf-8")
     )
-    expected_by_family = EXPECTED_DEV_3_ANALYTIC_HASHES_BY_BACKEND.get(
-        manifest.renderer_provenance.backend
+    assert (
+        tuple(episode.analytic_transport_sha256 for episode in manifest.episodes)
+        == EXPECTED_DEV_3_CROSS_PLATFORM_ANALYTIC_HASHES["corridor"]
     )
-    if expected_by_family is not None:
-        assert (
-            tuple(episode.analytic_transport_sha256 for episode in manifest.episodes)
-            == expected_by_family["corridor"]
-        )
 
 
 def test_historical_slice_1_identity_is_recorded_as_migration_evidence() -> None:
