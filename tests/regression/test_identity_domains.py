@@ -11,10 +11,16 @@ HISTORICAL_SLICE_1_EPISODE_0_ECOLOGICAL_HASH = (
 EXPECTED_SINGLE_OCCLUDER_EPISODE_0_ECOLOGICAL_HASH = (
     "0210bdbce412c6cf199c1cad58b5e8831b97d8a112a0e82f285b6ea1c20df4a3"
 )
-EXPECTED_CORRIDOR_ECOLOGICAL_HASHES = (
-    "92e89e4e0eb23b2a50a39cb3803c490654899531a000a3c1ef139e875177f2f8",
-    "ea231fe400fabfeb1afea6f9ba58450700734d6b539cfd0a3d540b7ad3345980",
-)
+EXPECTED_CORRIDOR_ECOLOGICAL_HASHES_BY_BACKEND = {
+    "wgl-default": (
+        "92e89e4e0eb23b2a50a39cb3803c490654899531a000a3c1ef139e875177f2f8",
+        "ea231fe400fabfeb1afea6f9ba58450700734d6b539cfd0a3d540b7ad3345980",
+    ),
+    "osmesa": (
+        "8ca92d6161acc2029421f1182491a96837f01058486fb5ee0c0189a1c2ff9a22",
+        "65ed70d5ad141313070978217d84a73e8504c17be95be193568d569940e71189",
+    ),
+}
 
 
 def test_ecological_label_hash_matches_locked_cross_platform_regression(
@@ -32,8 +38,10 @@ def test_corridor_ecological_hashes_match_locked_regressions(corridor_dataset: P
     manifest = DatasetManifest.model_validate_json(
         (corridor_dataset / "manifest.json").read_text(encoding="utf-8")
     )
-    assert tuple(episode.ecological_label_sha256 for episode in manifest.episodes) == (
-        EXPECTED_CORRIDOR_ECOLOGICAL_HASHES
+    assert manifest.renderer_provenance.backend in (EXPECTED_CORRIDOR_ECOLOGICAL_HASHES_BY_BACKEND)
+    assert (
+        tuple(episode.ecological_label_sha256 for episode in manifest.episodes)
+        == (EXPECTED_CORRIDOR_ECOLOGICAL_HASHES_BY_BACKEND[manifest.renderer_provenance.backend])
     )
 
 

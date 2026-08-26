@@ -167,14 +167,18 @@ geometry therefore affects dataset content identity without entering the ecologi
 Transition `0.1.0-dev.2` is not byte compatible with Slice 1. It preserves the meaning and exact
 measurements of unchanged observations while separating neutral raster facts from unavailable
 ecological claims. The expected new single-occluder episode-0 ecological hash is
-`0210bdbce412c6cf199c1cad58b5e8831b97d8a112a0e82f285b6ea1c20df4a3`; expected corridor episode-0
-and episode-1 hashes are `92e89e4e0eb23b2a50a39cb3803c490654899531a000a3c1ef139e875177f2f8`
-and `ea231fe400fabfeb1afea6f9ba58450700734d6b539cfd0a3d540b7ad3345980`.
+`0210bdbce412c6cf199c1cad58b5e8831b97d8a112a0e82f285b6ea1c20df4a3` in both tested environments.
+Corridor values are pinned per recorded backend because raster boundaries differ: Windows/WGL
+episode 0/1 are `92e89e4e0eb23b2a50a39cb3803c490654899531a000a3c1ef139e875177f2f8`
+and `ea231fe400fabfeb1afea6f9ba58450700734d6b539cfd0a3d540b7ad3345980`; Ubuntu/OSMesa episode
+0/1 are `8ca92d6161acc2029421f1182491a96837f01058486fb5ee0c0189a1c2ff9a22`
+and `65ed70d5ad141313070978217d84a73e8504c17be95be193568d569940e71189`.
 
 Artifact/container hashes, ecological-label identity, dataset scientific-content identity,
 source provenance, renderer/execution provenance, content/provenance binding, and volatile
 `run.json` metadata remain separate domains. RGB byte equality across WGL and OSMesa is not
-claimed. New regression identities require local and exact-head CI evidence.
+claimed. These backend-specific identities were pinned from local Windows/WGL evidence and exact-
+head Ubuntu/OSMesa run `32929169048`; a successful renewed exact-head CI run remains required.
 
 ## Remaining Gate 0B work
 

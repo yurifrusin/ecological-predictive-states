@@ -58,12 +58,13 @@ verification. The original findings remain unchanged in
   identity regression tests, `README.md`, `docs/IMPLEMENTATION_NOTES.md`, and
   `docs/GATE_0B_SLICE_2_CORRIDOR.md`.
 - Tests: transition round-trip requires `0.1.0-dev.2`; the historical Slice 1
-  `0.1.0-dev.1` hash remains recorded; new single-occluder and corridor ecological identities are
-  exact regressions.
+  `0.1.0-dev.1` hash remains recorded; the new single-occluder identity and backend-specific
+  Windows/WGL and Ubuntu/OSMesa corridor identities are exact regressions.
 - Implementation status: `IMPLEMENTED_PENDING_VERIFICATION`.
 - Limitations: the migration is intentionally not byte compatible. It does not offer a V1/V2
-  loader union because these contracts are unreleased. Exact-head CI confirmation is required
-  before renewed review can accept the pinned values.
+  loader union because these contracts are unreleased. Corridor ecological identity is not
+  cross-platform; exact values are selected by recorded renderer backend. Successful renewed
+  exact-head CI confirmation is required before re-review can accept the pinned values.
 
 ### `EPS-SR3-0004` — Correct scene-content identity semantics
 
