@@ -4,9 +4,7 @@ Ecological Predictive States is a research repository for testing whether an act
 
 ## Current status
 
-Gate 0A and the reviewed single-occluder Gate 0B slice are canonical. The reviewed corridor Gate 0B Slice 2 is canonical after PR #3 and its linked documentation closeout. Its exact reviewed implementation head was `4eb754e16dd8bb80eb0873be01060f39fddcbe44`, which received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`.
-
-Gate 0B Slice 3 analytic optical transport is implemented on branch `codex/gate-0b-slice-3-analytic-flow` and is pending independent review. It adds exact forward/backward image-plane transport for both canonical scene families without adding boundary ownership or ecological visibility events. Its method and limits are documented in [the Slice 3 contract](docs/GATE_0B_SLICE_3_ANALYTIC_FLOW.md).
+Gate 0A is canonical. The reviewed single-occluder Gate 0B Slice 1 and corridor Gate 0B Slice 2 are canonical. Gate 0B Slice 3 analytic optical transport is also canonical after exact-head engineering and scientific review. Its exact reviewed implementation head was `3086bc2eccc4b7492eb8a77660572e879a04ef0b`, which received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`, and its accepted method is `analytic_static_scene_transport_v3`. The method and limits are documented in [the Slice 3 contract](docs/GATE_0B_SLICE_3_ANALYTIC_FLOW.md).
 
 **No scientific result exists yet.** Successful generation, validation, and tests establish infrastructure only. Full Gate 0B completion is not claimed: full oriented boundary ownership and ecological visibility-event derivation remain incomplete. Gate 0C and all model work remain unauthorised.
 
