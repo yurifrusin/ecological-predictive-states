@@ -91,7 +91,7 @@ Neither meaningful migration is byte compatible: canonical transition JSON, ecol
 
 The scientifically rejected PR #5 v1 analytic identities remain historical evidence: `e6d5fc664957c4e68b3c249ce5bd32113755b1c86d5fff8dbeaafc75b550c7cd` for both canonical single-occluder episodes, `12ea54fea0b8d9716d12189fcba89397156f7c8111fcb7a488702ffb8240f3bf` for corridor episode 0, and `9b41e6780bbf89654cda8c5f6d5f4d6326d64bac2594a1afb12db883f91395b6` for corridor episode 1. Their earlier Windows/WGL and Ubuntu/OSMesa equality does not rescue the rejected infinite-plane method.
 
-Corrected local Windows/WGL v2 identities are provisionally `479d4540835dcc5d204e530766edfcc4bd74b971cc8efe9cbe391317d4ca6740` for both single-occluder episodes, `ddb4dff0fba18d89cd6c15eb988e672c93988d3d4eda2ae625ab317d36631015` for corridor episode 0, and `a276190abe142bd6859cd0e29983964cbdd17c2cbbf291141ed6f32c6c3c5007` for corridor episode 1. They are not pinned as shared cross-platform regressions until exact-head Ubuntu/OSMesa correction evidence exists.
+Corrected v2 identities are `479d4540835dcc5d204e530766edfcc4bd74b971cc8efe9cbe391317d4ca6740` for both single-occluder episodes, `ddb4dff0fba18d89cd6c15eb988e672c93988d3d4eda2ae625ab317d36631015` for corridor episode 0, and `a276190abe142bd6859cd0e29983964cbdd17c2cbbf291141ed6f32c6c3c5007` for corridor episode 1. Exact-head Ubuntu/OSMesa CI run `32962076994` at correction head `753c89dc54ad2c5f671f385237392d8794d94f37` reproduced the local Windows/WGL values, completed 207 tests, and exercised generation, validation, and inspection for both scene families. A shared locked-environment v2 analytic regression is therefore pinned. This does not claim stability across arbitrary drivers, platforms, dependency versions, or future scene families.
 
 ## Determinism and rendering limits
 
@@ -113,7 +113,7 @@ This evidence does not establish full Gate 0B completion, authorise Gate 0C, or 
 
 - Define and serialise full oriented boundary ownership rather than only boundary contacts plus an occlusion edge.
 - Derive true ecological accretion/deletion and disocclusion only after oriented boundary ownership is reviewed.
-- Confirm corrected v2 identities on exact-head Ubuntu/OSMesa CI, then extend the cross-platform posture beyond the locked Windows/WGL and Ubuntu/OSMesa environments and define any required tolerances for later scenes.
+- Extend the corrected v2 cross-platform posture beyond the evidenced locked Windows/WGL and Ubuntu/OSMesa environments and define any required tolerances for later scenes.
 - Expand procedural appearances beyond solid-colour variants if texture-frequency testing is adopted.
 
 Gate 0B completion is therefore not claimed. Gate 0C should not begin until these items and every Gate 0B exit criterion have owner-reviewed evidence.

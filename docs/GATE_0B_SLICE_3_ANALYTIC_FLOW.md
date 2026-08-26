@@ -128,7 +128,7 @@ The reviewed v1 identities are historical evidence for the rejected infinite-pla
 | Rejected corridor 0 | `12ea54fea0b8d9716d12189fcba89397156f7c8111fcb7a488702ffb8240f3bf` |
 | Rejected corridor 1 | `9b41e6780bbf89654cda8c5f6d5f4d6326d64bac2594a1afb12db883f91395b6` |
 
-Corrected local Windows/WGL v2 evidence is `479d4540835dcc5d204e530766edfcc4bd74b971cc8efe9cbe391317d4ca6740` for both single-occluder episodes, `ddb4dff0fba18d89cd6c15eb988e672c93988d3d4eda2ae625ab317d36631015` for corridor episode 0, and `a276190abe142bd6859cd0e29983964cbdd17c2cbbf291141ed6f32c6c3c5007` for corridor episode 1. They are provisional local evidence, not pinned shared cross-platform regressions, until an exact correction head runs on Ubuntu/OSMesa. Raster-derived ecological and dataset hashes remain distinct and may be backend-specific.
+Corrected v2 identities are `479d4540835dcc5d204e530766edfcc4bd74b971cc8efe9cbe391317d4ca6740` for both single-occluder episodes, `ddb4dff0fba18d89cd6c15eb988e672c93988d3d4eda2ae625ab317d36631015` for corridor episode 0, and `a276190abe142bd6859cd0e29983964cbdd17c2cbbf291141ed6f32c6c3c5007` for corridor episode 1. Exact-head Ubuntu/OSMesa CI run `32962076994` at correction head `753c89dc54ad2c5f671f385237392d8794d94f37` reproduced all four local Windows/WGL identities, completed 207 Linux tests, and generated, validated, and inspected both two-episode families. These values are therefore pinned as one shared regression for the two locked environments. This does not imply identity across arbitrary drivers, platforms, dependency versions, or future scene families. Raster-derived ecological and dataset hashes remain distinct and may be backend-specific.
 
 ## Independent validation and tests
 
