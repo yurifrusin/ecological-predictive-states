@@ -11,17 +11,23 @@ import mujoco
 import numpy as np
 import numpy.typing as npt
 
-ANALYTIC_TRANSPORT_METHOD: Final = "analytic_static_scene_transport_v2"
+ANALYTIC_TRANSPORT_METHOD: Final = "analytic_static_scene_transport_v3"
 ANALYTIC_BOUNDARY_RULE: Final = "four_neighbour_assignment_band_v1"
 ANALYTIC_BOUNDARY_WIDTH_PIXELS: Final = 1
-ANALYTIC_SURFACE_INTERSECTION_RULE: Final = "compiled_plane_and_oriented_box_nearest_hit_v2"
-FINITE_PLANE_EXTENT_RULE: Final = "finite_plane_visual_extent_v1"
+ANALYTIC_SURFACE_INTERSECTION_RULE: Final = "compiled_plane_and_oriented_box_nearest_hit_v3"
+FINITE_PLANE_EXTENT_RULE: Final = "finite_plane_visual_extent_v2"
+FINITE_PLANE_EDGE_COMPARISON_RULE: Final = "inclusive_extent_plus_scaled_binary64_epsilon_v1"
+FINITE_PLANE_EDGE_BINARY64_EPSILON: Final = float(np.finfo(np.float64).eps)
+FINITE_PLANE_EDGE_TOLERANCE_MULTIPLIER: Final = 16.0
+FINITE_PLANE_EDGE_MINIMUM_TOLERANCE_SCALE: Final = 1.0
 TARGET_VISIBILITY_RULE: Final = "same_surface_point_nearest_hit_v1"
 FLOW_FIXED_POINT_SCALE: Final = 1024
 FLOW_QUANTISATION_ROUNDING: Final = "nearest_ties_to_even"
 VISIBILITY_RELATIVE_TOLERANCE: Final = 1e-7
 VISIBILITY_MINIMUM_TOLERANCE_SCALE: Final = 1.0
 RAY_DIRECTION_EPSILON: Final = 1e-12
+CAMERA_ROTATION_ORTHONORMALITY_TOLERANCE: Final = 1e-9
+CAMERA_ROTATION_DETERMINANT_TOLERANCE: Final = 1e-9
 
 FloatArray = npt.NDArray[np.float64]
 Int32Array = npt.NDArray[np.int32]
@@ -69,6 +75,78 @@ class AnalyticTransportArrays:
     after_boundary_ambiguous: BoolArray
 
 
+def _validated_raster_dimensions(width: int, height: int) -> tuple[int, int]:
+    dimensions: list[int] = []
+    for name, value in (("width", width), ("height", height)):
+        if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
+            raise ValueError(f"analytic raster {name} must be a positive integer")
+        integer_value = int(value)
+        if integer_value <= 0:
+            raise ValueError(f"analytic raster {name} must be a positive integer")
+        dimensions.append(integer_value)
+    return dimensions[0], dimensions[1]
+
+
+def _validated_vertical_fov(value: float) -> float:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value,
+        (int, float, np.integer, np.floating),
+    ):
+        raise ValueError("analytic camera vertical FOV must be a finite number in (0, 180)")
+    fov = float(value)
+    if not math.isfinite(fov) or not 0.0 < fov < 180.0:
+        raise ValueError("analytic camera vertical FOV must be a finite number in (0, 180)")
+    return fov
+
+
+def _validated_camera_arrays(camera: AnalyticCamera) -> tuple[FloatArray, FloatArray, float]:
+    try:
+        position = np.asarray(camera.world_position, dtype=np.float64)
+        rotation_values = np.asarray(camera.world_rotation_row_major, dtype=np.float64)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "analytic camera position and rotation must be finite numeric values"
+        ) from error
+    if position.shape != (3,) or not np.all(np.isfinite(position)):
+        raise ValueError("analytic camera position must contain exactly three finite values")
+    if rotation_values.shape != (9,) or not np.all(np.isfinite(rotation_values)):
+        raise ValueError("analytic camera rotation must contain exactly nine finite values")
+    rotation = rotation_values.reshape(3, 3)
+    orthonormality_error = float(np.max(np.abs(rotation.T @ rotation - np.eye(3))))
+    determinant = float(np.linalg.det(rotation))
+    if (
+        orthonormality_error > CAMERA_ROTATION_ORTHONORMALITY_TOLERANCE
+        or not math.isfinite(determinant)
+        or abs(determinant - 1.0) > CAMERA_ROTATION_DETERMINANT_TOLERANCE
+    ):
+        raise ValueError("analytic camera rotation must be a proper orthonormal rotation")
+    return position, rotation, _validated_vertical_fov(camera.vertical_field_of_view_degrees)
+
+
+def _validated_controlled_geom_ids(
+    model: mujoco.MjModel,
+    controlled_geom_ids: tuple[int, ...],
+) -> tuple[int, ...]:
+    if not controlled_geom_ids:
+        raise ValueError("controlled geom identifiers must be non-empty and unique")
+    validated: list[int] = []
+    for geom_id in controlled_geom_ids:
+        if isinstance(geom_id, (bool, np.bool_)) or not isinstance(
+            geom_id,
+            (int, np.integer),
+        ):
+            raise ValueError("controlled geom identifiers must be integers")
+        integer_id = int(geom_id)
+        if integer_id < 0 or integer_id >= model.ngeom:
+            raise ValueError(
+                f"controlled geom identifier {integer_id} is outside [0, {model.ngeom})"
+            )
+        validated.append(integer_id)
+    if len(set(validated)) != len(validated):
+        raise ValueError("controlled geom identifiers must be non-empty and unique")
+    return tuple(validated)
+
+
 def focal_scales_from_vertical_fov(
     width: int,
     height: int,
@@ -76,6 +154,8 @@ def focal_scales_from_vertical_fov(
 ) -> tuple[float, float]:
     """Return horizontal/vertical focal scales in pixels from aspect ratio and vertical FOV."""
 
+    width, height = _validated_raster_dimensions(width, height)
+    vertical_field_of_view_degrees = _validated_vertical_fov(vertical_field_of_view_degrees)
     vertical_half_tangent = math.tan(math.radians(vertical_field_of_view_degrees) / 2.0)
     aspect_ratio = width / height
     horizontal_half_tangent = aspect_ratio * vertical_half_tangent
@@ -87,10 +167,12 @@ def focal_scales_from_vertical_fov(
 def pixel_rays_world(width: int, height: int, camera: AnalyticCamera) -> FloatArray:
     """Construct unit world-space rays through every centre-of-pixel sample."""
 
+    width, height = _validated_raster_dimensions(width, height)
+    _, rotation, vertical_fov = _validated_camera_arrays(camera)
     focal_x, focal_y = focal_scales_from_vertical_fov(
         width,
         height,
-        camera.vertical_field_of_view_degrees,
+        vertical_fov,
     )
     rows, columns = np.indices((height, width), dtype=np.float64)
     centre_x = width / 2.0
@@ -104,7 +186,6 @@ def pixel_rays_world(width: int, height: int, camera: AnalyticCamera) -> FloatAr
         axis=-1,
     )
     directions_camera /= np.linalg.norm(directions_camera, axis=-1, keepdims=True)
-    rotation = np.asarray(camera.world_rotation_row_major, dtype=np.float64).reshape(3, 3)
     return np.asarray(directions_camera @ rotation.T, dtype=np.float64)
 
 
@@ -116,14 +197,17 @@ def project_world_points(
 ) -> tuple[FloatArray, FloatArray, BoolArray]:
     """Project world points to continuous image coordinates under the declared convention."""
 
+    width, height = _validated_raster_dimensions(width, height)
+    position, rotation, vertical_fov = _validated_camera_arrays(camera)
+    points = np.asarray(world_points, dtype=np.float64)
+    if points.ndim < 1 or points.shape[-1] != 3 or not np.all(np.isfinite(points)):
+        raise ValueError("analytic world points must have a final dimension of three finite values")
     focal_x, focal_y = focal_scales_from_vertical_fov(
         width,
         height,
-        camera.vertical_field_of_view_degrees,
+        vertical_fov,
     )
-    position = np.asarray(camera.world_position, dtype=np.float64)
-    rotation = np.asarray(camera.world_rotation_row_major, dtype=np.float64).reshape(3, 3)
-    camera_points = np.asarray((world_points - position) @ rotation, dtype=np.float64)
+    camera_points = np.asarray((points - position) @ rotation, dtype=np.float64)
     forward_distance = -camera_points[..., 2]
     in_front = forward_distance > RAY_DIRECTION_EPSILON
     safe_distance = np.where(in_front, forward_distance, 1.0)
@@ -154,14 +238,21 @@ def _nearest_controlled_intersections(
         if geom_type == int(mujoco.mjtGeom.mjGEOM_PLANE):
             denominator = local_directions[..., 2]
             non_parallel = np.abs(denominator) > RAY_DIRECTION_EPSILON
-            candidate = np.where(non_parallel, -local_origin[2] / denominator, np.inf)
+            candidate = np.full(denominator.shape, np.inf, dtype=np.float64)
+            np.divide(-local_origin[2], denominator, out=candidate, where=non_parallel)
             positive = np.isfinite(candidate) & (candidate > RAY_DIRECTION_EPSILON)
             finite_candidate = np.where(positive, candidate, 0.0)
             local_hit_x = local_origin[0] + finite_candidate * local_directions[..., 0]
             local_hit_y = local_origin[1] + finite_candidate * local_directions[..., 1]
             visual_half_extent = np.asarray(model.geom_size[geom_id, :2], dtype=np.float64)
-            inside_visual_extent = (np.abs(local_hit_x) <= visual_half_extent[0]) & (
-                np.abs(local_hit_y) <= visual_half_extent[1]
+            edge_tolerance = (
+                FINITE_PLANE_EDGE_TOLERANCE_MULTIPLIER
+                * FINITE_PLANE_EDGE_BINARY64_EPSILON
+                * np.maximum(FINITE_PLANE_EDGE_MINIMUM_TOLERANCE_SCALE, visual_half_extent)
+            )
+            inclusive_limit = visual_half_extent + edge_tolerance
+            inside_visual_extent = (np.abs(local_hit_x) <= inclusive_limit[0]) & (
+                np.abs(local_hit_y) <= inclusive_limit[1]
             )
             candidate = np.where(positive & inside_visual_extent, candidate, np.inf)
         elif geom_type == int(mujoco.mjtGeom.mjGEOM_BOX):
@@ -311,8 +402,10 @@ def compute_analytic_transport(
 ) -> AnalyticTransportArrays:
     """Compute exact forward/backward static-surface transport from compiled geometry."""
 
-    if not controlled_geom_ids or len(set(controlled_geom_ids)) != len(controlled_geom_ids):
-        raise ValueError("controlled geom identifiers must be non-empty and unique")
+    width, height = _validated_raster_dimensions(width, height)
+    _validated_camera_arrays(before_camera)
+    _validated_camera_arrays(after_camera)
+    controlled_geom_ids = _validated_controlled_geom_ids(model, controlled_geom_ids)
     mujoco.mj_forward(model, data)
     before_directions = pixel_rays_world(width, height, before_camera)
     after_directions = pixel_rays_world(width, height, after_camera)

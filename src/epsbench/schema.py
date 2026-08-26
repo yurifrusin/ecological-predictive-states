@@ -368,8 +368,15 @@ class OpticalTransportQuantisation(StrictModel):
 
 
 class AnalyticIntersectionVisibilityContract(StrictModel):
-    surface_intersection_rule: Literal["compiled_plane_and_oriented_box_nearest_hit_v2"]
-    finite_plane_extent_rule: Literal["finite_plane_visual_extent_v1"]
+    surface_intersection_rule: Literal["compiled_plane_and_oriented_box_nearest_hit_v3"]
+    finite_plane_extent_rule: Literal["finite_plane_visual_extent_v2"]
+    finite_plane_edge_comparison_rule: Literal["inclusive_extent_plus_scaled_binary64_epsilon_v1"]
+    finite_plane_edge_binary64_epsilon: float = Field(
+        ge=2.220446049250313e-16,
+        le=2.220446049250313e-16,
+    )
+    finite_plane_edge_tolerance_multiplier: float = Field(ge=16.0, le=16.0)
+    finite_plane_edge_minimum_tolerance_scale: float = Field(ge=1.0, le=1.0)
     target_visibility_rule: Literal["same_surface_point_nearest_hit_v1"]
     visibility_relative_tolerance: float = Field(ge=1e-7, le=1e-7)
     visibility_minimum_tolerance_scale: float = Field(ge=1.0, le=1.0)
@@ -412,7 +419,7 @@ class DirectionalOpticalTransport(StrictModel):
 
 class AvailableDenseOpticalTransport(StrictModel):
     status: Literal["available"]
-    method: Literal["analytic_static_scene_transport_v2"]
+    method: Literal["analytic_static_scene_transport_v3"]
     coordinate_convention: OpticalTransportCoordinateConvention
     quantisation: OpticalTransportQuantisation
     intersection_visibility: AnalyticIntersectionVisibilityContract
@@ -446,7 +453,7 @@ DenseOpticalTransport = Annotated[
 
 
 class TransitionRecord(StrictModel):
-    schema_version: Literal["0.1.0-dev.4"]
+    schema_version: Literal["0.1.0-dev.5"]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     action: Action
     surfaces: tuple[SurfaceReference, ...] = Field(min_length=1)
@@ -697,7 +704,7 @@ class DirectionalTransportDiagnostic(StrictModel):
 
 
 class AnalyticTransportDiagnostics(StrictModel):
-    method: Literal["analytic_static_scene_transport_v2"]
+    method: Literal["analytic_static_scene_transport_v3"]
     renderer_cross_check: Literal["non_authoritative_exact_interior_agreement_v2"]
     interior_agreement_requirement: Literal["zero_unexplained_disagreement_v1"]
     frames: tuple[AnalyticRendererFrameDiagnostic, AnalyticRendererFrameDiagnostic]
@@ -714,7 +721,7 @@ class AnalyticTransportDiagnostics(StrictModel):
 
 
 class SingleOccluderInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.4"]
+    schema_version: Literal["0.1.0-dev.5"]
     scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]
@@ -757,7 +764,7 @@ class SingleOccluderInstrumentation(StrictModel):
 
 
 class CorridorInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.4"]
+    schema_version: Literal["0.1.0-dev.5"]
     scene_family: Literal[SceneFamily.CORRIDOR]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]

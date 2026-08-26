@@ -15,7 +15,7 @@ from epsbench.data import (
     generate_dataset,
     validate_dataset,
 )
-from epsbench.data.identity import compute_analytic_transport_hash
+from epsbench.data.identity import analytic_transport_domain, compute_analytic_transport_hash
 from epsbench.schema import (
     AvailableDenseOpticalTransport,
     AvailableOcclusionAnnotation,
@@ -210,15 +210,40 @@ def test_loader_returns_complete_typed_transport_bundle(
     assert bundle.forward_validity.dtype == bundle.forward_reasons.dtype == np.uint8
     assert bundle.backward_validity.dtype == bundle.backward_reasons.dtype == np.uint8
     assert bundle.fixed_point_scale == 1024
-    assert bundle.method == "analytic_static_scene_transport_v2"
+    assert bundle.method == "analytic_static_scene_transport_v3"
     assert bundle.intersection_visibility.finite_plane_extent_rule == (
-        "finite_plane_visual_extent_v1"
+        "finite_plane_visual_extent_v2"
     )
+    assert bundle.intersection_visibility.finite_plane_edge_comparison_rule == (
+        "inclusive_extent_plus_scaled_binary64_epsilon_v1"
+    )
+    assert bundle.intersection_visibility.finite_plane_edge_binary64_epsilon == (
+        np.finfo(np.float64).eps
+    )
+    assert bundle.intersection_visibility.finite_plane_edge_tolerance_multiplier == 16.0
+    assert bundle.intersection_visibility.finite_plane_edge_minimum_tolerance_scale == 1.0
     assert bundle.intersection_visibility.visibility_relative_tolerance == 1e-7
     assert np.array_equal(bundle.forward_validity == 1, bundle.forward_reasons == 0)
     assert np.array_equal(bundle.backward_validity == 1, bundle.backward_reasons == 0)
     assert np.all(bundle.forward_vectors_fixed[bundle.forward_validity == 0] == 0)
     assert np.all(bundle.backward_vectors_fixed[bundle.backward_validity == 0] == 0)
+
+
+def test_complete_finite_plane_edge_policy_changes_analytic_identity(
+    smoke_dataset: Path,
+) -> None:
+    transport = _available_transport(smoke_dataset)
+    assert analytic_transport_domain(transport)["intersection_visibility"] == (
+        transport.intersection_visibility.model_dump(mode="json")
+    )
+    assert compute_analytic_transport_hash(transport) == transport.analytic_transport_sha256
+    changed_contract = transport.intersection_visibility.model_copy(
+        update={"finite_plane_edge_tolerance_multiplier": 32.0}
+    )
+    changed_transport = transport.model_copy(update={"intersection_visibility": changed_contract})
+    assert compute_analytic_transport_hash(changed_transport) != (
+        transport.analytic_transport_sha256
+    )
 
 
 def test_renderer_cross_check_has_zero_unexplained_interior_disagreement(

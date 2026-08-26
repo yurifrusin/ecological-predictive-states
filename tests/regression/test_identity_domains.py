@@ -44,7 +44,7 @@ REJECTED_PR5_CROSS_PLATFORM_ANALYTIC_HASHES = {
         "9b41e6780bbf89654cda8c5f6d5f4d6326d64bac2594a1afb12db883f91395b6",
     ),
 }
-EXPECTED_DEV_4_CROSS_PLATFORM_ANALYTIC_HASHES = {
+REVIEWED_ER5_DEV_4_CROSS_PLATFORM_ANALYTIC_HASHES = {
     "single_occluder": (
         "479d4540835dcc5d204e530766edfcc4bd74b971cc8efe9cbe391317d4ca6740",
         "479d4540835dcc5d204e530766edfcc4bd74b971cc8efe9cbe391317d4ca6740",
@@ -52,6 +52,16 @@ EXPECTED_DEV_4_CROSS_PLATFORM_ANALYTIC_HASHES = {
     "corridor": (
         "ddb4dff0fba18d89cd6c15eb988e672c93988d3d4eda2ae625ab317d36631015",
         "a276190abe142bd6859cd0e29983964cbdd17c2cbbf291141ed6f32c6c3c5007",
+    ),
+}
+EXPECTED_DEV_5_CROSS_PLATFORM_ANALYTIC_HASHES = {
+    "single_occluder": (
+        "77821c734e4a5316851b9e57417a014e8caf292f568314da05e2493608960832",
+        "77821c734e4a5316851b9e57417a014e8caf292f568314da05e2493608960832",
+    ),
+    "corridor": (
+        "ffa9b31e91da7a4cdb68ce938beba901beecb3973684bc303d3e362fa01fa09a",
+        "64706a77347aa2a98e52d6da023ba80f7a04d1b7a94eaa809124c9b7fe9fca0a",
     ),
 }
 
@@ -90,7 +100,7 @@ def test_single_occluder_corrected_analytic_hash_matches_locked_cross_platform_r
     )
     assert (
         tuple(episode.analytic_transport_sha256 for episode in manifest.episodes)
-        == EXPECTED_DEV_4_CROSS_PLATFORM_ANALYTIC_HASHES["single_occluder"]
+        == EXPECTED_DEV_5_CROSS_PLATFORM_ANALYTIC_HASHES["single_occluder"]
     )
 
 
@@ -102,7 +112,7 @@ def test_corridor_corrected_analytic_hashes_match_locked_cross_platform_regressi
     )
     assert (
         tuple(episode.analytic_transport_sha256 for episode in manifest.episodes)
-        == EXPECTED_DEV_4_CROSS_PLATFORM_ANALYTIC_HASHES["corridor"]
+        == EXPECTED_DEV_5_CROSS_PLATFORM_ANALYTIC_HASHES["corridor"]
     )
 
 
@@ -119,6 +129,11 @@ def test_historical_slice_1_identity_is_recorded_as_migration_evidence() -> None
     assert all(
         value in notes
         for values in REJECTED_PR5_CROSS_PLATFORM_ANALYTIC_HASHES.values()
+        for value in values
+    )
+    assert all(
+        value in notes
+        for values in REVIEWED_ER5_DEV_4_CROSS_PLATFORM_ANALYTIC_HASHES.values()
         for value in values
     )
 

@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from typing import Any, cast
+
 import mujoco
 import numpy as np
 import pytest
 
 from epsbench.annotations import (
+    FINITE_PLANE_EDGE_BINARY64_EPSILON,
+    FINITE_PLANE_EDGE_MINIMUM_TOLERANCE_SCALE,
+    FINITE_PLANE_EDGE_TOLERANCE_MULTIPLIER,
     FLOW_FIXED_POINT_SCALE,
     AnalyticCamera,
     TransportReasonCode,
     compute_analytic_transport,
     focal_scales_from_vertical_fov,
+    pixel_rays_world,
 )
 
 WIDTH = 80
@@ -41,7 +48,62 @@ def _plane_model(
         f'size="{plane_half_extent} {plane_half_extent} 0.1"/>'
         f"{foreground}</worldbody></mujoco>"
     )
-    return model, mujoco.MjData(model)
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    return model, data
+
+
+def _rotated_plane_model() -> tuple[mujoco.MjModel, mujoco.MjData]:
+    model = mujoco.MjModel.from_xml_string(
+        '<mujoco><compiler angle="radian"/><worldbody>'
+        '<geom name="background" type="plane" pos="0 0 -5" size="1 1 0.1" '
+        'euler="0.35 -0.45 0.25"/>'
+        "</worldbody></mujoco>"
+    )
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    return model, data
+
+
+def _camera_looking_at(target: np.ndarray[Any, Any]) -> AnalyticCamera:
+    origin = np.zeros(3, dtype=np.float64)
+    forward = target - origin
+    forward /= np.linalg.norm(forward)
+    camera_z = -forward
+    reference_up = np.asarray((0.0, 1.0, 0.0), dtype=np.float64)
+    if abs(float(reference_up @ camera_z)) > 0.9:
+        reference_up = np.asarray((1.0, 0.0, 0.0), dtype=np.float64)
+    camera_x = np.cross(reference_up, camera_z)
+    camera_x /= np.linalg.norm(camera_x)
+    camera_y = np.cross(camera_z, camera_x)
+    rotation = np.column_stack((camera_x, camera_y, camera_z))
+    return AnalyticCamera(
+        world_position=(0.0, 0.0, 0.0),
+        world_rotation_row_major=tuple(float(value) for value in rotation.reshape(-1)),
+        vertical_field_of_view_degrees=FOV_DEGREES,
+    )
+
+
+def _local_plane_point_world(
+    data: mujoco.MjData,
+    local_point: tuple[float, float, float],
+) -> np.ndarray[Any, Any]:
+    rotation = np.asarray(data.geom_xmat[0], dtype=np.float64).reshape(3, 3)
+    position = np.asarray(data.geom_xpos[0], dtype=np.float64)
+    return np.asarray(position + np.asarray(local_point) @ rotation.T, dtype=np.float64)
+
+
+def _single_sample_assignment(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    target_world: np.ndarray[Any, Any],
+) -> tuple[int, int]:
+    camera = _camera_looking_at(target_world)
+    transport = compute_analytic_transport(model, data, (0,), 1, 1, camera, camera)
+    return (
+        int(transport.before_surface_assignment[0, 0]),
+        int(transport.forward.reasons[0, 0]),
+    )
 
 
 def test_fronto_parallel_plane_lateral_translation_matches_closed_form() -> None:
@@ -125,6 +187,175 @@ def test_finite_visual_plane_rejects_source_hits_outside_xy_extent() -> None:
     )
     assert np.all(transport.forward.validity[outside] == 0)
     assert np.all(transport.forward.vectors_fixed[outside] == 0)
+
+
+def test_finite_plane_exact_edge_and_near_inside_are_inclusive() -> None:
+    model, data = _plane_model(plane_half_extent=1.0)
+    tolerance = (
+        FINITE_PLANE_EDGE_TOLERANCE_MULTIPLIER
+        * FINITE_PLANE_EDGE_BINARY64_EPSILON
+        * max(FINITE_PLANE_EDGE_MINIMUM_TOLERANCE_SCALE, 1.0)
+    )
+    for local_x in (1.0, 1.0 - tolerance / 2.0):
+        target = _local_plane_point_world(data, (local_x, 0.0, 0.0))
+        assignment, reason = _single_sample_assignment(model, data, target)
+        assert assignment == 0
+        assert reason == TransportReasonCode.VALID_TRANSPORT
+
+
+def test_finite_plane_declared_outside_tolerance_is_rejected() -> None:
+    model, data = _plane_model(plane_half_extent=1.0)
+    tolerance = (
+        FINITE_PLANE_EDGE_TOLERANCE_MULTIPLIER
+        * FINITE_PLANE_EDGE_BINARY64_EPSILON
+        * max(FINITE_PLANE_EDGE_MINIMUM_TOLERANCE_SCALE, 1.0)
+    )
+    target = _local_plane_point_world(data, (1.0 + 2.0 * tolerance, 0.0, 0.0))
+    assignment, reason = _single_sample_assignment(model, data, target)
+    assert assignment == -1
+    assert reason == TransportReasonCode.NO_CONTROLLED_SOURCE_SURFACE
+
+
+def test_rotated_finite_plane_exact_local_edge_is_inclusive() -> None:
+    model, data = _rotated_plane_model()
+    target = _local_plane_point_world(data, (1.0, 0.0, 0.0))
+    assignment, reason = _single_sample_assignment(model, data, target)
+    assert assignment == 0
+    assert reason == TransportReasonCode.VALID_TRANSPORT
+
+
+def test_plane_parallel_public_camera_ray_has_no_controlled_source() -> None:
+    model, data = _plane_model(plane_half_extent=1.0)
+    parallel_rotation = (
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+    )
+    camera = AnalyticCamera(
+        world_position=(0.0, 0.0, 0.0),
+        world_rotation_row_major=parallel_rotation,
+        vertical_field_of_view_degrees=FOV_DEGREES,
+    )
+    transport = compute_analytic_transport(model, data, (0,), 1, 1, camera, camera)
+    assert transport.before_surface_assignment[0, 0] == -1
+    assert transport.forward.reasons[0, 0] == TransportReasonCode.NO_CONTROLLED_SOURCE_SURFACE
+
+
+@pytest.mark.parametrize(
+    ("width", "height"),
+    ((0, HEIGHT), (-1, HEIGHT), (WIDTH, 0), (WIDTH, -1), (True, HEIGHT), (1.5, HEIGHT)),
+)
+def test_public_analytic_api_rejects_malformed_raster_dimensions(
+    width: object,
+    height: object,
+) -> None:
+    model, data = _plane_model()
+    with pytest.raises(ValueError, match="positive integer"):
+        compute_analytic_transport(
+            model,
+            data,
+            (0,),
+            cast(int, width),
+            cast(int, height),
+            _camera(),
+            _camera(),
+        )
+
+
+@pytest.mark.parametrize("fov", (float("nan"), float("inf"), -float("inf"), 0.0, 180.0))
+def test_public_analytic_api_rejects_invalid_fov(fov: float) -> None:
+    model, data = _plane_model()
+    invalid_camera = replace(_camera(), vertical_field_of_view_degrees=fov)
+    with pytest.raises(ValueError, match="vertical FOV"):
+        compute_analytic_transport(
+            model,
+            data,
+            (0,),
+            WIDTH,
+            HEIGHT,
+            invalid_camera,
+            _camera(),
+        )
+
+
+@pytest.mark.parametrize(
+    "position",
+    (
+        (float("nan"), 0.0, 0.0),
+        (float("inf"), 0.0, 0.0),
+        (0.0, -float("inf"), 0.0),
+    ),
+)
+def test_public_analytic_api_rejects_nonfinite_camera_position(
+    position: tuple[float, float, float],
+) -> None:
+    model, data = _plane_model()
+    invalid_camera = replace(_camera(), world_position=position)
+    with pytest.raises(ValueError, match="position"):
+        compute_analytic_transport(
+            model,
+            data,
+            (0,),
+            WIDTH,
+            HEIGHT,
+            invalid_camera,
+            _camera(),
+        )
+
+
+@pytest.mark.parametrize(
+    "rotation",
+    (
+        (float("nan"), *IDENTITY_ROTATION[1:]),
+        (float("inf"), *IDENTITY_ROTATION[1:]),
+        (0.0,) * 9,
+        (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0),
+    ),
+)
+def test_public_analytic_api_rejects_nonfinite_or_degenerate_camera_rotation(
+    rotation: tuple[float, ...],
+) -> None:
+    model, data = _plane_model()
+    invalid_camera = replace(_camera(), world_rotation_row_major=rotation)
+    with pytest.raises(ValueError, match="rotation"):
+        compute_analytic_transport(
+            model,
+            data,
+            (0,),
+            WIDTH,
+            HEIGHT,
+            invalid_camera,
+            _camera(),
+        )
+
+
+@pytest.mark.parametrize("controlled_geom_ids", ((-1,), (1,), (False,)))
+def test_public_analytic_api_rejects_invalid_controlled_geom_identifiers(
+    controlled_geom_ids: tuple[object, ...],
+) -> None:
+    model, data = _plane_model()
+    with pytest.raises(ValueError, match="controlled geom"):
+        compute_analytic_transport(
+            model,
+            data,
+            cast(tuple[int, ...], controlled_geom_ids),
+            WIDTH,
+            HEIGHT,
+            _camera(),
+            _camera(),
+        )
+
+
+def test_public_ray_helper_rejects_invalid_camera_before_array_math() -> None:
+    invalid_camera = replace(_camera(), world_rotation_row_major=(0.0,) * 9)
+    with pytest.raises(ValueError, match="proper orthonormal"):
+        pixel_rays_world(WIDTH, HEIGHT, invalid_camera)
 
 
 def test_finite_visual_plane_edge_participates_in_analytic_boundary_band() -> None:

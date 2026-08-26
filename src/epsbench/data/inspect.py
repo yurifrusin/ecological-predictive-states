@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -59,6 +62,36 @@ def _reason_image(reasons: np.ndarray) -> Image.Image:
     return Image.fromarray(palette[reasons], mode="RGB")
 
 
+def _write_png_atomically_no_clobber(image: Image.Image, output: Path) -> None:
+    """Publish a complete PNG atomically without replacing any directory entry."""
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if not output.parent.is_dir():
+        raise ValueError("inspection output parent must be a directory")
+    if os.path.lexists(output):
+        raise FileExistsError(f"inspection output already exists: {output}")
+
+    encoded = io.BytesIO()
+    image.save(encoded, format="PNG", compress_level=9, optimize=False)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=output.parent,
+        prefix=f".{output.name}.",
+        suffix=".tmp",
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as temporary:
+            temporary.write(encoded.getbuffer())
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        try:
+            os.link(temporary_path, output)
+        except FileExistsError as error:
+            raise FileExistsError(f"inspection output already exists: {output}") from error
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
 def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> Path:
     root = dataset.resolve()
     resolved_output = output.resolve()
@@ -110,6 +143,5 @@ def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> 
         y = header_height + row * (height + label_height)
         draw.text((x + 6, y + 5), label, fill="black")
         canvas.paste(panel, (x, y + label_height))
-    output.parent.mkdir(parents=True, exist_ok=True)
-    canvas.save(output, compress_level=9, optimize=False)
+    _write_png_atomically_no_clobber(canvas, output)
     return output

@@ -21,6 +21,10 @@ from epsbench.annotations import (
     ANALYTIC_BOUNDARY_WIDTH_PIXELS,
     ANALYTIC_SURFACE_INTERSECTION_RULE,
     ANALYTIC_TRANSPORT_METHOD,
+    FINITE_PLANE_EDGE_BINARY64_EPSILON,
+    FINITE_PLANE_EDGE_COMPARISON_RULE,
+    FINITE_PLANE_EDGE_MINIMUM_TOLERANCE_SCALE,
+    FINITE_PLANE_EDGE_TOLERANCE_MULTIPLIER,
     FINITE_PLANE_EXTENT_RULE,
     FLOW_FIXED_POINT_SCALE,
     FLOW_QUANTISATION_ROUNDING,
@@ -303,6 +307,10 @@ def _write_analytic_transport(
         intersection_visibility=AnalyticIntersectionVisibilityContract(
             surface_intersection_rule=ANALYTIC_SURFACE_INTERSECTION_RULE,
             finite_plane_extent_rule=FINITE_PLANE_EXTENT_RULE,
+            finite_plane_edge_comparison_rule=FINITE_PLANE_EDGE_COMPARISON_RULE,
+            finite_plane_edge_binary64_epsilon=FINITE_PLANE_EDGE_BINARY64_EPSILON,
+            finite_plane_edge_tolerance_multiplier=FINITE_PLANE_EDGE_TOLERANCE_MULTIPLIER,
+            finite_plane_edge_minimum_tolerance_scale=(FINITE_PLANE_EDGE_MINIMUM_TOLERANCE_SCALE),
             target_visibility_rule=TARGET_VISIBILITY_RULE,
             visibility_relative_tolerance=VISIBILITY_RELATIVE_TOLERANCE,
             visibility_minimum_tolerance_scale=VISIBILITY_MINIMUM_TOLERANCE_SCALE,
@@ -497,7 +505,7 @@ def _generate_single_occluder_episode(
     if not relation_frame_indices:
         raise RuntimeError("counterfactual oracle found no foreground/background occlusion")
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.4",
+        schema_version="0.1.0-dev.5",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -539,7 +547,7 @@ def _generate_single_occluder_episode(
     write_canonical_json(transition_path, transition)
 
     instrumentation = SingleOccluderInstrumentation(
-        schema_version="0.1.0-dev.4",
+        schema_version="0.1.0-dev.5",
         scene_family=SceneFamily.SINGLE_OCCLUDER,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,
@@ -655,7 +663,7 @@ def _generate_corridor_episode(
         rendered.analytic_transport,
     )
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.4",
+        schema_version="0.1.0-dev.5",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -717,7 +725,7 @@ def _generate_corridor_episode(
             )
         )
     instrumentation = CorridorInstrumentation(
-        schema_version="0.1.0-dev.4",
+        schema_version="0.1.0-dev.5",
         scene_family=SceneFamily.CORRIDOR,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,

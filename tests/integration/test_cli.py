@@ -73,6 +73,30 @@ def test_corridor_validate_and_inspect_report_scene_family(
     assert output.is_file()
 
 
+def test_cli_inspection_refuses_existing_output_without_changing_bytes(
+    smoke_dataset: Path,
+    tmp_path: Path,
+) -> None:
+    runner = CliRunner()
+    output = tmp_path / "existing-cli-output.png"
+    original = b"preserve existing CLI output\n"
+    output.write_bytes(original)
+    result = runner.invoke(
+        app,
+        [
+            "inspect",
+            str(smoke_dataset),
+            "--episode",
+            "0",
+            "--output",
+            str(output),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "already exists" in result.output
+    assert output.read_bytes() == original
+
+
 def test_generation_refuses_nonempty_destination(tmp_path: Path) -> None:
     runner = CliRunner()
     output = tmp_path / "nonempty"
