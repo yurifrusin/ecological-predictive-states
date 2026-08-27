@@ -196,7 +196,10 @@ The packet records `freeze_status: candidate_packet_only_not_frozen` and contain
 split or final seed list. Its shared backend-independent roots separately cover the registry, seed
 registry, procedural definitions/assets/assignments, and ecological invariance. Renderer-specific
 RGB and admission evidence has its own root. One cross-platform RGB or complete-packet hash is not
-claimed.
+claimed. The shared ecological root binds established public scene, transport, boundary, event, and
+label identities plus each cell's within-environment structural-invariance result. Raw compiled
+camera, geometry, and remapping hashes remain private cell evidence and are excluded from that
+cross-platform root.
 
 ## Cross-platform evidence and limits
 

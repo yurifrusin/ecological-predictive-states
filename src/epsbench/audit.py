@@ -581,7 +581,18 @@ def _roots(
         }
         for cell in successful
     ]
-    ecological = [{"cell_id": cell["cell_id"], **_structural_domain(cell)} for cell in successful]
+    ecological = [
+        {
+            "cell_id": cell["cell_id"],
+            "scene_content_sha256": cell["scene_content_sha256"],
+            "analytic_transport_sha256": cell["analytic_transport_sha256"],
+            "oriented_boundary_sha256": cell["oriented_boundary_sha256"],
+            "visibility_event_sha256": cell["visibility_event_sha256"],
+            "ecological_label_sha256": cell["ecological_label_sha256"],
+            "structural_invariance": cell["admission_checks"]["structural_invariance"],
+        }
+        for cell in successful
+    ]
     renderer = [
         {
             "cell_id": cell["cell_id"],
