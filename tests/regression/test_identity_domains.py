@@ -4,6 +4,8 @@ from epsbench.data.identity import (
     analytic_transport_domain,
     compute_ecological_label_hash,
     ecological_label_domain,
+    oriented_boundary_domain,
+    visibility_event_domain,
 )
 from epsbench.schema import AvailableDenseOpticalTransport, DatasetManifest, TransitionRecord
 from epsbench.utils.canonical import canonical_json_bytes
@@ -64,6 +66,26 @@ EXPECTED_DEV_5_CROSS_PLATFORM_ANALYTIC_HASHES = {
         "64706a77347aa2a98e52d6da023ba80f7a04d1b7a94eaa809124c9b7fe9fca0a",
     ),
 }
+EXPECTED_DEV_6_CROSS_PLATFORM_BOUNDARY_HASHES = {
+    "single_occluder": (
+        "ea99e38626142a7c3b1845c234e5b577493fbf8ff55e40169a96bffaafe84f66",
+        "c690400c1c1496da23b4d8ee91af6b52d7e163a415fb7929ffa4494061becbef",
+    ),
+    "corridor": (
+        "77e4aba8aa763827ce3c3a1e20ebc03f134c0c44edb127235f071b32c769f503",
+        "fd5c4360c0cc03d6be11bd9917de4909aa6f26129f95d69364d793c42e8e9ab3",
+    ),
+}
+EXPECTED_DEV_6_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES = {
+    "single_occluder": (
+        "c35fe87f68dde0b282f8069a6700895d135e956a3b5ba2190f3b606f259b8ebb",
+        "c9032eb0250598e95902b3c4d5001ea724a48abf6cd66158fbd5374b2d312f2b",
+    ),
+    "corridor": (
+        "2db60ab41fe0f93f1fd574c0d1218d374727199b51eb3bf15625f6264cefbf0a",
+        "480e283e5eecc7fc21e3a21f56e114f44c69460681e167b9292c45fa8e7b5a15",
+    ),
+}
 
 
 def test_corrected_ecological_label_does_not_reuse_rejected_pr5_identity(
@@ -113,6 +135,38 @@ def test_corridor_corrected_analytic_hashes_match_locked_cross_platform_regressi
     assert (
         tuple(episode.analytic_transport_sha256 for episode in manifest.episodes)
         == EXPECTED_DEV_5_CROSS_PLATFORM_ANALYTIC_HASHES["corridor"]
+    )
+
+
+def test_single_occluder_boundary_and_event_hashes_match_locked_cross_platform_regression(
+    smoke_dataset: Path,
+) -> None:
+    manifest = DatasetManifest.model_validate_json(
+        (smoke_dataset / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert (
+        tuple(episode.oriented_boundary_sha256 for episode in manifest.episodes)
+        == (EXPECTED_DEV_6_CROSS_PLATFORM_BOUNDARY_HASHES["single_occluder"])
+    )
+    assert (
+        tuple(episode.visibility_event_sha256 for episode in manifest.episodes)
+        == (EXPECTED_DEV_6_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES["single_occluder"])
+    )
+
+
+def test_corridor_boundary_and_event_hashes_match_locked_cross_platform_regression(
+    corridor_dataset: Path,
+) -> None:
+    manifest = DatasetManifest.model_validate_json(
+        (corridor_dataset / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert (
+        tuple(episode.oriented_boundary_sha256 for episode in manifest.episodes)
+        == (EXPECTED_DEV_6_CROSS_PLATFORM_BOUNDARY_HASHES["corridor"])
+    )
+    assert (
+        tuple(episode.visibility_event_sha256 for episode in manifest.episodes)
+        == (EXPECTED_DEV_6_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES["corridor"])
     )
 
 
@@ -189,6 +243,35 @@ def test_analytic_identity_domain_excludes_artifacts_ids_and_provenance(
     assert all(value not in encoded for value in forbidden)
 
 
+def test_boundary_and_event_domains_exclude_privileged_appearance_and_container_state(
+    smoke_dataset: Path,
+) -> None:
+    manifest = DatasetManifest.model_validate_json(
+        (smoke_dataset / "manifest.json").read_text(encoding="utf-8")
+    )
+    transition = TransitionRecord.model_validate_json(
+        (smoke_dataset / manifest.episodes[0].transition.path).read_text(encoding="utf-8")
+    )
+    boundary = canonical_json_bytes(
+        oriented_boundary_domain(transition.oriented_boundary_ownership)
+    )
+    events = canonical_json_bytes(visibility_event_domain(transition.ecological_visibility_events))
+    for encoded in (boundary, events):
+        assert all(
+            value not in encoded
+            for value in (
+                b"appearance",
+                b"raw_geom",
+                b"world_",
+                b"semantic",
+                b"renderer",
+                b"file_sha256",
+                b".npy",
+                str(smoke_dataset.resolve()).encode(),
+            )
+        )
+
+
 def test_manifest_identity_excludes_volatile_run_metadata(smoke_dataset: Path) -> None:
     manifest_bytes = (smoke_dataset / "manifest.json").read_bytes()
     assert b"generated_at" not in manifest_bytes
@@ -196,7 +279,7 @@ def test_manifest_identity_excludes_volatile_run_metadata(smoke_dataset: Path) -
     assert str(smoke_dataset.resolve()).encode() not in manifest_bytes
 
 
-def test_unavailable_and_available_empty_occlusion_have_distinct_identities(
+def test_available_empty_and_unavailable_occlusion_have_distinct_identities(
     corridor_dataset: Path,
 ) -> None:
     manifest = DatasetManifest.model_validate_json(
@@ -205,17 +288,15 @@ def test_unavailable_and_available_empty_occlusion_have_distinct_identities(
     transition = TransitionRecord.model_validate_json(
         (corridor_dataset / manifest.episodes[0].transition.path).read_text(encoding="utf-8")
     )
-    available_empty = TransitionRecord.model_validate(
+    unavailable = TransitionRecord.model_validate(
         {
             **transition.model_dump(mode="python"),
             "occlusion": {
-                "status": "available",
-                "oracle_rule": "counterfactual_occluder_exclusion_v1",
-                "relations": (),
+                "status": "unavailable",
+                "reason_category": "oriented_corridor_occlusion_oracle_unavailable",
+                "reason": "historical unavailable posture",
             },
             "ecological_label_sha256": "0" * 64,
         }
     )
-    assert compute_ecological_label_hash(available_empty) != (
-        compute_ecological_label_hash(transition)
-    )
+    assert compute_ecological_label_hash(unavailable) != (compute_ecological_label_hash(transition))

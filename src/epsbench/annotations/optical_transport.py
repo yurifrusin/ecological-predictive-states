@@ -61,6 +61,7 @@ class DirectionalTransportArrays:
     vectors_fixed: Int32Array
     validity: UInt8Array
     reasons: UInt8Array
+    target_hit_assignment: Int32Array | None = None
 
 
 @dataclass(frozen=True)
@@ -388,7 +389,45 @@ def _directional_transport(
         vectors_fixed=vectors_fixed,
         validity=np.asarray(valid, dtype=np.uint8),
         reasons=reasons,
+        target_hit_assignment=np.asarray(target_hit_assignment, dtype=np.int32),
     )
+
+
+def counterfactual_surface_assignments(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    controlled_geom_ids: tuple[int, ...],
+    width: int,
+    height: int,
+    camera: AnalyticCamera,
+) -> dict[int, Int32Array]:
+    """Return nearest assignments after excluding each controlled surface in turn."""
+
+    width, height = _validated_raster_dimensions(width, height)
+    _validated_camera_arrays(camera)
+    controlled_geom_ids = _validated_controlled_geom_ids(model, controlled_geom_ids)
+    mujoco.mj_forward(model, data)
+    rays = pixel_rays_world(width, height, camera)
+    origin = np.asarray(camera.world_position, dtype=np.float64)
+    assignments: dict[int, Int32Array] = {}
+    for excluded_geom_id in controlled_geom_ids:
+        remaining = tuple(geom_id for geom_id in controlled_geom_ids if geom_id != excluded_geom_id)
+        if not remaining:
+            assignments[excluded_geom_id] = np.full(
+                (height, width),
+                -1,
+                dtype=np.int32,
+            )
+            continue
+        _, assignment = _nearest_controlled_intersections(
+            model,
+            data,
+            remaining,
+            origin,
+            rays,
+        )
+        assignments[excluded_geom_id] = assignment
+    return assignments
 
 
 def compute_analytic_transport(

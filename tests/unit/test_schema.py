@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -26,8 +27,8 @@ def test_transition_and_manifest_round_trip(smoke_dataset: Path) -> None:
     transition_bytes = transition_path.read_bytes().rstrip(b"\n")
     transition = TransitionRecord.model_validate_json(transition_bytes)
     assert canonical_json_bytes(transition) == transition_bytes
-    assert manifest.schema_version == "0.1.0-dev.3"
-    assert transition.schema_version == "0.1.0-dev.5"
+    assert manifest.schema_version == "0.1.0-dev.4"
+    assert transition.schema_version == "0.1.0-dev.6"
 
 
 def test_schema_version_matrix_advances_only_changed_wire_contracts(
@@ -43,8 +44,8 @@ def test_schema_version_matrix_advances_only_changed_wire_contracts(
         instrumentation = parse_privileged_instrumentation_json(
             (root / manifest.episodes[0].privileged_instrumentation.path).read_bytes()
         )
-        assert manifest.schema_version == "0.1.0-dev.3"
-        assert instrumentation.schema_version == "0.1.0-dev.5"
+        assert manifest.schema_version == "0.1.0-dev.4"
+        assert instrumentation.schema_version == "0.1.0-dev.6"
 
 
 def test_historical_transition_version_is_not_byte_compatible(smoke_dataset: Path) -> None:
@@ -53,7 +54,7 @@ def test_historical_transition_version_is_not_byte_compatible(smoke_dataset: Pat
     )
     transition_path = smoke_dataset / manifest.episodes[0].transition.path
     payload = json.loads(transition_path.read_text(encoding="utf-8"))
-    payload["schema_version"] = "0.1.0-dev.4"
+    payload["schema_version"] = "0.1.0-dev.5"
     with pytest.raises(ValidationError):
         TransitionRecord.model_validate(payload)
 
@@ -81,6 +82,70 @@ def test_available_transport_rejects_misaligned_reason_shape(smoke_dataset: Path
     payload = json.loads(transition_path.read_text(encoding="utf-8"))
     payload["analytic_optical_transport"]["forward"]["reasons"]["shape"] = [1, 1]
     with pytest.raises(ValidationError):
+        TransitionRecord.model_validate_json(json.dumps(payload))
+
+
+def _transition_payload(root: Path) -> dict[str, Any]:
+    manifest = DatasetManifest.model_validate_json(
+        (root / "manifest.json").read_text(encoding="utf-8")
+    )
+    payload = json.loads((root / manifest.episodes[0].transition.path).read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    return payload
+
+
+@pytest.mark.parametrize("corruption", ["duplicate", "out_of_range", "unknown_kind"])
+def test_oriented_boundary_sparse_contract_rejects_invalid_records(
+    smoke_dataset: Path,
+    corruption: str,
+) -> None:
+    payload = _transition_payload(smoke_dataset)
+    boundary = payload["oriented_boundary_ownership"]
+    assert isinstance(boundary, dict)
+    elements = boundary["elements"]
+    assert isinstance(elements, list)
+    first = dict(elements[0])
+    if corruption == "duplicate":
+        elements.insert(1, first)
+    elif corruption == "out_of_range":
+        first["column"] = boundary["raster_width"]
+        elements[0] = first
+    else:
+        first["kind"] = "invented_boundary"
+        elements[0] = first
+    with pytest.raises(ValidationError):
+        TransitionRecord.model_validate_json(json.dumps(payload))
+
+
+def test_oriented_boundary_owner_must_match_declared_image_side(smoke_dataset: Path) -> None:
+    payload = _transition_payload(smoke_dataset)
+    boundary = payload["oriented_boundary_ownership"]
+    assert isinstance(boundary, dict)
+    elements = boundary["elements"]
+    assert isinstance(elements, list)
+    element = next(item for item in elements if item["owner_side"] != "none")
+    element["owner_surface_id"] = (
+        element["positive_surface_id"]
+        if element["owner_side"] == "negative_axis_side"
+        else element["negative_surface_id"]
+    )
+    with pytest.raises(ValidationError, match="owner"):
+        TransitionRecord.model_validate_json(json.dumps(payload))
+
+
+def test_no_boundary_is_only_the_implicit_absent_sparse_state(smoke_dataset: Path) -> None:
+    payload = _transition_payload(smoke_dataset)
+    boundary = payload["oriented_boundary_ownership"]
+    assert isinstance(boundary, dict)
+    elements = boundary["elements"]
+    assert isinstance(elements, list)
+    elements[0] = {
+        **elements[0],
+        "kind": "no_boundary",
+        "owner_side": "none",
+        "owner_surface_id": None,
+    }
+    with pytest.raises(ValidationError, match="absent sparse"):
         TransitionRecord.model_validate_json(json.dumps(payload))
 
 

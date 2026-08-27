@@ -43,7 +43,7 @@ jobs:
       - name: Test
         run: uv run pytest
 
-      - name: Exercise analytic transport commands and print identities
+      - name: Exercise both scene families and print transport boundary event identities
         run: |
           uv run epsbench generate --config configs/benchmark_v0.yaml --episodes 2 --output data/ci-smoke
           uv run epsbench validate data/ci-smoke

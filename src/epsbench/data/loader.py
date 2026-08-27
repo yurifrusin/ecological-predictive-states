@@ -15,6 +15,8 @@ from epsbench.schema import (
     AnalyticBoundaryAmbiguityRule,
     AnalyticIntersectionVisibilityContract,
     AvailableDenseOpticalTransport,
+    AvailableEcologicalVisibilityEvents,
+    AvailableOrientedBoundaryOwnership,
     CameraInstrumentation,
     CorridorInstrumentation,
     CorridorSampledGeometry,
@@ -60,6 +62,20 @@ class LoadedAnalyticOpticalTransport:
     @property
     def backward_flow_pixels(self) -> npt.NDArray[np.float64]:
         return self.backward_vectors_fixed.astype(np.float64) / self.fixed_point_scale
+
+
+@dataclass(frozen=True)
+class LoadedEcologicalVisibilityEvents:
+    """Complete public event bundle with typed metadata and aligned dense maps."""
+
+    annotation: AvailableEcologicalVisibilityEvents
+    before_fate_codes: npt.NDArray[np.uint8]
+    before_affected_surface_labels: npt.NDArray[np.int32]
+    before_owner_surface_labels: npt.NDArray[np.int32]
+    after_origin_codes: npt.NDArray[np.uint8]
+    after_affected_surface_labels: npt.NDArray[np.int32]
+    after_owner_surface_labels: npt.NDArray[np.int32]
+    surface_ids_by_label: dict[int, str]
 
 
 class DatasetLoader:
@@ -134,6 +150,7 @@ class DatasetLoader:
             Modality.REGION_CORRESPONDENCE,
             Modality.REGION_MASK_CHANGES,
             Modality.ECOLOGICAL_VISIBILITY_EVENTS,
+            Modality.ORIENTED_BOUNDARY_OWNERSHIP,
             Modality.OCCLUSION_ANNOTATION,
             Modality.BOUNDARY_STRUCTURE,
             Modality.ANALYTIC_OPTICAL_TRANSPORT,
@@ -146,11 +163,56 @@ class DatasetLoader:
             visibility_states=transition.visibility_states,
             region_correspondence=transition.region_correspondence,
             region_mask_changes=transition.region_mask_changes,
+            oriented_boundary_ownership=transition.oriented_boundary_ownership,
             ecological_visibility_events=transition.ecological_visibility_events,
             occlusion=transition.occlusion,
             boundary_structures=transition.boundary_structures,
             analytic_optical_transport=transition.analytic_optical_transport,
             ecological_label_sha256=transition.ecological_label_sha256,
+        )
+
+    def read_oriented_boundaries(
+        self,
+        episode_index: int,
+    ) -> AvailableOrientedBoundaryOwnership:
+        self._require(Modality.ORIENTED_BOUNDARY_OWNERSHIP)
+        return self._transition(episode_index).oriented_boundary_ownership.model_copy(deep=True)
+
+    def read_ecological_visibility_events(
+        self,
+        episode_index: int,
+    ) -> LoadedEcologicalVisibilityEvents:
+        self._require(Modality.ECOLOGICAL_VISIBILITY_EVENTS)
+        transition = self._transition(episode_index)
+        events = transition.ecological_visibility_events
+
+        def load_uint8(relative_path: str) -> npt.NDArray[np.uint8]:
+            return np.asarray(
+                np.load(self._path(relative_path), allow_pickle=False),
+                dtype=np.uint8,
+            )
+
+        def load_int32(relative_path: str) -> npt.NDArray[np.int32]:
+            return np.asarray(
+                np.load(self._path(relative_path), allow_pickle=False),
+                dtype=np.int32,
+            )
+
+        return LoadedEcologicalVisibilityEvents(
+            annotation=events.model_copy(deep=True),
+            before_fate_codes=load_uint8(events.before_fate.event_codes.path),
+            before_affected_surface_labels=load_int32(
+                events.before_fate.affected_surface_labels.path
+            ),
+            before_owner_surface_labels=load_int32(events.before_fate.owner_surface_labels.path),
+            after_origin_codes=load_uint8(events.after_origin.event_codes.path),
+            after_affected_surface_labels=load_int32(
+                events.after_origin.affected_surface_labels.path
+            ),
+            after_owner_surface_labels=load_int32(events.after_origin.owner_surface_labels.path),
+            surface_ids_by_label={
+                surface.segmentation_label: surface.surface_id for surface in transition.surfaces
+            },
         )
 
     def read_analytic_optical_transport(

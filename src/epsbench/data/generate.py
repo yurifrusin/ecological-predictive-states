@@ -17,10 +17,18 @@ from PIL import Image
 
 from epsbench import __version__
 from epsbench.annotations import (
+    AFTER_EVENT_CODE_DOMAIN,
     ANALYTIC_BOUNDARY_RULE,
     ANALYTIC_BOUNDARY_WIDTH_PIXELS,
     ANALYTIC_SURFACE_INTERSECTION_RULE,
     ANALYTIC_TRANSPORT_METHOD,
+    ATTACHMENT_PUBLIC_CONTRACT_VERSION,
+    ATTACHMENT_RULE,
+    BEFORE_EVENT_CODE_DOMAIN,
+    BOUNDARY_KIND_DOMAIN,
+    COUNTERFACTUAL_CONTINUATION_RULE,
+    COUNTERFACTUAL_TIE_RULE,
+    EDGE_LATTICE_CONVENTION,
     FINITE_PLANE_EDGE_BINARY64_EPSILON,
     FINITE_PLANE_EDGE_COMPARISON_RULE,
     FINITE_PLANE_EDGE_MINIMUM_TOLERANCE_SCALE,
@@ -28,25 +36,34 @@ from epsbench.annotations import (
     FINITE_PLANE_EXTENT_RULE,
     FLOW_FIXED_POINT_SCALE,
     FLOW_QUANTISATION_ROUNDING,
+    JUNCTION_AMBIGUITY_RULE,
+    ORIENTED_BOUNDARY_METHOD,
+    OWNER_SIDE_DOMAIN,
     RAY_DIRECTION_EPSILON,
+    SILHOUETTE_RULE,
     TARGET_VISIBILITY_RULE,
+    VISIBILITY_EVENT_METHOD,
     VISIBILITY_MINIMUM_TOLERANCE_SCALE,
     VISIBILITY_RELATIVE_TOLERANCE,
     AnalyticTransportArrays,
     DirectionalTransportArrays,
+    RawBoundaryVisibilityAnalysis,
     derive_boundary_structure,
     derive_visibility,
 )
 from epsbench.config import BenchmarkConfig, CorridorConfig, SingleOccluderConfig
 from epsbench.data.identity import (
     compute_analytic_transport_hash,
+    compute_boundary_numerical_contract_hash,
     compute_content_provenance_binding,
     compute_corridor_scene_content_hash,
     compute_dataset_logical_hash,
     compute_ecological_label_hash,
+    compute_oriented_boundary_hash,
     compute_renderer_execution_provenance_hash,
     compute_single_occluder_scene_content_hash,
     compute_source_provenance_hash,
+    compute_visibility_event_hash,
 )
 from epsbench.data.provenance import collect_source_provenance
 from epsbench.schema import (
@@ -57,29 +74,44 @@ from epsbench.schema import (
     AnalyticTransportDiagnostics,
     ArtifactRecord,
     AvailableDenseOpticalTransport,
+    AvailableEcologicalVisibilityEvents,
     AvailableOcclusionAnnotation,
+    AvailableOrientedBoundaryOwnership,
+    BoundaryAxis,
+    BoundaryKind,
+    BoundaryOwnerSide,
+    BoundaryVisibilityDiagnostics,
     CameraInstrumentation,
     CorridorInstrumentation,
     DatasetManifest,
     DirectionalOpticalTransport,
     DirectionalTransportDiagnostic,
+    DirectionalVisibilityEventMap,
+    EdgeLatticeCoordinateConvention,
     EpisodeManifest,
     FrameRecord,
     GenerationSeeds,
     Modality,
+    OccludingVisibilityEventSummary,
     OcclusionFrameEvidence,
     OcclusionOracleEvidence,
     OcclusionRelation,
     OpticalTransportCoordinateConvention,
     OpticalTransportQuantisation,
+    OrientedBoundaryElement,
+    PrivilegedAttachmentContractEvidence,
+    PrivilegedAttachmentPairEvidence,
+    PrivilegedBoundaryElementEvidence,
     RawSegmentationFrameEvidence,
     RendererProvenance,
     SceneFamily,
     SingleOccluderInstrumentation,
     SurfaceReference,
     TransitionRecord,
-    UnavailableEcologicalVisibilityEvents,
-    UnavailableOcclusionAnnotation,
+    UnavailableComponentTopologyCapability,
+    VisibilityEventCapabilities,
+    WholeSurfaceEventKind,
+    WholeSurfaceVisibilityEvent,
 )
 from epsbench.sim import (
     CORRIDOR_SURFACE_NAMES,
@@ -349,6 +381,311 @@ def _write_analytic_transport(
     )
 
 
+def _surface_by_raw_id(
+    raw_geom_ids: dict[str, int],
+    references: dict[str, SurfaceReference],
+) -> dict[int, SurfaceReference]:
+    return {raw_id: references[name] for name, raw_id in raw_geom_ids.items()}
+
+
+def _write_oriented_boundaries(
+    analysis: RawBoundaryVisibilityAnalysis,
+    raw_surfaces: dict[int, SurfaceReference],
+    width: int,
+    height: int,
+) -> AvailableOrientedBoundaryOwnership:
+    elements = tuple(
+        OrientedBoundaryElement(
+            frame_index=element.frame_index,  # type: ignore[arg-type]
+            axis=BoundaryAxis(element.axis),
+            row=element.row,
+            column=element.column,
+            negative_surface_id=(
+                raw_surfaces[element.negative_raw_geom_id].surface_id
+                if element.negative_raw_geom_id is not None
+                else None
+            ),
+            positive_surface_id=(
+                raw_surfaces[element.positive_raw_geom_id].surface_id
+                if element.positive_raw_geom_id is not None
+                else None
+            ),
+            kind=BoundaryKind(element.kind),
+            owner_side=BoundaryOwnerSide(element.owner_side),
+            owner_surface_id=(
+                raw_surfaces[element.owner_raw_geom_id].surface_id
+                if element.owner_raw_geom_id is not None
+                else None
+            ),
+        )
+        for element in analysis.boundary_elements
+    )
+    boundary = AvailableOrientedBoundaryOwnership(
+        status="available",
+        method=ORIENTED_BOUNDARY_METHOD,
+        raster_width=width,
+        raster_height=height,
+        coordinate_convention=EdgeLatticeCoordinateConvention(
+            version=EDGE_LATTICE_CONVENTION,
+            horizontal_negative_sample="pixel_centre_row_column_left",
+            horizontal_positive_sample="pixel_centre_row_column_plus_1_right",
+            horizontal_shape="height_by_width_minus_1",
+            vertical_negative_sample="pixel_centre_row_column_top",
+            vertical_positive_sample="pixel_centre_row_plus_1_column_bottom",
+            vertical_shape="height_minus_1_by_width",
+            no_boundary_representation="implicit_by_absent_sparse_record",
+        ),
+        boundary_kind_domain=BOUNDARY_KIND_DOMAIN,
+        owner_side_domain=OWNER_SIDE_DOMAIN,
+        attachment_rule=ATTACHMENT_RULE,
+        attachment_public_contract_version=ATTACHMENT_PUBLIC_CONTRACT_VERSION,
+        numerical_contract_sha256=compute_boundary_numerical_contract_hash(),
+        counterfactual_continuation_rule=COUNTERFACTUAL_CONTINUATION_RULE,
+        counterfactual_tie_rule=COUNTERFACTUAL_TIE_RULE,
+        junction_ambiguity_rule=JUNCTION_AMBIGUITY_RULE,
+        silhouette_rule=SILHOUETTE_RULE,
+        elements=elements,
+        oriented_boundary_sha256="0" * 64,
+    )
+    return boundary.model_copy(
+        update={"oriented_boundary_sha256": compute_oriented_boundary_hash(boundary)}
+    )
+
+
+def _raw_ids_to_labels(
+    raw_ids: np.ndarray[Any, Any],
+    raw_surfaces: dict[int, SurfaceReference],
+) -> np.ndarray[Any, Any]:
+    labels = np.zeros(raw_ids.shape, dtype=np.int32)
+    for raw_id, surface in raw_surfaces.items():
+        labels[raw_ids == raw_id] = np.int32(surface.segmentation_label)
+    return labels
+
+
+def _write_event_direction(
+    root: Path,
+    episode_directory: Path,
+    name: str,
+    frame_index: int,
+    codes: np.ndarray[Any, Any],
+    affected_raw_ids: np.ndarray[Any, Any],
+    owner_raw_ids: np.ndarray[Any, Any],
+    raw_surfaces: dict[int, SurfaceReference],
+) -> DirectionalVisibilityEventMap:
+    affected_labels = _raw_ids_to_labels(affected_raw_ids, raw_surfaces)
+    owner_labels = _raw_ids_to_labels(owner_raw_ids, raw_surfaces)
+    codes_path = episode_directory / f"visibility_events_{name}_codes.npy"
+    affected_path = episode_directory / f"visibility_events_{name}_affected_labels.npy"
+    owner_path = episode_directory / f"visibility_events_{name}_owner_labels.npy"
+    np.save(codes_path, codes, allow_pickle=False)
+    np.save(affected_path, affected_labels, allow_pickle=False)
+    np.save(owner_path, owner_labels, allow_pickle=False)
+    return DirectionalVisibilityEventMap(
+        frame_index=frame_index,  # type: ignore[arg-type]
+        direction=("before_frame_fate" if frame_index == 0 else "after_frame_origin"),
+        event_codes=_array_artifact(
+            codes_path,
+            root,
+            codes,
+            Modality.ECOLOGICAL_VISIBILITY_EVENTS,
+            "application/x-npy",
+        ),
+        affected_surface_labels=_array_artifact(
+            affected_path,
+            root,
+            affected_labels,
+            Modality.ECOLOGICAL_VISIBILITY_EVENTS,
+            "application/x-npy",
+        ),
+        owner_surface_labels=_array_artifact(
+            owner_path,
+            root,
+            owner_labels,
+            Modality.ECOLOGICAL_VISIBILITY_EVENTS,
+            "application/x-npy",
+        ),
+    )
+
+
+def _write_visibility_events(
+    root: Path,
+    episode_directory: Path,
+    analysis: RawBoundaryVisibilityAnalysis,
+    raw_surfaces: dict[int, SurfaceReference],
+    boundary: AvailableOrientedBoundaryOwnership,
+    transport: AvailableDenseOpticalTransport,
+) -> AvailableEcologicalVisibilityEvents:
+    events = AvailableEcologicalVisibilityEvents(
+        status="available",
+        method=VISIBILITY_EVENT_METHOD,
+        capabilities=VisibilityEventCapabilities(
+            transport_causal_pixel_events="available",
+            whole_surface_events="available",
+            component_topology=UnavailableComponentTopologyCapability(
+                status="unavailable",
+                reason_category="component_topology_oracle_not_defined_in_slice_4",
+                reason="canonical Slice 4 does not define a component-topology oracle",
+            ),
+        ),
+        before_event_code_domain=BEFORE_EVENT_CODE_DOMAIN,
+        after_event_code_domain=AFTER_EVENT_CODE_DOMAIN,
+        before_fate=_write_event_direction(
+            root,
+            episode_directory,
+            "before_fate",
+            0,
+            analysis.before_fate_codes,
+            analysis.before_affected_raw_geom_ids,
+            analysis.before_owner_raw_geom_ids,
+            raw_surfaces,
+        ),
+        after_origin=_write_event_direction(
+            root,
+            episode_directory,
+            "after_origin",
+            1,
+            analysis.after_origin_codes,
+            analysis.after_affected_raw_geom_ids,
+            analysis.after_owner_raw_geom_ids,
+            raw_surfaces,
+        ),
+        occluding_event_summaries=tuple(
+            sorted(
+                (
+                    OccludingVisibilityEventSummary(
+                        kind=summary.kind,  # type: ignore[arg-type]
+                        affected_surface_id=raw_surfaces[summary.affected_raw_geom_id].surface_id,
+                        owner_surface_id=raw_surfaces[summary.owner_raw_geom_id].surface_id,
+                        pixel_count=summary.pixel_count,
+                    )
+                    for summary in analysis.event_summaries
+                ),
+                key=lambda item: (item.kind, item.affected_surface_id, item.owner_surface_id),
+            )
+        ),
+        whole_surface_events=tuple(
+            sorted(
+                (
+                    WholeSurfaceVisibilityEvent(
+                        surface_id=raw_surfaces[item.raw_geom_id].surface_id,
+                        kind=WholeSurfaceEventKind(item.kind),
+                        before_visible_pixels=item.before_visible_pixels,
+                        after_visible_pixels=item.after_visible_pixels,
+                    )
+                    for item in analysis.whole_surface_events
+                ),
+                key=lambda item: item.surface_id,
+            )
+        ),
+        oriented_boundary_sha256=boundary.oriented_boundary_sha256,
+        analytic_transport_sha256=transport.analytic_transport_sha256,
+        visibility_event_sha256="0" * 64,
+    )
+    return events.model_copy(
+        update={"visibility_event_sha256": compute_visibility_event_hash(events)}
+    )
+
+
+def _attachment_contract_evidence(
+    analysis: RawBoundaryVisibilityAnalysis,
+) -> PrivilegedAttachmentContractEvidence:
+    contract = analysis.attachment_contract
+    return PrivilegedAttachmentContractEvidence(
+        method=contract.method,  # type: ignore[arg-type]
+        contact_tolerance=contract.contact_tolerance,
+        rotation_tolerance=contract.rotation_tolerance,
+        geom_types=contract.geom_types,  # type: ignore[arg-type]
+        geom_world_rotations_row_major=contract.geom_world_rotations_row_major,
+        pair_evidence=tuple(
+            PrivilegedAttachmentPairEvidence(**item.__dict__) for item in contract.pair_evidence
+        ),
+    )
+
+
+def _boundary_visibility_diagnostics(
+    analysis: RawBoundaryVisibilityAnalysis,
+) -> BoundaryVisibilityDiagnostics:
+    kind_counts = {kind: 0 for kind in BoundaryKind}
+    owner_counts = {side: 0 for side in BoundaryOwnerSide}
+    evidence: list[PrivilegedBoundaryElementEvidence] = []
+    for element in analysis.boundary_elements:
+        kind = BoundaryKind(element.kind)
+        side = BoundaryOwnerSide(element.owner_side)
+        kind_counts[kind] += 1
+        owner_counts[side] += 1
+        evidence.append(
+            PrivilegedBoundaryElementEvidence(
+                frame_index=element.frame_index,  # type: ignore[arg-type]
+                axis=BoundaryAxis(element.axis),
+                row=element.row,
+                column=element.column,
+                negative_raw_geom_id=element.negative_raw_geom_id,
+                positive_raw_geom_id=element.positive_raw_geom_id,
+                kind=kind,
+                owner_side=side,
+                owner_raw_geom_id=element.owner_raw_geom_id,
+                negative_counterfactual_next_raw_geom_id=(
+                    element.negative_counterfactual_next_raw_geom_id
+                ),
+                positive_counterfactual_next_raw_geom_id=(
+                    element.positive_counterfactual_next_raw_geom_id
+                ),
+            )
+        )
+    return BoundaryVisibilityDiagnostics(
+        boundary_method=ORIENTED_BOUNDARY_METHOD,
+        counterfactual_continuation_rule=COUNTERFACTUAL_CONTINUATION_RULE,
+        counterfactual_tie_rule=COUNTERFACTUAL_TIE_RULE,
+        counterfactual_ray_direction_epsilon=RAY_DIRECTION_EPSILON,
+        junction_ambiguity_rule=JUNCTION_AMBIGUITY_RULE,
+        silhouette_rule=SILHOUETTE_RULE,
+        visibility_event_method=VISIBILITY_EVENT_METHOD,
+        boundary_evidence=tuple(evidence),
+        boundary_kind_counts=kind_counts,
+        owner_side_counts=owner_counts,
+        before_event_code_counts=tuple(
+            int(value)
+            for value in np.bincount(analysis.before_fate_codes.reshape(-1), minlength=6)[:6]
+        ),  # type: ignore[arg-type]
+        after_event_code_counts=tuple(
+            int(value)
+            for value in np.bincount(analysis.after_origin_codes.reshape(-1), minlength=6)[:6]
+        ),  # type: ignore[arg-type]
+    )
+
+
+def _boundary_derived_occlusion(
+    boundary: AvailableOrientedBoundaryOwnership,
+) -> AvailableOcclusionAnnotation:
+    frames_by_pair: dict[tuple[str, str], set[int]] = {}
+    for element in boundary.elements:
+        if element.kind != BoundaryKind.OCCLUDING_CONTOUR:
+            continue
+        owner = element.owner_surface_id
+        if owner is None:
+            raise RuntimeError("occluding contour lacks a public owner")
+        affected = (
+            element.positive_surface_id
+            if owner == element.negative_surface_id
+            else element.negative_surface_id
+        )
+        if affected is None:
+            raise RuntimeError("occluding contour lacks an affected surface")
+        frames_by_pair.setdefault((owner, affected), set()).add(element.frame_index)
+    return AvailableOcclusionAnnotation(
+        status="available",
+        oracle_rule="oriented_boundary_ownership_v1",
+        relations=tuple(
+            OcclusionRelation(
+                occluder_surface_id=owner,
+                occluded_surface_id=affected,
+                frame_indices=tuple(sorted(frames)),  # type: ignore[arg-type]
+            )
+            for (owner, affected), frames in sorted(frames_by_pair.items())
+        ),
+    )
+
+
 def _directional_diagnostic(
     arrays: DirectionalTransportArrays,
 ) -> DirectionalTransportDiagnostic:
@@ -469,6 +806,21 @@ def _generate_single_occluder_episode(
         episode_directory,
         rendered.analytic_transport,
     )
+    raw_surfaces = _surface_by_raw_id(rendered.raw_geom_ids, references)
+    oriented_boundaries = _write_oriented_boundaries(
+        rendered.boundary_visibility,
+        raw_surfaces,
+        config.render.width,
+        config.render.height,
+    )
+    visibility_events = _write_visibility_events(
+        root,
+        episode_directory,
+        rendered.boundary_visibility,
+        raw_surfaces,
+        oriented_boundaries,
+        analytic_transport,
+    )
     occluder_raw_id = rendered.raw_geom_ids["occluding_surface"]
     occluded_raw_id = rendered.raw_geom_ids["background_surface"]
     occlusion_frame_evidence: list[OcclusionFrameEvidence] = []
@@ -505,7 +857,7 @@ def _generate_single_occluder_episode(
     if not relation_frame_indices:
         raise RuntimeError("counterfactual oracle found no foreground/background occlusion")
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.5",
+        schema_version="0.1.0-dev.6",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -514,14 +866,8 @@ def _generate_single_occluder_episode(
         visibility_states=visibility,
         region_correspondence=correspondence,
         region_mask_changes=mask_changes,
-        ecological_visibility_events=UnavailableEcologicalVisibilityEvents(
-            status="unavailable",
-            reason_category="oriented_boundary_ownership_unavailable",
-            reason=(
-                "Ecological accretion/deletion events remain unavailable until oriented "
-                "boundary ownership is implemented; analytic transport alone is insufficient."
-            ),
-        ),
+        oriented_boundary_ownership=oriented_boundaries,
+        ecological_visibility_events=visibility_events,
         occlusion=AvailableOcclusionAnnotation(
             status="available",
             oracle_rule="counterfactual_occluder_exclusion_v1",
@@ -547,7 +893,7 @@ def _generate_single_occluder_episode(
     write_canonical_json(transition_path, transition)
 
     instrumentation = SingleOccluderInstrumentation(
-        schema_version="0.1.0-dev.5",
+        schema_version="0.1.0-dev.6",
         scene_family=SceneFamily.SINGLE_OCCLUDER,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,
@@ -558,6 +904,8 @@ def _generate_single_occluder_episode(
         },
         raw_geom_world_positions=rendered.raw_geom_positions,
         raw_geom_compiled_sizes=rendered.raw_geom_compiled_sizes,
+        raw_geom_types=rendered.raw_geom_types,  # type: ignore[arg-type]
+        raw_geom_world_rotations_row_major=(rendered.raw_geom_world_rotations_row_major),
         occlusion_oracle=OcclusionOracleEvidence(
             rule="counterfactual_occluder_exclusion_v1",
             candidate_occluder_raw_geom_id=occluder_raw_id,
@@ -568,6 +916,10 @@ def _generate_single_occluder_episode(
             rendered.analytic_transport,
             rendered.before.raw_geom_segmentation,
             rendered.after.raw_geom_segmentation,
+        ),
+        attachment_contract=_attachment_contract_evidence(rendered.boundary_visibility),
+        boundary_visibility_diagnostics=_boundary_visibility_diagnostics(
+            rendered.boundary_visibility
         ),
     )
     instrumentation_path = episode_directory / "instrumentation.json"
@@ -593,6 +945,8 @@ def _generate_single_occluder_episode(
         scene_content_sha256=compute_single_occluder_scene_content_hash(config),
         ecological_label_sha256=transition.ecological_label_sha256,
         analytic_transport_sha256=analytic_transport.analytic_transport_sha256,
+        oriented_boundary_sha256=oriented_boundaries.oriented_boundary_sha256,
+        visibility_event_sha256=visibility_events.visibility_event_sha256,
         rgb_logical_sha256=(before.rgb.logical_sha256, after.rgb.logical_sha256),
     )
 
@@ -662,8 +1016,23 @@ def _generate_corridor_episode(
         episode_directory,
         rendered.analytic_transport,
     )
+    raw_surfaces = _surface_by_raw_id(rendered.raw_geom_ids, references)
+    oriented_boundaries = _write_oriented_boundaries(
+        rendered.boundary_visibility,
+        raw_surfaces,
+        config.render.width,
+        config.render.height,
+    )
+    visibility_events = _write_visibility_events(
+        root,
+        episode_directory,
+        rendered.boundary_visibility,
+        raw_surfaces,
+        oriented_boundaries,
+        analytic_transport,
+    )
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.5",
+        schema_version="0.1.0-dev.6",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -672,22 +1041,9 @@ def _generate_corridor_episode(
         visibility_states=visibility,
         region_correspondence=correspondence,
         region_mask_changes=mask_changes,
-        ecological_visibility_events=UnavailableEcologicalVisibilityEvents(
-            status="unavailable",
-            reason_category="oriented_boundary_ownership_unavailable",
-            reason=(
-                "Ecological accretion/deletion events remain unavailable until oriented "
-                "boundary ownership is implemented; analytic transport alone is insufficient."
-            ),
-        ),
-        occlusion=UnavailableOcclusionAnnotation(
-            status="unavailable",
-            reason_category="oriented_corridor_occlusion_oracle_unavailable",
-            reason=(
-                "Oriented corridor occlusion is unavailable until a controlled "
-                "boundary-ownership oracle is implemented."
-            ),
-        ),
+        oriented_boundary_ownership=oriented_boundaries,
+        ecological_visibility_events=visibility_events,
+        occlusion=_boundary_derived_occlusion(oriented_boundaries),
         boundary_structures=boundaries,
         analytic_optical_transport=analytic_transport,
         ecological_label_sha256="0" * 64,
@@ -725,7 +1081,7 @@ def _generate_corridor_episode(
             )
         )
     instrumentation = CorridorInstrumentation(
-        schema_version="0.1.0-dev.5",
+        schema_version="0.1.0-dev.6",
         scene_family=SceneFamily.CORRIDOR,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,
@@ -737,6 +1093,8 @@ def _generate_corridor_episode(
         },
         raw_geom_world_positions=rendered.raw_geom_positions,
         raw_geom_compiled_sizes=rendered.raw_geom_compiled_sizes,
+        raw_geom_types=rendered.raw_geom_types,  # type: ignore[arg-type]
+        raw_geom_world_rotations_row_major=(rendered.raw_geom_world_rotations_row_major),
         sampled_geometry=geometry,
         camera_before=camera_before,
         camera_after=camera_after,
@@ -748,6 +1106,10 @@ def _generate_corridor_episode(
             rendered.analytic_transport,
             rendered.before.raw_geom_segmentation,
             rendered.after.raw_geom_segmentation,
+        ),
+        attachment_contract=_attachment_contract_evidence(rendered.boundary_visibility),
+        boundary_visibility_diagnostics=_boundary_visibility_diagnostics(
+            rendered.boundary_visibility
         ),
     )
     instrumentation_path = episode_directory / "instrumentation.json"
@@ -774,6 +1136,8 @@ def _generate_corridor_episode(
         scene_content_sha256=scene_content_sha256,
         ecological_label_sha256=transition.ecological_label_sha256,
         analytic_transport_sha256=analytic_transport.analytic_transport_sha256,
+        oriented_boundary_sha256=oriented_boundaries.oriented_boundary_sha256,
+        visibility_event_sha256=visibility_events.visibility_event_sha256,
         rgb_logical_sha256=(before.rgb.logical_sha256, after.rgb.logical_sha256),
     )
 
@@ -830,7 +1194,7 @@ def generate_dataset(config: BenchmarkConfig, episodes: int, output: Path) -> Da
         renderer_provenance
     )
     manifest = DatasetManifest(
-        schema_version="0.1.0-dev.3",
+        schema_version="0.1.0-dev.4",
         generator_version="0.1.0",
         scene_family=config.scene_family,
         root_seed=config.seed,

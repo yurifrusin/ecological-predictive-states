@@ -2,9 +2,16 @@
 
 from typing import Any
 
+from epsbench.annotations import (
+    ATTACHMENT_CONTACT_TOLERANCE,
+    ATTACHMENT_ROTATION_TOLERANCE,
+    RAY_DIRECTION_EPSILON,
+)
 from epsbench.config import CorridorConfig, SingleOccluderConfig
 from epsbench.schema import (
     AvailableDenseOpticalTransport,
+    AvailableEcologicalVisibilityEvents,
+    AvailableOrientedBoundaryOwnership,
     CorridorSampledGeometry,
     DatasetManifest,
     RendererProvenance,
@@ -34,9 +41,18 @@ def ecological_label_domain(transition: TransitionRecord) -> dict[str, Any]:
         "region_mask_changes": [
             item.model_dump(mode="json") for item in transition.region_mask_changes
         ],
-        "ecological_visibility_events": transition.ecological_visibility_events.model_dump(
-            mode="json"
-        ),
+        "oriented_boundary_ownership": {
+            **oriented_boundary_domain(transition.oriented_boundary_ownership),
+            "oriented_boundary_sha256": (
+                transition.oriented_boundary_ownership.oriented_boundary_sha256
+            ),
+        },
+        "ecological_visibility_events": {
+            **visibility_event_domain(transition.ecological_visibility_events),
+            "visibility_event_sha256": (
+                transition.ecological_visibility_events.visibility_event_sha256
+            ),
+        },
         "occlusion": transition.occlusion.model_dump(mode="json"),
         "boundary_structures": [
             item.model_dump(mode="json") for item in transition.boundary_structures
@@ -87,6 +103,85 @@ def analytic_transport_domain(transport: AvailableDenseOpticalTransport) -> dict
 
 def compute_analytic_transport_hash(transport: AvailableDenseOpticalTransport) -> str:
     return sha256_bytes(canonical_json_bytes(analytic_transport_domain(transport)))
+
+
+def boundary_numerical_contract_domain() -> dict[str, Any]:
+    """Return typed global numerical rules without scene metric geometry."""
+
+    return {
+        "attachment_contact_tolerance": ATTACHMENT_CONTACT_TOLERANCE,
+        "attachment_rotation_tolerance": ATTACHMENT_ROTATION_TOLERANCE,
+        "counterfactual_ray_direction_epsilon": RAY_DIRECTION_EPSILON,
+    }
+
+
+def compute_boundary_numerical_contract_hash() -> str:
+    return sha256_bytes(canonical_json_bytes(boundary_numerical_contract_domain()))
+
+
+def oriented_boundary_domain(
+    boundary: AvailableOrientedBoundaryOwnership,
+) -> dict[str, Any]:
+    """Return the public image-plane boundary-ownership identity domain."""
+
+    return {
+        "method": boundary.method,
+        "raster_width": boundary.raster_width,
+        "raster_height": boundary.raster_height,
+        "coordinate_convention": boundary.coordinate_convention.model_dump(mode="json"),
+        "boundary_kind_domain": boundary.boundary_kind_domain,
+        "owner_side_domain": boundary.owner_side_domain,
+        "attachment_rule": boundary.attachment_rule,
+        "attachment_public_contract_version": boundary.attachment_public_contract_version,
+        "numerical_contract_sha256": boundary.numerical_contract_sha256,
+        "counterfactual_continuation_rule": boundary.counterfactual_continuation_rule,
+        "counterfactual_tie_rule": boundary.counterfactual_tie_rule,
+        "junction_ambiguity_rule": boundary.junction_ambiguity_rule,
+        "silhouette_rule": boundary.silhouette_rule,
+        "frame_indices": [0, 1],
+        "elements": [item.model_dump(mode="json") for item in boundary.elements],
+    }
+
+
+def compute_oriented_boundary_hash(boundary: AvailableOrientedBoundaryOwnership) -> str:
+    return sha256_bytes(canonical_json_bytes(oriented_boundary_domain(boundary)))
+
+
+def visibility_event_domain(events: AvailableEcologicalVisibilityEvents) -> dict[str, Any]:
+    """Return the backend-independent ecological visibility-event identity domain."""
+
+    def direction_domain(direction: Any) -> dict[str, Any]:
+        return {
+            "frame_index": direction.frame_index,
+            "direction": direction.direction,
+            "event_codes_logical_sha256": direction.event_codes.logical_sha256,
+            "affected_surface_labels_logical_sha256": (
+                direction.affected_surface_labels.logical_sha256
+            ),
+            "owner_surface_labels_logical_sha256": direction.owner_surface_labels.logical_sha256,
+        }
+
+    return {
+        "method": events.method,
+        "capabilities": events.capabilities.model_dump(mode="json"),
+        "before_event_code_domain": events.before_event_code_domain,
+        "after_event_code_domain": events.after_event_code_domain,
+        "before_fate": direction_domain(events.before_fate),
+        "after_origin": direction_domain(events.after_origin),
+        "occluding_event_summaries": [
+            item.model_dump(mode="json") for item in events.occluding_event_summaries
+        ],
+        "whole_surface_events": [
+            item.model_dump(mode="json") for item in events.whole_surface_events
+        ],
+        "oriented_boundary_sha256": events.oriented_boundary_sha256,
+        "analytic_transport_sha256": events.analytic_transport_sha256,
+        "frame_indices": [0, 1],
+    }
+
+
+def compute_visibility_event_hash(events: AvailableEcologicalVisibilityEvents) -> str:
+    return sha256_bytes(canonical_json_bytes(visibility_event_domain(events)))
 
 
 def single_occluder_scene_content_domain(config: SingleOccluderConfig) -> dict[str, Any]:
@@ -199,6 +294,8 @@ def dataset_logical_domain(manifest: DatasetManifest) -> dict[str, Any]:
                 "scene_content_sha256": episode.scene_content_sha256,
                 "ecological_label_sha256": episode.ecological_label_sha256,
                 "analytic_transport_sha256": episode.analytic_transport_sha256,
+                "oriented_boundary_sha256": episode.oriented_boundary_sha256,
+                "visibility_event_sha256": episode.visibility_event_sha256,
                 "rgb_logical_sha256": list(episode.rgb_logical_sha256),
             }
             for episode in manifest.episodes

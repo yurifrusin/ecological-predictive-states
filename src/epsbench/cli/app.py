@@ -1,18 +1,44 @@
 """Typer CLI for generate, validate, and inspect operations."""
 
+from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from epsbench.config import load_config
-from epsbench.data import create_inspection_image, generate_dataset, validate_dataset
+from epsbench.data import DatasetLoader, create_inspection_image, generate_dataset, validate_dataset
+from epsbench.schema import DatasetManifest, ModalityPermissionSet
 
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
     help="EPS-Bench Milestone 0 dataset utilities.",
 )
+
+
+def _print_oracle_evidence(dataset: Path, manifest: DatasetManifest) -> None:
+    typer.echo(
+        "Oriented boundary identities: "
+        + ", ".join(episode.oriented_boundary_sha256 for episode in manifest.episodes)
+    )
+    typer.echo(
+        "Visibility event identities: "
+        + ", ".join(episode.visibility_event_sha256 for episode in manifest.episodes)
+    )
+    loader = DatasetLoader(dataset, ModalityPermissionSet.ecological_only())
+    for episode in manifest.episodes:
+        boundary = loader.read_oriented_boundaries(episode.episode_index)
+        events = loader.read_ecological_visibility_events(episode.episode_index)
+        boundary_counts = Counter(element.kind.value for element in boundary.elements)
+        before_counts = Counter(int(value) for value in events.before_fate_codes.reshape(-1))
+        after_counts = Counter(int(value) for value in events.after_origin_codes.reshape(-1))
+        boundary_summary = dict(sorted(boundary_counts.items()))
+        typer.echo(
+            f"Episode {episode.episode_index} boundary counts {boundary_summary}; "
+            f"before-event counts {dict(sorted(before_counts.items()))}; "
+            f"after-event counts {dict(sorted(after_counts.items()))}"
+        )
 
 
 @app.command()
@@ -36,13 +62,14 @@ def generate(
         "Analytic transport identities: "
         + ", ".join(episode.analytic_transport_sha256 for episode in manifest.episodes)
     )
+    _print_oracle_evidence(output, manifest)
 
 
 @app.command(name="validate")
 def validate_command(
     dataset: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
 ) -> None:
-    """Validate schemas, artifacts, alignment, remapping, and hashes."""
+    """Validate schemas, artifacts, analytic oracles, remapping, and hashes."""
 
     try:
         manifest = validate_dataset(dataset)
@@ -57,6 +84,7 @@ def validate_command(
         "Analytic transport identities: "
         + ", ".join(episode.analytic_transport_sha256 for episode in manifest.episodes)
     )
+    _print_oracle_evidence(dataset, manifest)
 
 
 @app.command(name="inspect")
@@ -65,7 +93,7 @@ def inspect_command(
     output: Annotated[Path, typer.Option(dir_okay=False)],
     episode: Annotated[int, typer.Option(min=0)] = 0,
 ) -> None:
-    """Write an RGB/segmentation/transport composite outside the dataset."""
+    """Write an RGB, transport, boundary, and event composite outside the dataset."""
 
     try:
         result = create_inspection_image(dataset, episode, output)

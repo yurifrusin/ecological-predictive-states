@@ -108,9 +108,18 @@ def test_counterfactual_oracle_derives_relation_frame_membership(smoke_dataset: 
     assert transition.occlusion.relations[0].frame_indices == evidence_frames
 
 
-def test_actual_ecological_visibility_events_remain_typed_unavailable(
+def test_ecological_visibility_events_are_available_and_transport_causal(
     smoke_dataset: Path,
 ) -> None:
     annotation = _transition(smoke_dataset, 0).ecological_visibility_events
-    assert annotation.status == "unavailable"
-    assert annotation.reason_category == "oriented_boundary_ownership_unavailable"
+    assert annotation.status == "available"
+    assert annotation.capabilities.transport_causal_pixel_events == "available"
+    assert annotation.capabilities.whole_surface_events == "available"
+    assert annotation.capabilities.component_topology.status == "unavailable"
+    assert annotation.capabilities.component_topology.reason == (
+        "canonical Slice 4 does not define a component-topology oracle"
+    )
+    assert {item.kind for item in annotation.occluding_event_summaries} == {
+        "accretion",
+        "deletion",
+    }
