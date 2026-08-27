@@ -11,12 +11,12 @@ from epsbench.data.identity import (
     compute_source_provenance_hash,
 )
 from epsbench.schema import (
+    AvailableOcclusionAnnotation,
     CorridorInstrumentation,
     DatasetManifest,
     ModalityPermissionSet,
     SceneFamily,
     TransitionRecord,
-    UnavailableOcclusionAnnotation,
     parse_privileged_instrumentation_json,
 )
 
@@ -176,22 +176,18 @@ def test_corridor_appearance_changes_rgb_only(
     assert base_transition.ecological_visibility_events == (
         alternate_transition.ecological_visibility_events
     )
-    assert isinstance(base_transition.occlusion, UnavailableOcclusionAnnotation)
+    assert isinstance(base_transition.occlusion, AvailableOcclusionAnnotation)
     assert base_transition.occlusion == alternate_transition.occlusion
 
 
-def test_corridor_visibility_and_occlusion_claims_are_typed_unavailable(
+def test_corridor_visibility_is_available_and_occlusion_is_oracle_known_empty(
     corridor_dataset: Path,
 ) -> None:
     transition = _transition(corridor_dataset, 0)
-    assert transition.ecological_visibility_events.status == "unavailable"
-    assert transition.ecological_visibility_events.reason_category == (
-        "oriented_boundary_ownership_unavailable"
-    )
-    assert isinstance(transition.occlusion, UnavailableOcclusionAnnotation)
-    assert transition.occlusion.reason_category == (
-        "oriented_corridor_occlusion_oracle_unavailable"
-    )
+    assert transition.ecological_visibility_events.status == "available"
+    assert isinstance(transition.occlusion, AvailableOcclusionAnnotation)
+    assert transition.occlusion.oracle_rule == "oriented_boundary_ownership_complete_v2"
+    assert transition.occlusion.relations == ()
 
 
 def test_ecological_permissions_deny_corridor_privileged_data_before_open(

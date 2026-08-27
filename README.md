@@ -4,9 +4,9 @@ Ecological Predictive States is a research repository for testing whether an act
 
 ## Current status
 
-Gate 0A is canonical. The reviewed single-occluder Gate 0B Slice 1 and corridor Gate 0B Slice 2 are canonical. Gate 0B Slice 3 analytic optical transport is also canonical after exact-head engineering and scientific review. Its exact reviewed implementation head was `3086bc2eccc4b7492eb8a77660572e879a04ef0b`, which received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`, and its accepted method is `analytic_static_scene_transport_v3`. The method and limits are documented in [the Slice 3 contract](docs/GATE_0B_SLICE_3_ANALYTIC_FLOW.md).
+Gate 0A is canonical. The reviewed single-occluder Gate 0B Slice 1 and corridor Gate 0B Slice 2 are canonical. Gate 0B Slice 3 analytic optical transport is also canonical after exact-head engineering and scientific review. Its exact reviewed implementation head was `3086bc2eccc4b7492eb8a77660572e879a04ef0b`, which received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`, and its accepted method is `analytic_static_scene_transport_v3`. The method and limits are documented in [the Slice 3 contract](docs/GATE_0B_SLICE_3_ANALYTIC_FLOW.md). Slice 4 oriented-boundary and ecological visibility-event work is implemented on its named branch but remains pending dual independent review and owner approval; its proposed contract is documented in [the Slice 4 implementation note](docs/GATE_0B_SLICE_4_BOUNDARY_EVENTS.md).
 
-**No scientific result exists yet.** Successful generation, validation, and tests establish infrastructure only. Full Gate 0B completion is not claimed: full oriented boundary ownership and ecological visibility-event derivation remain incomplete. Gate 0C and all model work remain unauthorised.
+**No scientific result exists yet.** Successful generation, validation, and tests establish infrastructure only. Full Gate 0B completion is not claimed: Slice 4 is pending review and the remaining Gate 0B exit criteria have not received owner-approved evidence. Gate 0C and all model work remain unauthorised.
 
 The scientific authority is [the Research Charter](docs/RESEARCH_CHARTER.md), followed by [EPS-Bench v0](docs/EPS_BENCH_V0.md) and [Milestone 0](docs/MILESTONE_0.md). Architecture and current limits are recorded in [the implementation notes](docs/IMPLEMENTATION_NOTES.md). Review workflow v2 is canonical after PR #7 and its linked closeout; the exact reviewed implementation head was `741e31882cb484fa5858630be83d2f08e483585f`, which received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`. Active review records remain external to implementation PRs, and final immutable records enter through a separately authorised linked closeout. `MERGE_CONVERGENCE` and the terminal `RECORD_ONLY_CLOSEOUT` path remain distinct. The orchestrator coordinates state without inheriting review authority. This governance closeout has no Gate 0B or Gate 0C effect, implements no machine-readable review automation or next slice, and establishes no scientific result. See [the review protocol](docs/review-protocol.md) and [review-record directory policy](docs/reviews/README.md).
 
@@ -70,12 +70,12 @@ Use `uv run ruff format .` to apply formatting intentionally.
 | Class | Current contents |
 | --- | --- |
 | Sensory | RGB and executed action |
-| Ecological oracle | Opaque surface regions, boundary contacts, projected-image fractions, correspondence, neutral mask changes, typed analytic optical transport with validity/reasons, typed unavailable ecological-visibility-event status, and typed occlusion availability/relations |
+| Ecological oracle | Opaque surface regions, boundary contacts, projected-image fractions, correspondence, neutral mask changes, typed analytic optical transport, sparse oriented boundary ownership, bounded ecological visibility-event maps/summaries, and typed occlusion availability/relations |
 | Metric baseline | Depth |
 | Instrumentation only | Camera world transforms, raw MuJoCo geom IDs, raw coordinates, sampled corridor geometry, and generation records |
 | Control metadata | Compound transition and scene-family records; never treated as learner inputs |
 
-`DatasetLoader` requires an explicit `ModalityPermissionSet`. Ecological-only access may read the complete image-plane analytic transport bundle; access without that modality fails before its artifacts are opened. Ecological-only access still fails before depth, camera pose, raw IDs, or world-coordinate artifacts are opened.
+`DatasetLoader` requires an explicit `ModalityPermissionSet`. Ecological-only access may read the complete image-plane analytic transport, oriented-boundary, and visibility-event bundles; access without the relevant modality fails before its transition or artifacts are opened. Ecological-only access still fails before depth, camera pose, raw IDs, world-coordinate geometry, attachment evidence, or counterfactual ray evidence is opened.
 
 ## Repository map
 

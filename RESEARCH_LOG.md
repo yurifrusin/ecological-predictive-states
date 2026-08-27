@@ -37,3 +37,15 @@ Completed EPS review cycles showed that committing an active review record can c
 EPS therefore separates active external review evidence from immutable records added during linked closeout, declares both a review profile and evidence class for each work package, and distinguishes work-package closeout, engineering-milestone closeout, benchmark or preregistration freeze, and empirical decision gates. Machine-readable review-state automation is deferred until the amended human process completes a full work package without governance correction. These refinements incorporate cross-project learning developed while Unfrozen Schemas adopted the EPS review model, but that memorandum is not authoritative for EPS; EPS adopts the changes prospectively under its own owner authority.
 
 Moving active reviews outside implementation PRs solves exact-head circularity, but pass-only convergence would leave terminal negative outcomes without a canonical repository record. A rejected, inconclusive, blocked, owner-rejected, or abandoned implementation also needs preservation even though it cannot reach merge convergence. The record-only closeout path therefore archives exact-head review and owner-decision evidence through a separate documentation PR from canonical `main`, without merging or repairing the terminal implementation. This is governance and falsification-hygiene correction, not an empirical result.
+
+## 2026-08-27 — Image-lattice boundary ownership
+
+Oriented boundary ownership is defined on the image edge lattice and distinguishes occluding contours, attached junctions, controlled silhouettes, and multi-surface ambiguity. Metric geometry is privileged apparatus evidence; public ownership is expressed only through opaque surfaces and image-relative side.
+
+The proposed Slice 4 representation is implemented pending independent review. This rationale does not make the work canonical or establish a scientific result.
+
+## 2026-08-27 — Transport-causal visibility events
+
+Accretion and deletion are derived only when analytic transport establishes occlusion/disocclusion and oriented boundary ownership identifies a supported owner/affected pair. Frame entry/exit and neutral mask change remain separate.
+
+Component split/merge remains explicitly unavailable in this slice. Implementation and CI are infrastructure evidence only; Gate 0B completion and Gate 0C authorisation are not implied.

@@ -13,6 +13,8 @@ from epsbench.data.identity import (
     compute_content_provenance_binding,
     compute_dataset_logical_hash,
     compute_ecological_label_hash,
+    compute_oriented_boundary_hash,
+    compute_visibility_event_hash,
 )
 from epsbench.schema import (
     ArtifactRecord,
@@ -98,6 +100,30 @@ def commit_episode_payloads(
 
     manifest = load_manifest(root)
     episode = manifest.episodes[episode_index]
+    events_payload = transition_payload.get("ecological_visibility_events")
+    if isinstance(events_payload, dict):
+        summaries = events_payload.get("occluding_event_summaries")
+        if isinstance(summaries, list):
+            summaries.sort(
+                key=lambda item: (
+                    item["kind"],
+                    item["affected_surface_id"],
+                    item["owner_surface_id"],
+                )
+            )
+        whole = events_payload.get("whole_surface_events")
+        if isinstance(whole, list):
+            whole.sort(key=lambda item: item["surface_id"])
+    occlusion_payload = transition_payload.get("occlusion")
+    if isinstance(occlusion_payload, dict):
+        relations = occlusion_payload.get("relations")
+        if isinstance(relations, list):
+            relations.sort(
+                key=lambda item: (
+                    item["occluder_surface_id"],
+                    item["occluded_surface_id"],
+                )
+            )
     transition = TransitionRecord.model_validate_json(canonical_json_bytes(transition_payload))
     if isinstance(transition.analytic_optical_transport, AvailableDenseOpticalTransport):
         analytic_transport = transition.analytic_optical_transport.model_copy(
@@ -111,6 +137,31 @@ def commit_episode_payloads(
         transition = transition.model_copy(
             update={"analytic_optical_transport": analytic_transport}
         )
+    assert isinstance(transition.analytic_optical_transport, AvailableDenseOpticalTransport)
+    boundary = transition.oriented_boundary_ownership.model_copy(
+        update={"oriented_boundary_sha256": "0" * 64}
+    )
+    boundary = boundary.model_copy(
+        update={"oriented_boundary_sha256": compute_oriented_boundary_hash(boundary)}
+    )
+    events = transition.ecological_visibility_events.model_copy(
+        update={
+            "analytic_transport_sha256": (
+                transition.analytic_optical_transport.analytic_transport_sha256
+            ),
+            "oriented_boundary_sha256": boundary.oriented_boundary_sha256,
+            "visibility_event_sha256": "0" * 64,
+        }
+    )
+    events = events.model_copy(
+        update={"visibility_event_sha256": compute_visibility_event_hash(events)}
+    )
+    transition = transition.model_copy(
+        update={
+            "oriented_boundary_ownership": boundary,
+            "ecological_visibility_events": events,
+        }
+    )
     transition = TransitionRecord.model_validate(
         {
             **transition.model_dump(mode="python"),
@@ -143,6 +194,12 @@ def commit_episode_payloads(
                     AvailableDenseOpticalTransport,
                 )
                 else episode.analytic_transport_sha256
+            ),
+            "oriented_boundary_sha256": (
+                transition.oriented_boundary_ownership.oriented_boundary_sha256
+            ),
+            "visibility_event_sha256": (
+                transition.ecological_visibility_events.visibility_event_sha256
             ),
             "rgb_logical_sha256": (
                 transition.before.rgb.logical_sha256,
@@ -181,7 +238,20 @@ def commit_declared_transport_identity_corruption(
     transition_payload["analytic_optical_transport"]["analytic_transport_sha256"] = (
         corrupted_identity
     )
+    transition_payload["ecological_visibility_events"]["analytic_transport_sha256"] = (
+        corrupted_identity
+    )
     transition = TransitionRecord.model_validate_json(canonical_json_bytes(transition_payload))
+    events = transition.ecological_visibility_events.model_copy(
+        update={
+            "analytic_transport_sha256": corrupted_identity,
+            "visibility_event_sha256": "0" * 64,
+        }
+    )
+    events = events.model_copy(
+        update={"visibility_event_sha256": compute_visibility_event_hash(events)}
+    )
+    transition = transition.model_copy(update={"ecological_visibility_events": events})
     transition = transition.model_copy(
         update={"ecological_label_sha256": compute_ecological_label_hash(transition)}
     )
@@ -196,6 +266,92 @@ def commit_declared_transport_identity_corruption(
             "transition": transition_record,
             "ecological_label_sha256": transition.ecological_label_sha256,
             "analytic_transport_sha256": corrupted_identity,
+            "visibility_event_sha256": events.visibility_event_sha256,
+        }
+    )
+    _write_manifest(root, manifest, episodes)
+
+
+def commit_declared_boundary_identity_corruption(
+    root: Path,
+    episode_index: int,
+    corrupted_identity: str,
+) -> None:
+    """Rebuild every enclosing hash while preserving a false boundary identity."""
+
+    manifest = load_manifest(root)
+    episode = manifest.episodes[episode_index]
+    transition = TransitionRecord.model_validate_json(
+        (root / episode.transition.path).read_text(encoding="utf-8")
+    )
+    boundary = transition.oriented_boundary_ownership.model_copy(
+        update={"oriented_boundary_sha256": corrupted_identity}
+    )
+    events = transition.ecological_visibility_events.model_copy(
+        update={
+            "oriented_boundary_sha256": corrupted_identity,
+            "visibility_event_sha256": "0" * 64,
+        }
+    )
+    events = events.model_copy(
+        update={"visibility_event_sha256": compute_visibility_event_hash(events)}
+    )
+    transition = transition.model_copy(
+        update={
+            "oriented_boundary_ownership": boundary,
+            "ecological_visibility_events": events,
+        }
+    )
+    transition = transition.model_copy(
+        update={"ecological_label_sha256": compute_ecological_label_hash(transition)}
+    )
+    transition_record = rewrite_json_artifact(
+        root,
+        episode.transition,
+        transition.model_dump(mode="json"),
+    )
+    episodes = list(manifest.episodes)
+    episodes[episode_index] = episode.model_copy(
+        update={
+            "transition": transition_record,
+            "ecological_label_sha256": transition.ecological_label_sha256,
+            "oriented_boundary_sha256": corrupted_identity,
+            "visibility_event_sha256": events.visibility_event_sha256,
+        }
+    )
+    _write_manifest(root, manifest, episodes)
+
+
+def commit_declared_event_identity_corruption(
+    root: Path,
+    episode_index: int,
+    corrupted_identity: str,
+) -> None:
+    """Rebuild every enclosing hash while preserving a false event identity."""
+
+    manifest = load_manifest(root)
+    episode = manifest.episodes[episode_index]
+    transition = TransitionRecord.model_validate_json(
+        (root / episode.transition.path).read_text(encoding="utf-8")
+    )
+    events = transition.ecological_visibility_events.model_copy(
+        update={"visibility_event_sha256": corrupted_identity}
+    )
+    transition = transition.model_copy(update={"ecological_visibility_events": events})
+    transition = transition.model_copy(
+        update={"ecological_label_sha256": compute_ecological_label_hash(transition)}
+    )
+    transition_record = rewrite_json_artifact(
+        root,
+        episode.transition,
+        transition.model_dump(mode="json"),
+    )
+    episodes = list(manifest.episodes)
+    episodes[episode_index] = episode.model_copy(
+        update={
+            "transition": transition_record,
+            "ecological_label_sha256": transition.ecological_label_sha256,
+            "visibility_event_sha256": corrupted_identity,
         }
     )
     _write_manifest(root, manifest, episodes)

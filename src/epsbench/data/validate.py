@@ -11,8 +11,30 @@ from PIL import Image
 
 from epsbench.annotations import (
     ANALYTIC_TRANSPORT_METHOD,
+    ATTACHMENT_CONTACT_MANIFOLD_RULE,
+    ATTACHMENT_EDGE_ASSOCIATION_RULE,
+    ATTACHMENT_ENDPOINT_TIE_RULE,
+    ATTACHMENT_FEASIBILITY_RULE,
+    ATTACHMENT_MULTI_SURFACE_RULE,
+    ATTACHMENT_PROJECTION_CONVENTION,
+    ATTACHMENT_PROJECTION_IN_FRONT_RULE,
+    ATTACHMENT_PUBLIC_CONTRACT_VERSION,
+    ATTACHMENT_RULE,
+    BOUNDARY_KIND_DOMAIN,
+    COUNTERFACTUAL_CONTINUATION_RULE,
+    COUNTERFACTUAL_TIE_RULE,
+    EDGE_LATTICE_CONVENTION,
+    JUNCTION_AMBIGUITY_RULE,
+    ORIENTED_BOUNDARY_METHOD,
+    OWNER_SIDE_DOMAIN,
+    RAY_DIRECTION_EPSILON,
+    SILHOUETTE_RULE,
+    SUPPORTED_CONTACT_MANIFOLD_TYPES,
+    AfterOriginCode,
     AnalyticTransportArrays,
+    BeforeFateCode,
     DirectionalTransportArrays,
+    RawBoundaryVisibilityAnalysis,
     TransportReasonCode,
     derive_boundary_structure,
     derive_visibility,
@@ -25,11 +47,14 @@ from epsbench.config import (
 )
 from epsbench.data.identity import (
     compute_analytic_transport_hash,
+    compute_boundary_numerical_contract_hash,
     compute_content_provenance_binding,
     compute_dataset_logical_hash,
     compute_ecological_label_hash,
+    compute_oriented_boundary_hash,
     compute_renderer_execution_provenance_hash,
     compute_source_provenance_hash,
+    compute_visibility_event_hash,
 )
 from epsbench.data.paths import UnsafeDatasetManifestError, resolve_dataset_manifest
 from epsbench.schema import (
@@ -39,16 +64,29 @@ from epsbench.schema import (
     ArtifactRecord,
     AvailableDenseOpticalTransport,
     AvailableOcclusionAnnotation,
+    AvailableOrientedBoundaryOwnership,
+    BoundaryAxis,
+    BoundaryKind,
+    BoundaryOwnerSide,
+    BoundaryVisibilityDiagnostics,
     CameraInstrumentation,
     CorridorInstrumentation,
     DatasetManifest,
     DirectionalOpticalTransport,
     DirectionalTransportDiagnostic,
+    DirectionalVisibilityEventMap,
+    EdgeLatticeCoordinateConvention,
+    OccludingVisibilityEventSummary,
     OcclusionRelation,
+    OrientedBoundaryElement,
+    PrivilegedAttachmentContractEvidence,
+    PrivilegedAttachmentPairEvidence,
+    PrivilegedBoundaryElementEvidence,
     PrivilegedInstrumentation,
     SingleOccluderInstrumentation,
     TransitionRecord,
-    UnavailableOcclusionAnnotation,
+    WholeSurfaceEventKind,
+    WholeSurfaceVisibilityEvent,
     parse_privileged_instrumentation_json,
 )
 from epsbench.sim import (
@@ -56,7 +94,9 @@ from epsbench.sim import (
     compile_corridor_scene_contract,
     compile_single_occluder_scene_contract,
     compute_corridor_analytic_transport,
+    compute_corridor_boundary_visibility,
     compute_single_occluder_analytic_transport,
+    compute_single_occluder_boundary_visibility,
     corridor_generation_seeds,
 )
 from epsbench.sim.compiled import CompiledSceneContract
@@ -251,6 +291,324 @@ def _require_exact_transport_recomputation(
             )
 
 
+def _raw_surface_records(
+    transition: TransitionRecord,
+    instrumentation: PrivilegedInstrumentation,
+) -> dict[int, Any]:
+    by_id = {surface.surface_id: surface for surface in transition.surfaces}
+    return {
+        int(raw_id): by_id[opaque_id]
+        for raw_id, opaque_id in instrumentation.raw_to_opaque_surface_ids.items()
+    }
+
+
+def _expected_oriented_boundary(
+    analysis: RawBoundaryVisibilityAnalysis,
+    raw_surfaces: dict[int, Any],
+    width: int,
+    height: int,
+) -> AvailableOrientedBoundaryOwnership:
+    elements = tuple(
+        OrientedBoundaryElement(
+            frame_index=item.frame_index,  # type: ignore[arg-type]
+            axis=BoundaryAxis(item.axis),
+            row=item.row,
+            column=item.column,
+            negative_surface_id=(
+                raw_surfaces[item.negative_raw_geom_id].surface_id
+                if item.negative_raw_geom_id is not None
+                else None
+            ),
+            positive_surface_id=(
+                raw_surfaces[item.positive_raw_geom_id].surface_id
+                if item.positive_raw_geom_id is not None
+                else None
+            ),
+            kind=BoundaryKind(item.kind),
+            owner_side=BoundaryOwnerSide(item.owner_side),
+            owner_surface_id=(
+                raw_surfaces[item.owner_raw_geom_id].surface_id
+                if item.owner_raw_geom_id is not None
+                else None
+            ),
+        )
+        for item in analysis.boundary_elements
+    )
+    boundary = AvailableOrientedBoundaryOwnership(
+        status="available",
+        method=ORIENTED_BOUNDARY_METHOD,
+        raster_width=width,
+        raster_height=height,
+        coordinate_convention=EdgeLatticeCoordinateConvention(
+            version=EDGE_LATTICE_CONVENTION,
+            horizontal_negative_sample="pixel_centre_row_column_left",
+            horizontal_positive_sample="pixel_centre_row_column_plus_1_right",
+            horizontal_shape="height_by_width_minus_1",
+            vertical_negative_sample="pixel_centre_row_column_top",
+            vertical_positive_sample="pixel_centre_row_plus_1_column_bottom",
+            vertical_shape="height_minus_1_by_width",
+            no_boundary_representation="implicit_by_absent_sparse_record",
+        ),
+        boundary_kind_domain=BOUNDARY_KIND_DOMAIN,
+        owner_side_domain=OWNER_SIDE_DOMAIN,
+        attachment_rule=ATTACHMENT_RULE,
+        attachment_public_contract_version=ATTACHMENT_PUBLIC_CONTRACT_VERSION,
+        attachment_contact_manifold_rule=ATTACHMENT_CONTACT_MANIFOLD_RULE,
+        attachment_supported_contact_manifold_types=SUPPORTED_CONTACT_MANIFOLD_TYPES,
+        attachment_projection_convention=ATTACHMENT_PROJECTION_CONVENTION,
+        attachment_projection_in_front_rule=ATTACHMENT_PROJECTION_IN_FRONT_RULE,
+        attachment_feasibility_rule=ATTACHMENT_FEASIBILITY_RULE,
+        attachment_edge_lattice_association_rule=ATTACHMENT_EDGE_ASSOCIATION_RULE,
+        attachment_endpoint_tie_rule=ATTACHMENT_ENDPOINT_TIE_RULE,
+        attachment_multi_surface_rule=ATTACHMENT_MULTI_SURFACE_RULE,
+        numerical_contract_sha256=compute_boundary_numerical_contract_hash(),
+        counterfactual_continuation_rule=COUNTERFACTUAL_CONTINUATION_RULE,
+        counterfactual_tie_rule=COUNTERFACTUAL_TIE_RULE,
+        junction_ambiguity_rule=JUNCTION_AMBIGUITY_RULE,
+        silhouette_rule=SILHOUETTE_RULE,
+        elements=elements,
+        oriented_boundary_sha256="0" * 64,
+    )
+    return boundary.model_copy(
+        update={"oriented_boundary_sha256": compute_oriented_boundary_hash(boundary)}
+    )
+
+
+def _expected_boundary_occlusion(
+    boundary: AvailableOrientedBoundaryOwnership,
+    oracle_rule: str,
+) -> AvailableOcclusionAnnotation:
+    frames_by_pair: dict[tuple[str, str], set[int]] = {}
+    for element in boundary.elements:
+        if element.kind != BoundaryKind.OCCLUDING_CONTOUR:
+            continue
+        owner = element.owner_surface_id
+        if owner is None:
+            raise DatasetValidationError("recomputed occluding contour lacks an owner")
+        affected = (
+            element.positive_surface_id
+            if owner == element.negative_surface_id
+            else element.negative_surface_id
+        )
+        if affected is None:
+            raise DatasetValidationError("recomputed occluding contour lacks an affected surface")
+        frames_by_pair.setdefault((owner, affected), set()).add(element.frame_index)
+    return AvailableOcclusionAnnotation(
+        status="available",
+        oracle_rule=oracle_rule,  # type: ignore[arg-type]
+        relations=tuple(
+            OcclusionRelation(
+                occluder_surface_id=owner,
+                occluded_surface_id=affected,
+                frame_indices=tuple(sorted(frames)),  # type: ignore[arg-type]
+            )
+            for (owner, affected), frames in sorted(frames_by_pair.items())
+        ),
+    )
+
+
+def _raw_event_labels(
+    raw_ids: np.ndarray[Any, Any],
+    raw_surfaces: dict[int, Any],
+) -> np.ndarray[Any, Any]:
+    labels = np.zeros(raw_ids.shape, dtype=np.int32)
+    for raw_id, surface in raw_surfaces.items():
+        labels[raw_ids == raw_id] = np.int32(surface.segmentation_label)
+    return labels
+
+
+def _load_event_direction(
+    root: Path,
+    direction: DirectionalVisibilityEventMap,
+    expected_shape: tuple[int, int],
+    registry: _ArtifactRegistry,
+) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any], np.ndarray[Any, Any]]:
+    codes = _load_npy(root, direction.event_codes, registry)
+    affected = _load_npy(root, direction.affected_surface_labels, registry)
+    owner = _load_npy(root, direction.owner_surface_labels, registry)
+    if codes.dtype != np.dtype("uint8") or codes.shape != expected_shape:
+        raise DatasetValidationError("visibility-event code dtype or shape is invalid")
+    if affected.dtype != np.dtype("int32") or affected.shape != expected_shape:
+        raise DatasetValidationError("visibility-event affected-label dtype or shape is invalid")
+    if owner.dtype != np.dtype("int32") or owner.shape != expected_shape:
+        raise DatasetValidationError("visibility-event owner-label dtype or shape is invalid")
+    if not np.all(np.isin(codes, tuple(range(6)))):
+        raise DatasetValidationError("visibility-event map contains an unknown event code")
+    causal = codes == 1
+    if np.any(affected[causal] == 0) or np.any(owner[causal] == 0):
+        raise DatasetValidationError("causal visibility events require owner/affected labels")
+    if np.any(affected[~causal] != 0) or np.any(owner[~causal] != 0):
+        raise DatasetValidationError("non-causal visibility events must use canonical zero labels")
+    return codes, affected, owner
+
+
+def _require_boundary_and_event_recomputation(
+    root: Path,
+    transition: TransitionRecord,
+    instrumentation: PrivilegedInstrumentation,
+    expected: RawBoundaryVisibilityAnalysis,
+    expected_shape: tuple[int, int],
+    registry: _ArtifactRegistry,
+) -> None:
+    raw_surfaces = _raw_surface_records(transition, instrumentation)
+    expected_boundary = _expected_oriented_boundary(
+        expected,
+        raw_surfaces,
+        expected_shape[1],
+        expected_shape[0],
+    )
+    observed_boundary = transition.oriented_boundary_ownership
+    if compute_oriented_boundary_hash(observed_boundary) != (
+        observed_boundary.oriented_boundary_sha256
+    ):
+        raise DatasetValidationError("oriented-boundary identity mismatch")
+    if observed_boundary != expected_boundary:
+        raise DatasetValidationError("oriented-boundary records differ from recomputation")
+
+    events = transition.ecological_visibility_events
+    if compute_visibility_event_hash(events) != events.visibility_event_sha256:
+        raise DatasetValidationError("visibility-event identity mismatch")
+    before = _load_event_direction(root, events.before_fate, expected_shape, registry)
+    after = _load_event_direction(root, events.after_origin, expected_shape, registry)
+    expected_before = (
+        expected.before_fate_codes,
+        _raw_event_labels(expected.before_affected_raw_geom_ids, raw_surfaces),
+        _raw_event_labels(expected.before_owner_raw_geom_ids, raw_surfaces),
+    )
+    expected_after = (
+        expected.after_origin_codes,
+        _raw_event_labels(expected.after_affected_raw_geom_ids, raw_surfaces),
+        _raw_event_labels(expected.after_owner_raw_geom_ids, raw_surfaces),
+    )
+    if any(
+        not np.array_equal(actual, recomputed)
+        for actual, recomputed in zip(before, expected_before, strict=True)
+    ):
+        raise DatasetValidationError("before-frame visibility events differ from recomputation")
+    if any(
+        not np.array_equal(actual, recomputed)
+        for actual, recomputed in zip(after, expected_after, strict=True)
+    ):
+        raise DatasetValidationError("after-frame visibility events differ from recomputation")
+
+    summaries = tuple(
+        sorted(
+            (
+                OccludingVisibilityEventSummary(
+                    kind=item.kind,  # type: ignore[arg-type]
+                    affected_surface_id=raw_surfaces[item.affected_raw_geom_id].surface_id,
+                    owner_surface_id=raw_surfaces[item.owner_raw_geom_id].surface_id,
+                    pixel_count=item.pixel_count,
+                )
+                for item in expected.event_summaries
+            ),
+            key=lambda item: (item.kind, item.affected_surface_id, item.owner_surface_id),
+        )
+    )
+    whole = tuple(
+        sorted(
+            (
+                WholeSurfaceVisibilityEvent(
+                    surface_id=raw_surfaces[item.raw_geom_id].surface_id,
+                    kind=WholeSurfaceEventKind(item.kind),
+                    before_visible_pixels=item.before_visible_pixels,
+                    after_visible_pixels=item.after_visible_pixels,
+                )
+                for item in expected.whole_surface_events
+            ),
+            key=lambda item: item.surface_id,
+        )
+    )
+    if events.occluding_event_summaries != summaries:
+        raise DatasetValidationError("visibility-event summaries differ from recomputation")
+    if events.whole_surface_events != whole:
+        raise DatasetValidationError("whole-surface events differ from recomputation")
+    if np.any(before[0] == int(BeforeFateCode.UNRESOLVED_OCCLUSION)) or np.any(
+        after[0] == int(AfterOriginCode.UNRESOLVED_OCCLUSION)
+    ):
+        raise DatasetValidationError("canonical visibility events contain unresolved occlusion")
+
+
+def _expected_attachment_contract(
+    analysis: RawBoundaryVisibilityAnalysis,
+) -> PrivilegedAttachmentContractEvidence:
+    contract = analysis.attachment_contract
+    return PrivilegedAttachmentContractEvidence(
+        method=contract.method,  # type: ignore[arg-type]
+        contact_manifold_rule=contract.contact_manifold_rule,  # type: ignore[arg-type]
+        supported_contact_manifold_types=contract.supported_contact_manifold_types,  # type: ignore[arg-type]
+        projection_convention=contract.projection_convention,  # type: ignore[arg-type]
+        projection_in_front_rule=contract.projection_in_front_rule,  # type: ignore[arg-type]
+        projection_in_front_epsilon=contract.projection_in_front_epsilon,
+        feasibility_rule=contract.feasibility_rule,  # type: ignore[arg-type]
+        image_feasibility_slack=contract.image_feasibility_slack,
+        edge_lattice_association_rule=contract.edge_lattice_association_rule,  # type: ignore[arg-type]
+        endpoint_tie_rule=contract.endpoint_tie_rule,  # type: ignore[arg-type]
+        multi_surface_rule=contract.multi_surface_rule,  # type: ignore[arg-type]
+        contact_tolerance=contract.contact_tolerance,
+        rotation_tolerance=contract.rotation_tolerance,
+        image_tolerance_pixels=contract.image_tolerance_pixels,
+        geom_types=contract.geom_types,  # type: ignore[arg-type]
+        geom_world_rotations_row_major=contract.geom_world_rotations_row_major,
+        pair_evidence=tuple(
+            PrivilegedAttachmentPairEvidence(**item.__dict__) for item in contract.pair_evidence
+        ),
+    )
+
+
+def _expected_boundary_diagnostics(
+    analysis: RawBoundaryVisibilityAnalysis,
+) -> BoundaryVisibilityDiagnostics:
+    kind_counts = {kind: 0 for kind in BoundaryKind}
+    owner_counts = {side: 0 for side in BoundaryOwnerSide}
+    evidence: list[PrivilegedBoundaryElementEvidence] = []
+    for item in analysis.boundary_elements:
+        kind = BoundaryKind(item.kind)
+        side = BoundaryOwnerSide(item.owner_side)
+        kind_counts[kind] += 1
+        owner_counts[side] += 1
+        evidence.append(
+            PrivilegedBoundaryElementEvidence(
+                frame_index=item.frame_index,  # type: ignore[arg-type]
+                axis=BoundaryAxis(item.axis),
+                row=item.row,
+                column=item.column,
+                negative_raw_geom_id=item.negative_raw_geom_id,
+                positive_raw_geom_id=item.positive_raw_geom_id,
+                kind=kind,
+                owner_side=side,
+                owner_raw_geom_id=item.owner_raw_geom_id,
+                negative_counterfactual_next_raw_geom_id=(
+                    item.negative_counterfactual_next_raw_geom_id
+                ),
+                positive_counterfactual_next_raw_geom_id=(
+                    item.positive_counterfactual_next_raw_geom_id
+                ),
+                on_projected_attachment_locus=item.on_projected_attachment_locus,
+            )
+        )
+    return BoundaryVisibilityDiagnostics(
+        boundary_method=ORIENTED_BOUNDARY_METHOD,
+        counterfactual_continuation_rule="counterfactual_nearest_surface_continuation_v1",
+        counterfactual_tie_rule="exactly_one_side_continues_v1",
+        counterfactual_ray_direction_epsilon=RAY_DIRECTION_EPSILON,
+        junction_ambiguity_rule=JUNCTION_AMBIGUITY_RULE,
+        silhouette_rule="controlled_to_uncontrolled_side_owns_v1",
+        visibility_event_method="analytic_transport_boundary_causal_events_v2",
+        boundary_evidence=tuple(evidence),
+        boundary_kind_counts=kind_counts,
+        owner_side_counts=owner_counts,
+        before_event_code_counts=tuple(
+            int(value)
+            for value in np.bincount(analysis.before_fate_codes.reshape(-1), minlength=6)[:6]
+        ),  # type: ignore[arg-type]
+        after_event_code_counts=tuple(
+            int(value)
+            for value in np.bincount(analysis.after_origin_codes.reshape(-1), minlength=6)[:6]
+        ),  # type: ignore[arg-type]
+    )
+
+
 def _reconstruct_raw_segmentation(
     transition: TransitionRecord,
     instrumentation: PrivilegedInstrumentation,
@@ -440,6 +798,18 @@ def _require_compiled_apparatus_contract(
         ):
             raise DatasetValidationError(
                 "instrumented geom size differs from compiled MuJoCo scene"
+            )
+    if instrumentation.raw_geom_types != compiled_scene.raw_geom_types:
+        raise DatasetValidationError("instrumented geom types differ from compiled MuJoCo scene")
+    for name, expected_rotation in compiled_scene.raw_geom_world_rotations_row_major.items():
+        if not np.allclose(
+            instrumentation.raw_geom_world_rotations_row_major[name],
+            expected_rotation,
+            atol=1e-12,
+            rtol=0.0,
+        ):
+            raise DatasetValidationError(
+                "instrumented geom rotation differs from compiled MuJoCo scene"
             )
 
 
@@ -716,19 +1086,20 @@ def _require_occlusion_oracle(
         if count > 0:
             supported_frames.append(frame_index)
 
-    expected_occlusion = AvailableOcclusionAnnotation(
-        status="available",
-        oracle_rule="counterfactual_occluder_exclusion_v1",
-        relations=(
-            OcclusionRelation(
-                occluder_surface_id=occluder_id,
-                occluded_surface_id=occluded_id,
-                frame_indices=tuple(supported_frames),  # type: ignore[arg-type]
-            ),
-        ),
+    if not supported_frames:
+        raise DatasetValidationError("counterfactual cross-check found no designated occlusion")
+    if not isinstance(transition.occlusion, AvailableOcclusionAnnotation):
+        raise DatasetValidationError("single-occluder occlusion must be available")
+    designated = tuple(
+        relation
+        for relation in transition.occlusion.relations
+        if relation.occluder_surface_id == occluder_id
+        and relation.occluded_surface_id == occluded_id
     )
-    if not supported_frames or transition.occlusion != expected_occlusion:
-        raise DatasetValidationError("occlusion annotation does not match counterfactual evidence")
+    if len(designated) != 1 or designated[0].frame_indices != tuple(supported_frames):
+        raise DatasetValidationError(
+            "designated counterfactual evidence disagrees with the complete boundary graph"
+        )
 
 
 def validate_dataset(root: Path) -> DatasetManifest:
@@ -805,6 +1176,16 @@ def validate_dataset(root: Path) -> DatasetManifest:
             != episode.analytic_transport_sha256
         ):
             raise DatasetValidationError("episode analytic transport identity mismatch")
+        if (
+            transition.oriented_boundary_ownership.oriented_boundary_sha256
+            != episode.oriented_boundary_sha256
+        ):
+            raise DatasetValidationError("episode oriented-boundary identity mismatch")
+        if (
+            transition.ecological_visibility_events.visibility_event_sha256
+            != episode.visibility_event_sha256
+        ):
+            raise DatasetValidationError("episode visibility-event identity mismatch")
         instrumentation_payload = _verify_json(
             resolved_root,
             episode.privileged_instrumentation,
@@ -828,6 +1209,12 @@ def validate_dataset(root: Path) -> DatasetManifest:
             raise DatasetValidationError("raw geom coordinate records are incomplete")
         if set(instrumentation.raw_geom_ids) != set(instrumentation.raw_geom_compiled_sizes):
             raise DatasetValidationError("compiled geom size records are incomplete")
+        if set(instrumentation.raw_geom_ids) != set(instrumentation.raw_geom_types):
+            raise DatasetValidationError("compiled geom type records are incomplete")
+        if set(instrumentation.raw_geom_ids) != set(
+            instrumentation.raw_geom_world_rotations_row_major
+        ):
+            raise DatasetValidationError("compiled geom rotation records are incomplete")
         if set(instrumentation.raw_to_opaque_surface_ids.values()) != {
             surface.surface_id for surface in transition.surfaces
         }:
@@ -863,6 +1250,7 @@ def validate_dataset(root: Path) -> DatasetManifest:
             _require_compiled_apparatus_contract(instrumentation, compiled_scene)
             expected_scene_content_sha256 = _single_occluder_scene_content_hash(config)
             expected_analytic_transport = compute_single_occluder_analytic_transport(config)
+            expected_boundary_visibility = compute_single_occluder_boundary_visibility(config)
         elif isinstance(instrumentation, CorridorInstrumentation):
             if not isinstance(config, CorridorConfig):
                 raise DatasetValidationError("corridor instrumentation/configuration mismatch")
@@ -878,6 +1266,11 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 instrumentation,
             )
             expected_analytic_transport = compute_corridor_analytic_transport(
+                config,
+                instrumentation.sampled_geometry,
+                instrumentation.generation_seeds.appearance_seed,
+            )
+            expected_boundary_visibility = compute_corridor_boundary_visibility(
                 config,
                 instrumentation.sampled_geometry,
                 instrumentation.generation_seeds.appearance_seed,
@@ -952,6 +1345,22 @@ def validate_dataset(root: Path) -> DatasetManifest:
             observed_analytic_transport,
             expected_analytic_transport,
         )
+        _require_boundary_and_event_recomputation(
+            resolved_root,
+            transition,
+            instrumentation,
+            expected_boundary_visibility,
+            expected_raster_shape,
+            registry,
+        )
+        if instrumentation.attachment_contract != _expected_attachment_contract(
+            expected_boundary_visibility
+        ):
+            raise DatasetValidationError("attachment contract differs from compiled recomputation")
+        if instrumentation.boundary_visibility_diagnostics != _expected_boundary_diagnostics(
+            expected_boundary_visibility
+        ):
+            raise DatasetValidationError("boundary/event diagnostics differ from recomputation")
 
         if tuple(item[0].shape for item in frame_arrays) != (
             transition.before.rgb.shape,
@@ -979,6 +1388,26 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 "corridor optical field contains uncontrolled renderer background"
             )
 
+        raw_surfaces = _raw_surface_records(transition, instrumentation)
+        expected_boundary = _expected_oriented_boundary(
+            expected_boundary_visibility,
+            raw_surfaces,
+            expected_raster_shape[1],
+            expected_raster_shape[0],
+        )
+        occlusion_rule = (
+            "oriented_boundary_ownership_with_counterfactual_crosscheck_v1"
+            if isinstance(instrumentation, SingleOccluderInstrumentation)
+            else "oriented_boundary_ownership_complete_v2"
+        )
+        if transition.occlusion != _expected_boundary_occlusion(
+            expected_boundary,
+            occlusion_rule,
+        ):
+            raise DatasetValidationError(
+                "public occlusion graph is not the complete oriented-boundary relation set"
+            )
+
         if isinstance(instrumentation, SingleOccluderInstrumentation):
             if not isinstance(config, SingleOccluderConfig):
                 raise DatasetValidationError(
@@ -991,10 +1420,6 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 (frame_arrays[0][2], frame_arrays[1][2]),
                 expected_raster_shape,
                 registry,
-            )
-        elif not isinstance(transition.occlusion, UnavailableOcclusionAnnotation):
-            raise DatasetValidationError(
-                "corridor occlusion must remain unavailable without controlled oracle evidence"
             )
         else:
             _require_corridor_raw_segmentation(

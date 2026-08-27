@@ -22,7 +22,6 @@ from epsbench.schema import (
     Modality,
     ModalityPermissionSet,
     TransitionRecord,
-    UnavailableOcclusionAnnotation,
 )
 from epsbench.sim import compute_single_occluder_analytic_transport
 from tests.dataset_mutations import (
@@ -313,7 +312,7 @@ def test_transport_permission_is_denied_before_transition_or_artifact_access(
 
 
 @pytest.mark.parametrize("fixture_name", ["smoke_dataset", "corridor_dataset"])
-def test_ecological_transport_view_has_no_metric_semantic_or_boundary_ownership_leakage(
+def test_ecological_transport_view_has_no_metric_or_semantic_leakage(
     fixture_name: str,
     request: pytest.FixtureRequest,
 ) -> None:
@@ -334,8 +333,6 @@ def test_ecological_transport_view_has_no_metric_semantic_or_boundary_ownership_
         "sampled_geometry",
         "support_surface",
         "corridor_floor",
-        "boundary_ownership_map",
-        "owned_boundary",
     ):
         assert forbidden not in payload
 
@@ -445,27 +442,27 @@ def _artifact(payload: dict[str, Any]) -> Any:
 
 
 @pytest.mark.parametrize("fixture_name", ["smoke_dataset", "corridor_dataset"])
-def test_transport_slice_preserves_unavailable_claims_and_existing_occlusion_posture(
+def test_transport_slice_is_bound_into_available_boundary_and_event_oracles(
     fixture_name: str,
     request: pytest.FixtureRequest,
 ) -> None:
     root = request.getfixturevalue(fixture_name)
     assert isinstance(root, Path)
     transition = _transition(root)
-    assert transition.ecological_visibility_events.status == "unavailable"
-    assert transition.ecological_visibility_events.reason_category == (
-        "oriented_boundary_ownership_unavailable"
+    assert transition.ecological_visibility_events.status == "available"
+    assert transition.oriented_boundary_ownership.status == "available"
+    assert isinstance(transition.analytic_optical_transport, AvailableDenseOpticalTransport)
+    assert transition.ecological_visibility_events.analytic_transport_sha256 == (
+        transition.analytic_optical_transport.analytic_transport_sha256
     )
     if fixture_name == "smoke_dataset":
         assert isinstance(transition.occlusion, AvailableOcclusionAnnotation)
     else:
-        assert isinstance(transition.occlusion, UnavailableOcclusionAnnotation)
+        assert isinstance(transition.occlusion, AvailableOcclusionAnnotation)
+        assert transition.occlusion.relations == ()
     for change in transition.region_mask_changes:
         assert set(change.model_dump()) == {
             "surface_id",
             "change",
             "affected_image_pixels",
         }
-    payload = transition.model_dump_json()
-    assert "boundary_ownership_map" not in payload
-    assert "owned_boundary" not in payload

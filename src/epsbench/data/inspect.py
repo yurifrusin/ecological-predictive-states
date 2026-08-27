@@ -62,6 +62,58 @@ def _reason_image(reasons: np.ndarray) -> Image.Image:
     return Image.fromarray(palette[reasons], mode="RGB")
 
 
+def _boundary_overlay(segmentation: Image.Image, boundary: object, frame_index: int) -> Image.Image:
+    from epsbench.schema import AvailableOrientedBoundaryOwnership
+
+    if not isinstance(boundary, AvailableOrientedBoundaryOwnership):
+        raise TypeError("inspection requires available oriented boundary ownership")
+    output = segmentation.copy()
+    draw = ImageDraw.Draw(output)
+    colours = {
+        "occluding_contour": (255, 40, 40),
+        "attached_junction": (40, 220, 255),
+        "controlled_silhouette": (255, 210, 35),
+        "multi_surface_junction_ambiguous": (190, 70, 255),
+        "unresolved_boundary": (255, 255, 255),
+    }
+    for element in boundary.elements:
+        if element.frame_index != frame_index:
+            continue
+        colour = colours[element.kind.value]
+        if element.axis.value == "horizontal":
+            points = ((element.column, element.row), (element.column + 1, element.row))
+            owner_points = {
+                "negative_axis_side": (element.column, element.row),
+                "positive_axis_side": (element.column + 1, element.row),
+            }
+        else:
+            points = ((element.column, element.row), (element.column, element.row + 1))
+            owner_points = {
+                "negative_axis_side": (element.column, element.row),
+                "positive_axis_side": (element.column, element.row + 1),
+            }
+        draw.line(points, fill=colour, width=1)
+        owner_point = owner_points.get(element.owner_side.value)
+        if owner_point is not None:
+            draw.point(owner_point, fill=(0, 0, 0))
+    return output
+
+
+def _event_image(codes: np.ndarray) -> Image.Image:
+    palette = np.asarray(
+        (
+            (58, 190, 92),
+            (220, 55, 55),
+            (245, 190, 55),
+            (140, 78, 190),
+            (20, 20, 20),
+            (255, 255, 255),
+        ),
+        dtype=np.uint8,
+    )
+    return Image.fromarray(palette[codes], mode="RGB")
+
+
 def _write_png_atomically_no_clobber(image: Image.Image, output: Path) -> None:
     """Publish a complete PNG atomically without replacing any directory entry."""
 
@@ -114,34 +166,89 @@ def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> 
     )
     forward_reasons = _reason_image(transport.forward_reasons)
     backward_reasons = _reason_image(transport.backward_reasons)
+    boundary = loader.read_oriented_boundaries(episode_index)
+    visibility_events = loader.read_ecological_visibility_events(episode_index)
+    before_boundary = _boundary_overlay(before_segmentation, boundary, 0)
+    after_boundary = _boundary_overlay(after_segmentation, boundary, 1)
+    before_events = _event_image(visibility_events.before_fate_codes)
+    after_events = _event_image(visibility_events.after_origin_codes)
+    ecological = loader.read_ecological_transition(episode_index)
     panels = (
-        ("RGB before", before_rgb),
-        ("RGB after", after_rgb),
-        ("Opaque surface labels before", before_segmentation),
-        ("Opaque surface labels after", after_segmentation),
-        ("Forward transport (valid pixels)", forward_flow),
-        ("Backward transport (valid pixels)", backward_flow),
-        ("Forward validity/reason codes", forward_reasons),
-        ("Backward validity/reason codes", backward_reasons),
+        ("RGB - before", before_rgb),
+        ("RGB - after", after_rgb),
+        ("Opaque segmentation - before", before_segmentation),
+        ("Opaque segmentation - after", after_segmentation),
+        ("Analytic transport - forward", forward_flow),
+        ("Analytic transport - backward", backward_flow),
+        ("Transport reasons - forward", forward_reasons),
+        ("Transport reasons - backward", backward_reasons),
+        ("Oriented boundaries - before", before_boundary),
+        ("Oriented boundaries - after", after_boundary),
+        ("Event fate - before frame", before_events),
+        ("Event origin - after frame", after_events),
     )
     width, height = before_rgb.size
+    panel_width = max(width, 240)
+    panel_height = round(height * panel_width / width)
     label_height = 24
-    header_height = 58
+    header_height = 224
     canvas = Image.new(
         "RGB",
-        (2 * width, header_height + 4 * (height + label_height)),
+        (2 * panel_width, header_height + 6 * (panel_height + label_height)),
         "white",
     )
     draw = ImageDraw.Draw(canvas)
     draw.text((6, 4), f"Analytic transport: {transport.method}", fill="black")
     draw.text((6, 20), f"Identity: {transport.analytic_transport_sha256[:32]}", fill="black")
     draw.text((6, 36), f"          {transport.analytic_transport_sha256[32:]}", fill="black")
+    draw.text(
+        (6, 52),
+        f"Boundary: {boundary.oriented_boundary_sha256[:32]}",
+        fill="black",
+    )
+    draw.text(
+        (6, 68),
+        f"          {boundary.oriented_boundary_sha256[32:]}",
+        fill="black",
+    )
+    draw.text(
+        (6, 84),
+        f"Events:   {visibility_events.annotation.visibility_event_sha256[:32]}",
+        fill="black",
+    )
+    draw.text(
+        (6, 100),
+        f"          {visibility_events.annotation.visibility_event_sha256[32:]}",
+        fill="black",
+    )
+    draw.text((6, 116), "Boundary: red occluding; cyan attached; yellow silhouette", fill="black")
+    draw.text((6, 132), "purple ambiguous; black dot marks declared owner side", fill="black")
+    summaries = visibility_events.annotation.occluding_event_summaries
+    draw.text(
+        (6, 148),
+        "Events: green stable; red causal; yellow frame; purple ambiguous; black none",
+        fill="black",
+    )
+    summary_lines = [
+        f"{item.kind} affected {item.affected_surface_id[8:16]} "
+        f"owner {item.owner_surface_id[8:16]} pixels {item.pixel_count}"
+        for item in summaries
+    ] or ["none"]
+    draw.text((6, 164), f"Accretion/deletion: {summary_lines[0]}", fill="black")
+    if len(summary_lines) > 1:
+        draw.text((6, 180), f"                    {summary_lines[1]}", fill="black")
+    draw.text(
+        (6, 196),
+        f"Occlusion: {ecological.occlusion.status}; component split/merge: unavailable",
+        fill="black",
+    )
     for panel_index, (label, panel) in enumerate(panels):
         column = panel_index % 2
         row = panel_index // 2
-        x = column * width
-        y = header_height + row * (height + label_height)
+        x = column * panel_width
+        y = header_height + row * (panel_height + label_height)
         draw.text((x + 6, y + 5), label, fill="black")
-        canvas.paste(panel, (x, y + label_height))
+        resized = panel.resize((panel_width, panel_height), resample=Image.Resampling.NEAREST)
+        canvas.paste(resized, (x, y + label_height))
     _write_png_atomically_no_clobber(canvas, output)
     return output

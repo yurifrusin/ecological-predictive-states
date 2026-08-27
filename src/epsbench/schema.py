@@ -92,6 +92,7 @@ class Modality(StrEnum):
     REGION_CORRESPONDENCE = "region_correspondence"
     REGION_MASK_CHANGES = "region_mask_changes"
     ECOLOGICAL_VISIBILITY_EVENTS = "ecological_visibility_events"
+    ORIENTED_BOUNDARY_OWNERSHIP = "oriented_boundary_ownership"
     OCCLUSION_ANNOTATION = "occlusion_annotation"
     ANALYTIC_OPTICAL_TRANSPORT = "analytic_optical_transport"
     DEPTH = "depth"
@@ -115,6 +116,7 @@ class Modality(StrEnum):
             Modality.REGION_CORRESPONDENCE,
             Modality.REGION_MASK_CHANGES,
             Modality.ECOLOGICAL_VISIBILITY_EVENTS,
+            Modality.ORIENTED_BOUNDARY_OWNERSHIP,
             Modality.OCCLUSION_ANNOTATION,
             Modality.ANALYTIC_OPTICAL_TRANSPORT,
         }:
@@ -212,12 +214,6 @@ class RegionMaskChange(StrictModel):
         return self
 
 
-class UnavailableEcologicalVisibilityEvents(StrictModel):
-    status: Literal["unavailable"]
-    reason_category: Literal["oriented_boundary_ownership_unavailable"]
-    reason: str = Field(min_length=1)
-
-
 class RegionCorrespondence(StrictModel):
     surface_id: SurfaceId
     before_visible_pixels: int = Field(ge=0)
@@ -267,8 +263,28 @@ class OcclusionRelation(StrictModel):
 
 class AvailableOcclusionAnnotation(StrictModel):
     status: Literal["available"]
-    oracle_rule: Literal["counterfactual_occluder_exclusion_v1"]
+    oracle_rule: Literal[
+        "oriented_boundary_ownership_complete_v2",
+        "oriented_boundary_ownership_with_counterfactual_crosscheck_v1",
+    ]
     relations: tuple[OcclusionRelation, ...]
+
+    @model_validator(mode="after")
+    def relations_are_complete_form_and_canonical(self) -> AvailableOcclusionAnnotation:
+        keys = [
+            (relation.occluder_surface_id, relation.occluded_surface_id)
+            for relation in self.relations
+        ]
+        if keys != sorted(keys) or len(keys) != len(set(keys)):
+            raise ValueError("occlusion relations must be uniquely canonical-ordered")
+        if any(not relation.frame_indices for relation in self.relations):
+            raise ValueError("an available occlusion relation requires at least one frame")
+        if any(
+            relation.frame_indices != tuple(sorted(relation.frame_indices))
+            for relation in self.relations
+        ):
+            raise ValueError("occlusion relation frame indices must be canonical-ordered")
+        return self
 
 
 class UnavailableOcclusionAnnotation(StrictModel):
@@ -281,6 +297,145 @@ OcclusionAnnotation = Annotated[
     AvailableOcclusionAnnotation | UnavailableOcclusionAnnotation,
     Field(discriminator="status"),
 ]
+
+
+class BoundaryAxis(StrEnum):
+    HORIZONTAL = "horizontal"
+    VERTICAL = "vertical"
+
+
+class BoundaryKind(StrEnum):
+    NO_BOUNDARY = "no_boundary"
+    OCCLUDING_CONTOUR = "occluding_contour"
+    ATTACHED_JUNCTION = "attached_junction"
+    CONTROLLED_SILHOUETTE = "controlled_silhouette"
+    MULTI_SURFACE_JUNCTION_AMBIGUOUS = "multi_surface_junction_ambiguous"
+    UNRESOLVED_BOUNDARY = "unresolved_boundary"
+
+
+class BoundaryOwnerSide(StrEnum):
+    NONE = "none"
+    NEGATIVE_AXIS_SIDE = "negative_axis_side"
+    POSITIVE_AXIS_SIDE = "positive_axis_side"
+
+
+class EdgeLatticeCoordinateConvention(StrictModel):
+    version: Literal["four_neighbour_sample_edge_lattice_v1"]
+    horizontal_negative_sample: Literal["pixel_centre_row_column_left"]
+    horizontal_positive_sample: Literal["pixel_centre_row_column_plus_1_right"]
+    horizontal_shape: Literal["height_by_width_minus_1"]
+    vertical_negative_sample: Literal["pixel_centre_row_column_top"]
+    vertical_positive_sample: Literal["pixel_centre_row_plus_1_column_bottom"]
+    vertical_shape: Literal["height_minus_1_by_width"]
+    no_boundary_representation: Literal["implicit_by_absent_sparse_record"]
+
+
+class OrientedBoundaryElement(StrictModel):
+    frame_index: Literal[0, 1]
+    axis: BoundaryAxis
+    row: int = Field(ge=0)
+    column: int = Field(ge=0)
+    negative_surface_id: SurfaceId | None
+    positive_surface_id: SurfaceId | None
+    kind: BoundaryKind
+    owner_side: BoundaryOwnerSide
+    owner_surface_id: SurfaceId | None
+
+    @model_validator(mode="after")
+    def ownership_matches_kind_and_side(self) -> OrientedBoundaryElement:
+        if self.kind == BoundaryKind.NO_BOUNDARY:
+            raise ValueError("no-boundary edges are represented by absent sparse records")
+        if self.negative_surface_id == self.positive_surface_id:
+            raise ValueError("a sparse boundary element requires different neighbouring surfaces")
+        if self.negative_surface_id is None and self.positive_surface_id is None:
+            raise ValueError("a boundary element requires at least one controlled surface")
+        if self.owner_side == BoundaryOwnerSide.NEGATIVE_AXIS_SIDE:
+            expected_owner = self.negative_surface_id
+        elif self.owner_side == BoundaryOwnerSide.POSITIVE_AXIS_SIDE:
+            expected_owner = self.positive_surface_id
+        else:
+            expected_owner = None
+        if self.owner_surface_id != expected_owner:
+            raise ValueError("boundary owner must equal the surface on the declared owner side")
+        if self.kind in {
+            BoundaryKind.ATTACHED_JUNCTION,
+            BoundaryKind.MULTI_SURFACE_JUNCTION_AMBIGUOUS,
+            BoundaryKind.UNRESOLVED_BOUNDARY,
+        } and (self.owner_side != BoundaryOwnerSide.NONE or self.owner_surface_id is not None):
+            raise ValueError("attached, ambiguous, and unresolved boundaries have no owner")
+        if self.kind == BoundaryKind.OCCLUDING_CONTOUR:
+            if self.negative_surface_id is None or self.positive_surface_id is None:
+                raise ValueError("occluding contours require two controlled surfaces")
+            if self.owner_side == BoundaryOwnerSide.NONE:
+                raise ValueError("occluding contours require exactly one owner")
+        if self.kind == BoundaryKind.ATTACHED_JUNCTION and (
+            self.negative_surface_id is None or self.positive_surface_id is None
+        ):
+            raise ValueError("attached junctions require two controlled surfaces")
+        if self.kind == BoundaryKind.CONTROLLED_SILHOUETTE:
+            if (self.negative_surface_id is None) == (self.positive_surface_id is None):
+                raise ValueError("controlled silhouettes require exactly one controlled side")
+            if self.owner_side == BoundaryOwnerSide.NONE:
+                raise ValueError("the controlled side must own a controlled silhouette")
+        return self
+
+
+class AvailableOrientedBoundaryOwnership(StrictModel):
+    status: Literal["available"]
+    method: Literal["analytic_oriented_boundary_ownership_v4"]
+    raster_width: int = Field(gt=0)
+    raster_height: int = Field(gt=0)
+    coordinate_convention: EdgeLatticeCoordinateConvention
+    boundary_kind_domain: Literal["oriented_boundary_kind_domain_v1"]
+    owner_side_domain: Literal["oriented_boundary_owner_side_domain_v1"]
+    attachment_rule: Literal["projected_compiled_contact_locus_v3"]
+    attachment_public_contract_version: Literal["scene_attachment_public_contract_v4"]
+    attachment_contact_manifold_rule: Literal["compiled_axis_aligned_intersection_cell_v1"]
+    attachment_supported_contact_manifold_types: tuple[
+        Literal["point"],
+        Literal["axis_aligned_segment"],
+        Literal["axis_aligned_rectangle"],
+        Literal["axis_aligned_overlap_volume"],
+    ]
+    attachment_projection_convention: Literal["analytic_pinhole_pixel_centre_v1"]
+    attachment_projection_in_front_rule: Literal["strict_forward_distance_greater_than_epsilon_v1"]
+    attachment_feasibility_rule: Literal[
+        "image_constraints_only_slack_strict_front_and_cell_bounds_exact_v1"
+    ]
+    attachment_edge_lattice_association_rule: Literal[
+        "sample_connection_segment_intersects_projected_contact_cell_v1"
+    ]
+    attachment_endpoint_tie_rule: Literal["inclusive_contact_endpoints_v1"]
+    attachment_multi_surface_rule: Literal["multi_surface_ambiguity_precedes_attachment_v1"]
+    numerical_contract_sha256: Sha256
+    counterfactual_continuation_rule: Literal["counterfactual_nearest_surface_continuation_v1"]
+    counterfactual_tie_rule: Literal["exactly_one_side_continues_v1"]
+    junction_ambiguity_rule: Literal["edge_incident_3x2_or_2x3_multi_assignment_v2"]
+    silhouette_rule: Literal["controlled_to_uncontrolled_side_owns_v1"]
+    elements: tuple[OrientedBoundaryElement, ...]
+    oriented_boundary_sha256: Sha256
+
+    @model_validator(mode="after")
+    def elements_are_ordered_unique_and_in_range(self) -> AvailableOrientedBoundaryOwnership:
+        axis_order = {BoundaryAxis.HORIZONTAL: 0, BoundaryAxis.VERTICAL: 1}
+        keys = [
+            (element.frame_index, axis_order[element.axis], element.row, element.column)
+            for element in self.elements
+        ]
+        if keys != sorted(keys) or len(keys) != len(set(keys)):
+            raise ValueError("oriented boundary elements must be uniquely canonical-ordered")
+        for element in self.elements:
+            if element.axis == BoundaryAxis.HORIZONTAL:
+                in_range = (
+                    element.row < self.raster_height and element.column < self.raster_width - 1
+                )
+            else:
+                in_range = (
+                    element.row < self.raster_height - 1 and element.column < self.raster_width
+                )
+            if not in_range:
+                raise ValueError("oriented boundary coordinate is outside the edge lattice")
+        return self
 
 
 class ArtifactRecord(StrictModel):
@@ -311,6 +466,125 @@ class ArtifactRecord(StrictModel):
         if any(dimension <= 0 for dimension in value):
             raise ValueError("artifact dimensions must be positive")
         return value
+
+
+class DirectionalVisibilityEventMap(StrictModel):
+    frame_index: Literal[0, 1]
+    direction: Literal["before_frame_fate", "after_frame_origin"]
+    event_codes: ArtifactRecord
+    affected_surface_labels: ArtifactRecord
+    owner_surface_labels: ArtifactRecord
+
+    @model_validator(mode="after")
+    def artifacts_are_complete_and_aligned(self) -> DirectionalVisibilityEventMap:
+        artifacts = (
+            self.event_codes,
+            self.affected_surface_labels,
+            self.owner_surface_labels,
+        )
+        if any(
+            artifact.modality != Modality.ECOLOGICAL_VISIBILITY_EVENTS for artifact in artifacts
+        ):
+            raise ValueError("visibility-event maps require the ecological event modality")
+        if self.event_codes.dtype != "uint8" or len(self.event_codes.shape) != 2:
+            raise ValueError("visibility-event codes must be a two-dimensional uint8 array")
+        for artifact in (self.affected_surface_labels, self.owner_surface_labels):
+            if artifact.dtype != "int32" or artifact.shape != self.event_codes.shape:
+                raise ValueError("visibility-event surface maps must be aligned int32 arrays")
+        if (self.frame_index, self.direction) not in {
+            (0, "before_frame_fate"),
+            (1, "after_frame_origin"),
+        }:
+            raise ValueError("visibility-event direction must match its source frame")
+        return self
+
+
+class UnavailableComponentTopologyCapability(StrictModel):
+    status: Literal["unavailable"]
+    reason_category: Literal["component_topology_oracle_not_defined_in_slice_4"]
+    reason: Literal["canonical Slice 4 does not define a component-topology oracle"]
+
+
+class VisibilityEventCapabilities(StrictModel):
+    transport_causal_pixel_events: Literal["available"]
+    whole_surface_events: Literal["available"]
+    component_topology: UnavailableComponentTopologyCapability
+
+
+class OccludingVisibilityEventSummary(StrictModel):
+    kind: Literal["accretion", "deletion"]
+    affected_surface_id: SurfaceId
+    owner_surface_id: SurfaceId
+    pixel_count: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def surfaces_are_distinct(self) -> OccludingVisibilityEventSummary:
+        if self.affected_surface_id == self.owner_surface_id:
+            raise ValueError("visibility-event owner and affected surfaces must differ")
+        return self
+
+
+class WholeSurfaceEventKind(StrEnum):
+    APPEARANCE = "appearance"
+    DISAPPEARANCE = "disappearance"
+    PERSISTENTLY_VISIBLE = "persistently_visible"
+    PERSISTENTLY_HIDDEN_OR_ABSENT = "persistently_hidden_or_absent"
+
+
+class WholeSurfaceVisibilityEvent(StrictModel):
+    surface_id: SurfaceId
+    kind: WholeSurfaceEventKind
+    before_visible_pixels: int = Field(ge=0)
+    after_visible_pixels: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def counts_match_kind(self) -> WholeSurfaceVisibilityEvent:
+        before = self.before_visible_pixels
+        after = self.after_visible_pixels
+        expected = (
+            WholeSurfaceEventKind.APPEARANCE
+            if before == 0 and after > 0
+            else WholeSurfaceEventKind.DISAPPEARANCE
+            if before > 0 and after == 0
+            else WholeSurfaceEventKind.PERSISTENTLY_VISIBLE
+            if before > 0 and after > 0
+            else WholeSurfaceEventKind.PERSISTENTLY_HIDDEN_OR_ABSENT
+        )
+        if self.kind != expected:
+            raise ValueError("whole-surface event kind does not match exact visibility counts")
+        return self
+
+
+class AvailableEcologicalVisibilityEvents(StrictModel):
+    status: Literal["available"]
+    method: Literal["analytic_transport_boundary_causal_events_v2"]
+    capabilities: VisibilityEventCapabilities
+    before_event_code_domain: Literal["before_frame_fate_codes_v1"]
+    after_event_code_domain: Literal["after_frame_origin_codes_v1"]
+    before_fate: DirectionalVisibilityEventMap
+    after_origin: DirectionalVisibilityEventMap
+    occluding_event_summaries: tuple[OccludingVisibilityEventSummary, ...]
+    whole_surface_events: tuple[WholeSurfaceVisibilityEvent, ...]
+    oriented_boundary_sha256: Sha256
+    analytic_transport_sha256: Sha256
+    visibility_event_sha256: Sha256
+
+    @model_validator(mode="after")
+    def directions_and_summaries_are_canonical(self) -> AvailableEcologicalVisibilityEvents:
+        if self.before_fate.frame_index != 0 or self.after_origin.frame_index != 1:
+            raise ValueError("visibility-event maps must cover ordered before/after source frames")
+        if self.before_fate.event_codes.shape != self.after_origin.event_codes.shape:
+            raise ValueError("visibility-event maps must have aligned raster dimensions")
+        summary_keys = [
+            (item.kind, item.affected_surface_id, item.owner_surface_id)
+            for item in self.occluding_event_summaries
+        ]
+        if summary_keys != sorted(summary_keys) or len(summary_keys) != len(set(summary_keys)):
+            raise ValueError("visibility-event summaries must be uniquely canonical-ordered")
+        whole_ids = [item.surface_id for item in self.whole_surface_events]
+        if whole_ids != sorted(whole_ids) or len(whole_ids) != len(set(whole_ids)):
+            raise ValueError("whole-surface events must be uniquely ordered by surface ID")
+        return self
 
 
 class FrameRecord(StrictModel):
@@ -453,7 +727,7 @@ DenseOpticalTransport = Annotated[
 
 
 class TransitionRecord(StrictModel):
-    schema_version: Literal["0.1.0-dev.5"]
+    schema_version: Literal["0.1.0-dev.9"]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     action: Action
     surfaces: tuple[SurfaceReference, ...] = Field(min_length=1)
@@ -462,7 +736,8 @@ class TransitionRecord(StrictModel):
     visibility_states: tuple[VisibilityState, ...] = Field(min_length=1)
     region_correspondence: tuple[RegionCorrespondence, ...] = Field(min_length=1)
     region_mask_changes: tuple[RegionMaskChange, ...] = Field(min_length=1)
-    ecological_visibility_events: UnavailableEcologicalVisibilityEvents
+    oriented_boundary_ownership: AvailableOrientedBoundaryOwnership
+    ecological_visibility_events: AvailableEcologicalVisibilityEvents
     occlusion: OcclusionAnnotation
     boundary_structures: tuple[BoundaryStructure, ...] = Field(min_length=2, max_length=2)
     analytic_optical_transport: DenseOpticalTransport
@@ -504,6 +779,41 @@ class TransitionRecord(StrictModel):
             for contact in boundary.contacts:
                 if {contact.first_surface_id, contact.second_surface_id} - known:
                     raise ValueError("boundary contact references an unknown surface")
+        for element in self.oriented_boundary_ownership.elements:
+            referenced = {
+                value
+                for value in (
+                    element.negative_surface_id,
+                    element.positive_surface_id,
+                    element.owner_surface_id,
+                )
+                if value is not None
+            }
+            if not referenced.issubset(known):
+                raise ValueError("oriented boundary references an unknown surface")
+        if self.oriented_boundary_ownership.oriented_boundary_sha256 != (
+            self.ecological_visibility_events.oriented_boundary_sha256
+        ):
+            raise ValueError("visibility events must bind the oriented-boundary identity")
+        if isinstance(self.analytic_optical_transport, AvailableDenseOpticalTransport) and (
+            self.analytic_optical_transport.analytic_transport_sha256
+            != self.ecological_visibility_events.analytic_transport_sha256
+        ):
+            raise ValueError("visibility events must bind the analytic-transport identity")
+        event_surface_ids = {
+            item.affected_surface_id
+            for item in self.ecological_visibility_events.occluding_event_summaries
+        } | {
+            item.owner_surface_id
+            for item in self.ecological_visibility_events.occluding_event_summaries
+        }
+        if not event_surface_ids.issubset(known):
+            raise ValueError("visibility-event summary references an unknown surface")
+        whole_surface_ids = {
+            item.surface_id for item in self.ecological_visibility_events.whole_surface_events
+        }
+        if whole_surface_ids != known:
+            raise ValueError("whole-surface events must cover every declared surface")
         if self.before.frame_index != 0 or self.after.frame_index != 1:
             raise ValueError("transition frames must be ordered before then after")
         if {item.frame_index for item in self.boundary_structures} != {0, 1}:
@@ -514,6 +824,14 @@ class TransitionRecord(StrictModel):
                 raise ValueError("analytic optical transport must align with both raster frames")
             if (self.before.width, self.before.height) != (self.after.width, self.after.height):
                 raise ValueError("analytic optical transport requires aligned frame dimensions")
+        expected_event_shape = (self.before.height, self.before.width)
+        if self.ecological_visibility_events.before_fate.event_codes.shape != expected_event_shape:
+            raise ValueError("ecological visibility-event maps must align with both raster frames")
+        if (
+            self.oriented_boundary_ownership.raster_width,
+            self.oriented_boundary_ownership.raster_height,
+        ) != (self.before.width, self.before.height):
+            raise ValueError("oriented boundary lattice must align with both raster frames")
         return self
 
 
@@ -526,7 +844,8 @@ class EcologicalTransitionView(StrictModel):
     visibility_states: tuple[VisibilityState, ...]
     region_correspondence: tuple[RegionCorrespondence, ...]
     region_mask_changes: tuple[RegionMaskChange, ...]
-    ecological_visibility_events: UnavailableEcologicalVisibilityEvents
+    oriented_boundary_ownership: AvailableOrientedBoundaryOwnership
+    ecological_visibility_events: AvailableEcologicalVisibilityEvents
     occlusion: OcclusionAnnotation
     boundary_structures: tuple[BoundaryStructure, ...]
     analytic_optical_transport: DenseOpticalTransport
@@ -542,6 +861,8 @@ class EpisodeManifest(StrictModel):
     scene_content_sha256: Sha256
     ecological_label_sha256: Sha256
     analytic_transport_sha256: Sha256
+    oriented_boundary_sha256: Sha256
+    visibility_event_sha256: Sha256
     rgb_logical_sha256: tuple[Sha256, Sha256]
 
     @model_validator(mode="after")
@@ -720,8 +1041,158 @@ class AnalyticTransportDiagnostics(StrictModel):
         return self
 
 
+class PrivilegedAttachmentPairEvidence(StrictModel):
+    first_semantic_name: str = Field(min_length=1)
+    second_semantic_name: str = Field(min_length=1)
+    first_raw_geom_id: int = Field(ge=0)
+    second_raw_geom_id: int = Field(ge=0)
+    expected_attached: bool
+    observed_contact: bool
+    axis_interval_gaps: tuple[float, float, float]
+    contact_manifold_type: (
+        Literal[
+            "point",
+            "axis_aligned_segment",
+            "axis_aligned_rectangle",
+            "axis_aligned_overlap_volume",
+        ]
+        | None
+    )
+    contact_world_min: tuple[float, float, float] | None
+    contact_world_max: tuple[float, float, float] | None
+
+    @model_validator(mode="after")
+    def pair_is_distinct_finite_and_truthful(self) -> PrivilegedAttachmentPairEvidence:
+        if self.first_semantic_name == self.second_semantic_name:
+            raise ValueError("attachment evidence requires two semantic surfaces")
+        if self.first_raw_geom_id == self.second_raw_geom_id:
+            raise ValueError("attachment evidence requires two raw geoms")
+        if not all(math.isfinite(value) for value in self.axis_interval_gaps):
+            raise ValueError("attachment interval gaps must be finite")
+        if self.expected_attached != self.observed_contact:
+            raise ValueError("canonical attachment evidence cannot retain a contact mismatch")
+        has_manifold = self.contact_manifold_type is not None
+        if has_manifold != self.observed_contact:
+            raise ValueError("contact manifold presence must equal observed contact")
+        if (self.contact_world_min is None) != (self.contact_world_max is None):
+            raise ValueError("contact manifold bounds must be both present or both absent")
+        if (self.contact_world_min is not None) != has_manifold:
+            raise ValueError("contact manifold bounds must match manifold presence")
+        if self.contact_world_min is not None and self.contact_world_max is not None:
+            if not all(
+                math.isfinite(value) for value in (*self.contact_world_min, *self.contact_world_max)
+            ):
+                raise ValueError("contact manifold bounds must be finite")
+            if any(
+                lower > upper
+                for lower, upper in zip(
+                    self.contact_world_min,
+                    self.contact_world_max,
+                    strict=True,
+                )
+            ):
+                raise ValueError("contact manifold bounds must be ordered")
+        return self
+
+
+class PrivilegedAttachmentContractEvidence(StrictModel):
+    method: Literal["projected_compiled_contact_locus_v3"]
+    contact_manifold_rule: Literal["compiled_axis_aligned_intersection_cell_v1"]
+    supported_contact_manifold_types: tuple[
+        Literal["point"],
+        Literal["axis_aligned_segment"],
+        Literal["axis_aligned_rectangle"],
+        Literal["axis_aligned_overlap_volume"],
+    ]
+    projection_convention: Literal["analytic_pinhole_pixel_centre_v1"]
+    projection_in_front_rule: Literal["strict_forward_distance_greater_than_epsilon_v1"]
+    projection_in_front_epsilon: float = Field(ge=1e-12, le=1e-12)
+    feasibility_rule: Literal["image_constraints_only_slack_strict_front_and_cell_bounds_exact_v1"]
+    image_feasibility_slack: float = Field(ge=1e-12, le=1e-12)
+    edge_lattice_association_rule: Literal[
+        "sample_connection_segment_intersects_projected_contact_cell_v1"
+    ]
+    endpoint_tie_rule: Literal["inclusive_contact_endpoints_v1"]
+    multi_surface_rule: Literal["multi_surface_ambiguity_precedes_attachment_v1"]
+    contact_tolerance: float = Field(ge=1e-12, le=1e-12)
+    rotation_tolerance: float = Field(ge=1e-12, le=1e-12)
+    image_tolerance_pixels: float = Field(ge=0.5, le=0.5)
+    geom_types: dict[str, Literal["plane", "box"]]
+    geom_world_rotations_row_major: dict[str, tuple[float, ...]]
+    pair_evidence: tuple[PrivilegedAttachmentPairEvidence, ...]
+
+    @model_validator(mode="after")
+    def rotations_and_pairs_are_complete(self) -> PrivilegedAttachmentContractEvidence:
+        if set(self.geom_types) != set(self.geom_world_rotations_row_major):
+            raise ValueError("attachment geom type and rotation evidence must cover the same names")
+        for rotation in self.geom_world_rotations_row_major.values():
+            if len(rotation) != 9 or not all(math.isfinite(value) for value in rotation):
+                raise ValueError("attachment rotations must contain nine finite values")
+        keys = [
+            (item.first_semantic_name, item.second_semantic_name) for item in self.pair_evidence
+        ]
+        if keys != sorted(keys) or len(keys) != len(set(keys)):
+            raise ValueError("attachment pair evidence must be unique and canonical-ordered")
+        return self
+
+
+class PrivilegedBoundaryElementEvidence(StrictModel):
+    frame_index: Literal[0, 1]
+    axis: BoundaryAxis
+    row: int = Field(ge=0)
+    column: int = Field(ge=0)
+    negative_raw_geom_id: int | None = Field(default=None, ge=0)
+    positive_raw_geom_id: int | None = Field(default=None, ge=0)
+    kind: BoundaryKind
+    owner_side: BoundaryOwnerSide
+    owner_raw_geom_id: int | None = Field(default=None, ge=0)
+    negative_counterfactual_next_raw_geom_id: int | None = Field(default=None, ge=0)
+    positive_counterfactual_next_raw_geom_id: int | None = Field(default=None, ge=0)
+    on_projected_attachment_locus: bool
+
+    @model_validator(mode="after")
+    def local_attachment_evidence_matches_kind(self) -> PrivilegedBoundaryElementEvidence:
+        if self.kind == BoundaryKind.ATTACHED_JUNCTION and not (self.on_projected_attachment_locus):
+            raise ValueError("attached junction requires local projected-locus evidence")
+        if self.on_projected_attachment_locus and self.kind not in {
+            BoundaryKind.ATTACHED_JUNCTION,
+            BoundaryKind.MULTI_SURFACE_JUNCTION_AMBIGUOUS,
+        }:
+            raise ValueError(
+                "projected attachment locus can only yield attachment or junction ambiguity"
+            )
+        return self
+
+
+class BoundaryVisibilityDiagnostics(StrictModel):
+    boundary_method: Literal["analytic_oriented_boundary_ownership_v4"]
+    counterfactual_continuation_rule: Literal["counterfactual_nearest_surface_continuation_v1"]
+    counterfactual_tie_rule: Literal["exactly_one_side_continues_v1"]
+    counterfactual_ray_direction_epsilon: float = Field(ge=1e-12, le=1e-12)
+    junction_ambiguity_rule: Literal["edge_incident_3x2_or_2x3_multi_assignment_v2"]
+    silhouette_rule: Literal["controlled_to_uncontrolled_side_owns_v1"]
+    visibility_event_method: Literal["analytic_transport_boundary_causal_events_v2"]
+    boundary_evidence: tuple[PrivilegedBoundaryElementEvidence, ...]
+    boundary_kind_counts: dict[BoundaryKind, int]
+    owner_side_counts: dict[BoundaryOwnerSide, int]
+    before_event_code_counts: tuple[int, int, int, int, int, int]
+    after_event_code_counts: tuple[int, int, int, int, int, int]
+
+    @model_validator(mode="after")
+    def counts_are_nonnegative(self) -> BoundaryVisibilityDiagnostics:
+        if any(value < 0 for value in self.boundary_kind_counts.values()):
+            raise ValueError("boundary diagnostic counts must be non-negative")
+        if any(value < 0 for value in self.owner_side_counts.values()):
+            raise ValueError("owner-side diagnostic counts must be non-negative")
+        if any(value < 0 for value in self.before_event_code_counts):
+            raise ValueError("before-event diagnostic counts must be non-negative")
+        if any(value < 0 for value in self.after_event_code_counts):
+            raise ValueError("after-event diagnostic counts must be non-negative")
+        return self
+
+
 class SingleOccluderInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.5"]
+    schema_version: Literal["0.1.0-dev.9"]
     scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]
@@ -729,8 +1200,12 @@ class SingleOccluderInstrumentation(StrictModel):
     raw_to_opaque_surface_ids: dict[str, SurfaceId]
     raw_geom_world_positions: dict[str, tuple[float, float, float]]
     raw_geom_compiled_sizes: dict[str, tuple[float, float, float]]
+    raw_geom_types: dict[str, Literal["plane", "box"]]
+    raw_geom_world_rotations_row_major: dict[str, tuple[float, ...]]
     occlusion_oracle: OcclusionOracleEvidence
     analytic_transport_diagnostics: AnalyticTransportDiagnostics
+    attachment_contract: PrivilegedAttachmentContractEvidence
+    boundary_visibility_diagnostics: BoundaryVisibilityDiagnostics
 
     @model_validator(mode="after")
     def apparatus_mapping_is_exact_and_finite(self) -> SingleOccluderInstrumentation:
@@ -744,6 +1219,10 @@ class SingleOccluderInstrumentation(StrictModel):
             raise ValueError("raw geom positions must describe exactly the apparatus surfaces")
         if set(self.raw_geom_compiled_sizes) != expected_names:
             raise ValueError("compiled geom sizes must describe exactly the apparatus surfaces")
+        if set(self.raw_geom_types) != expected_names:
+            raise ValueError("compiled geom types must describe exactly the apparatus surfaces")
+        if set(self.raw_geom_world_rotations_row_major) != expected_names:
+            raise ValueError("compiled geom rotations must describe exactly the apparatus surfaces")
         if set(self.raw_to_opaque_surface_ids) != {str(raw_id) for raw_id in raw_ids}:
             raise ValueError("raw-to-opaque mapping must cover exactly the apparatus raw IDs")
         if len(set(self.raw_to_opaque_surface_ids.values())) != len(expected_names):
@@ -764,7 +1243,7 @@ class SingleOccluderInstrumentation(StrictModel):
 
 
 class CorridorInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.5"]
+    schema_version: Literal["0.1.0-dev.9"]
     scene_family: Literal[SceneFamily.CORRIDOR]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]
@@ -773,6 +1252,8 @@ class CorridorInstrumentation(StrictModel):
     raw_to_opaque_surface_ids: dict[str, SurfaceId]
     raw_geom_world_positions: dict[str, tuple[float, float, float]]
     raw_geom_compiled_sizes: dict[str, tuple[float, float, float]]
+    raw_geom_types: dict[str, Literal["plane", "box"]]
+    raw_geom_world_rotations_row_major: dict[str, tuple[float, ...]]
     sampled_geometry: CorridorSampledGeometry
     camera_before: CameraInstrumentation
     camera_after: CameraInstrumentation
@@ -784,6 +1265,8 @@ class CorridorInstrumentation(StrictModel):
     geometry_sampling_rule: Literal["uniform_width_length_v1"]
     appearance_rule: Literal["solid_colour_variant_v1"]
     analytic_transport_diagnostics: AnalyticTransportDiagnostics
+    attachment_contract: PrivilegedAttachmentContractEvidence
+    boundary_visibility_diagnostics: BoundaryVisibilityDiagnostics
 
     @model_validator(mode="after")
     def apparatus_mapping_and_evidence_are_exact(self) -> CorridorInstrumentation:
@@ -806,6 +1289,10 @@ class CorridorInstrumentation(StrictModel):
             raise ValueError("raw geom positions must describe exactly the corridor surfaces")
         if set(self.raw_geom_compiled_sizes) != expected_names:
             raise ValueError("compiled geom sizes must describe exactly the corridor surfaces")
+        if set(self.raw_geom_types) != expected_names:
+            raise ValueError("compiled geom types must describe exactly the corridor surfaces")
+        if set(self.raw_geom_world_rotations_row_major) != expected_names:
+            raise ValueError("compiled geom rotations must describe exactly the corridor surfaces")
         if set(self.raw_to_opaque_surface_ids) != {str(raw_id) for raw_id in raw_ids}:
             raise ValueError("corridor raw-to-opaque mapping must cover exactly the raw IDs")
         if len(set(self.raw_to_opaque_surface_ids.values())) != len(expected_names):
@@ -911,7 +1398,7 @@ class RendererProvenance(StrictModel):
 
 
 class DatasetManifest(StrictModel):
-    schema_version: Literal["0.1.0-dev.3"]
+    schema_version: Literal["0.1.0-dev.4"]
     generator_version: Literal["0.1.0"]
     scene_family: SceneFamily
     root_seed: int = Field(ge=0)

@@ -8,7 +8,13 @@ import mujoco
 import numpy as np
 import numpy.typing as npt
 
-from epsbench.annotations import AnalyticCamera, AnalyticTransportArrays, compute_analytic_transport
+from epsbench.annotations import (
+    AnalyticCamera,
+    AnalyticTransportArrays,
+    RawBoundaryVisibilityAnalysis,
+    compute_analytic_transport,
+    compute_raw_boundary_visibility_analysis,
+)
 from epsbench.config import CorridorConfig
 from epsbench.schema import CorridorSampledGeometry
 from epsbench.sim.compiled import CompiledSceneContract, extract_compiled_scene_contract
@@ -23,6 +29,13 @@ CORRIDOR_SURFACE_NAMES = (
     "corridor_left_surface",
     "corridor_right_surface",
     "corridor_end_surface",
+)
+CORRIDOR_ATTACHMENT_PAIRS = (
+    ("corridor_floor", "corridor_left_surface"),
+    ("corridor_floor", "corridor_right_surface"),
+    ("corridor_floor", "corridor_end_surface"),
+    ("corridor_left_surface", "corridor_end_surface"),
+    ("corridor_right_surface", "corridor_end_surface"),
 )
 
 
@@ -42,7 +55,10 @@ class CorridorRenderedTransition:
     raw_geom_ids: dict[str, int]
     raw_geom_positions: dict[str, tuple[float, float, float]]
     raw_geom_compiled_sizes: dict[str, tuple[float, float, float]]
+    raw_geom_types: dict[str, str]
+    raw_geom_world_rotations_row_major: dict[str, tuple[float, ...]]
     analytic_transport: AnalyticTransportArrays
+    boundary_visibility: RawBoundaryVisibilityAnalysis
 
 
 def corridor_generation_seeds(episode_seed: int) -> tuple[int, int, int]:
@@ -220,6 +236,58 @@ def compute_corridor_analytic_transport(
     )
 
 
+def compute_corridor_boundary_visibility(
+    config: CorridorConfig,
+    geometry: CorridorSampledGeometry,
+    appearance_seed: int,
+) -> RawBoundaryVisibilityAnalysis:
+    """Independently compile and recompute the Slice 4 oracle for validation."""
+
+    model = mujoco.MjModel.from_xml_string(
+        build_corridor_scene_xml(config, geometry, appearance_seed)
+    )
+    data = mujoco.MjData(model)
+    camera_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "monocular_camera")
+    model.cam_pos[camera_id, 1] = geometry.camera_before_forward_position
+    mujoco.mj_forward(model, data)
+    before_camera = _analytic_camera(
+        tuple(float(value) for value in data.cam_xpos[camera_id]),  # type: ignore[arg-type]
+        tuple(float(value) for value in data.cam_xmat[camera_id].reshape(-1)),
+        float(model.cam_fovy[camera_id]),
+    )
+    model.cam_pos[camera_id, 1] = geometry.camera_after_forward_position
+    mujoco.mj_forward(model, data)
+    after_camera = _analytic_camera(
+        tuple(float(value) for value in data.cam_xpos[camera_id]),  # type: ignore[arg-type]
+        tuple(float(value) for value in data.cam_xmat[camera_id].reshape(-1)),
+        float(model.cam_fovy[camera_id]),
+    )
+    raw_geom_ids = {
+        name: mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
+        for name in CORRIDOR_SURFACE_NAMES
+    }
+    transport = compute_analytic_transport(
+        model,
+        data,
+        tuple(raw_geom_ids.values()),
+        config.render.width,
+        config.render.height,
+        before_camera,
+        after_camera,
+    )
+    return compute_raw_boundary_visibility_analysis(
+        model,
+        data,
+        raw_geom_ids,
+        CORRIDOR_ATTACHMENT_PAIRS,
+        config.render.width,
+        config.render.height,
+        before_camera,
+        after_camera,
+        transport,
+    )
+
+
 def _render_raw_segmentation(
     renderer: mujoco.Renderer,
     data: mujoco.MjData,
@@ -326,11 +394,35 @@ def render_corridor_transition(
             compiled.camera_field_of_view_degrees,
         ),
     )
+    before_analytic_camera = _analytic_camera(
+        before.camera_world_position,
+        before.camera_world_rotation_row_major,
+        compiled.camera_field_of_view_degrees,
+    )
+    after_analytic_camera = _analytic_camera(
+        after.camera_world_position,
+        after.camera_world_rotation_row_major,
+        compiled.camera_field_of_view_degrees,
+    )
+    boundary_visibility = compute_raw_boundary_visibility_analysis(
+        model,
+        data,
+        compiled.raw_geom_ids,
+        CORRIDOR_ATTACHMENT_PAIRS,
+        config.render.width,
+        config.render.height,
+        before_analytic_camera,
+        after_analytic_camera,
+        analytic_transport,
+    )
     return CorridorRenderedTransition(
         before=before,
         after=after,
         raw_geom_ids=compiled.raw_geom_ids,
         raw_geom_positions=compiled.raw_geom_world_positions,
         raw_geom_compiled_sizes=compiled.raw_geom_compiled_sizes,
+        raw_geom_types=compiled.raw_geom_types,
+        raw_geom_world_rotations_row_major=(compiled.raw_geom_world_rotations_row_major),
         analytic_transport=analytic_transport,
+        boundary_visibility=boundary_visibility,
     )

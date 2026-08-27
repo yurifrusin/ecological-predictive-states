@@ -208,8 +208,8 @@ def test_corridor_declared_surface_absent_from_both_frames_is_rejected(
         validate_dataset(broken)
 
 
-@pytest.mark.parametrize("fabrication", ["available_empty", "available_relation"])
-def test_corridor_cannot_claim_available_occlusion_without_oracle(
+@pytest.mark.parametrize("fabrication", ["unavailable", "available_relation", "wrong_rule"])
+def test_corridor_occlusion_must_match_boundary_oracle(
     corridor_dataset: Path,
     tmp_path: Path,
     fabrication: str,
@@ -221,6 +221,16 @@ def test_corridor_cannot_claim_available_occlusion_without_oracle(
     )
     transition, instrumentation = load_episode_payloads(broken, 0)
     first, second = (surface["surface_id"] for surface in transition["surfaces"][:2])
+    if fabrication == "unavailable":
+        transition["occlusion"] = {
+            "status": "unavailable",
+            "reason_category": "oriented_corridor_occlusion_oracle_unavailable",
+            "reason": "fabricated historical posture",
+        }
+        commit_episode_payloads(broken, 0, transition, instrumentation)
+        with pytest.raises(DatasetValidationError, match="complete oriented-boundary"):
+            validate_dataset(broken)
+        return
     relations = []
     if fabrication == "available_relation":
         relations.append(
@@ -232,9 +242,13 @@ def test_corridor_cannot_claim_available_occlusion_without_oracle(
         )
     transition["occlusion"] = {
         "status": "available",
-        "oracle_rule": "counterfactual_occluder_exclusion_v1",
+        "oracle_rule": (
+            "oriented_boundary_ownership_with_counterfactual_crosscheck_v1"
+            if fabrication == "wrong_rule"
+            else "oriented_boundary_ownership_complete_v2"
+        ),
         "relations": relations,
     }
     commit_episode_payloads(broken, 0, transition, instrumentation)
-    with pytest.raises(DatasetValidationError, match="corridor occlusion"):
+    with pytest.raises(DatasetValidationError, match="complete oriented-boundary"):
         validate_dataset(broken)
