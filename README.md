@@ -8,7 +8,7 @@ Gate 0A is canonical. The reviewed single-occluder Gate 0B Slice 1 and corridor 
 
 **No scientific result exists yet.** Successful generation, validation, and tests establish infrastructure only. Full Gate 0B completion is not claimed: full oriented boundary ownership and ecological visibility-event derivation remain incomplete. Gate 0C and all model work remain unauthorised.
 
-The scientific authority is [the Research Charter](docs/RESEARCH_CHARTER.md), followed by [EPS-Bench v0](docs/EPS_BENCH_V0.md) and [Milestone 0](docs/MILESTONE_0.md). Architecture and current limits are recorded in [the implementation notes](docs/IMPLEMENTATION_NOTES.md); implementation, review, ownership, and closeout are separated by [the review protocol](docs/review-protocol.md).
+The scientific authority is [the Research Charter](docs/RESEARCH_CHARTER.md), followed by [EPS-Bench v0](docs/EPS_BENCH_V0.md) and [Milestone 0](docs/MILESTONE_0.md). Architecture and current limits are recorded in [the implementation notes](docs/IMPLEMENTATION_NOTES.md). Changes declare a review profile and evidence class; active reviews remain outside implementation heads, and final immutable records are canonicalised only during linked closeout. The orchestrator coordinates state without inheriting review authority. Work-package merge remains distinct from full Gate 0B completion and from scientific evidence. See [the review protocol](docs/review-protocol.md) and [review-record directory policy](docs/reviews/README.md).
 
 ## Windows PowerShell setup
 
