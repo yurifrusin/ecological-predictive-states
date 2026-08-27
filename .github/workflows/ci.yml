@@ -51,3 +51,28 @@ jobs:
           uv run epsbench generate --config configs/corridor_v0.yaml --episodes 2 --output data/ci-corridor
           uv run epsbench validate data/ci-corridor
           uv run epsbench inspect data/ci-corridor --episode 0 --output artifacts/ci-corridor-episode-0.png
+
+      - name: Audit the complete appearance candidate matrix
+        run: |
+          uv run epsbench appearance-audit \
+            --registry configs/appearance_candidates_v0.yaml \
+            --seeds configs/evaluation_seed_candidates_v0.yaml \
+            --single-config configs/benchmark_v0.yaml \
+            --corridor-config configs/corridor_v0.yaml \
+            --output artifacts/gate-0b-slice-5-candidates
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          roots = json.loads(
+              (Path("artifacts/gate-0b-slice-5-candidates") / "candidate_packet.json").read_text()
+          )["roots"]
+          expected = {
+              "appearance_registry_sha256": "fb4311af79e5ccabe2ea186789b4525b6b8c702a73ba2ee46ef1fbc07bceabfe",
+              "seed_registry_sha256": "6c6816ae1f6657a710631f08a435cca4c623e81efc71ac4e6330a44338313482",
+              "procedural_asset_root_sha256": "ac21f433bb6720e466d5e38953f5e6f07ff83acfed8501aec9690c3d229b0f8b",
+              "ecological_invariance_root_sha256": "ea913d6e93b61e4543decd2440d34fdc37fb43d7a45ae261b0ed1e155f263ef7",
+          }
+          assert all(roots[key] == value for key, value in expected.items()), (roots, expected)
+          print("Exact cross-platform shared roots:", expected)
+          PY

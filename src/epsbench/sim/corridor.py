@@ -15,6 +15,7 @@ from epsbench.annotations import (
     compute_analytic_transport,
     compute_raw_boundary_visibility_analysis,
 )
+from epsbench.appearance import AppearanceRenderPlan, configured_appearance_render_plan
 from epsbench.config import CorridorConfig
 from epsbench.schema import CorridorSampledGeometry
 from epsbench.sim.compiled import CompiledSceneContract, extract_compiled_scene_contract
@@ -37,6 +38,17 @@ CORRIDOR_ATTACHMENT_PAIRS = (
     ("corridor_left_surface", "corridor_end_surface"),
     ("corridor_right_surface", "corridor_end_surface"),
 )
+
+
+def _appearance(config: CorridorConfig, plan: AppearanceRenderPlan | None) -> AppearanceRenderPlan:
+    if plan is not None:
+        return plan
+    return configured_appearance_render_plan(
+        config.appearance.profile_id,
+        "corridor",
+        CORRIDOR_SURFACE_NAMES,
+        config.seed,
+    )
 
 
 @dataclass(frozen=True)
@@ -67,7 +79,7 @@ def corridor_generation_seeds(episode_seed: int) -> tuple[int, int, int]:
     return (
         derive_seed(episode_seed, "geometry-sampling"),
         derive_seed(episode_seed, "surface-remapping"),
-        derive_seed(episode_seed, "appearance"),
+        derive_seed(episode_seed, "appearance-base"),
     )
 
 
@@ -94,38 +106,14 @@ def sample_corridor_geometry(
     )
 
 
-def _appearance_colours(variant: str, appearance_seed: int) -> dict[str, str]:
-    if variant == "alternate":
-        palette = {
-            "floor": (0.18, 0.42, 0.30),
-            "left": (0.70, 0.25, 0.55),
-            "right": (0.23, 0.55, 0.72),
-            "end": (0.82, 0.68, 0.18),
-        }
-    else:
-        palette = {
-            "floor": (0.30, 0.32, 0.36),
-            "left": (0.65, 0.22, 0.18),
-            "right": (0.16, 0.34, 0.68),
-            "end": (0.32, 0.58, 0.28),
-        }
-    rng = np.random.default_rng(appearance_seed)
-    colours: dict[str, str] = {}
-    for name, rgb in palette.items():
-        scale = float(rng.uniform(0.9, 1.05))
-        varied = tuple(min(1.0, channel * scale) for channel in rgb)
-        colours[name] = f"{varied[0]} {varied[1]} {varied[2]} 1"
-    return colours
-
-
 def build_corridor_scene_xml(
     config: CorridorConfig,
     geometry: CorridorSampledGeometry,
-    appearance_seed: int,
+    appearance: AppearanceRenderPlan | None = None,
 ) -> str:
     """Build a parametric open-top corridor whose walls cover the camera optical field."""
 
-    colours = _appearance_colours(config.appearance.variant, appearance_seed)
+    appearance = _appearance(config, appearance)
     half_width = geometry.width / 2.0
     half_length = geometry.length / 2.0
     half_height = geometry.wall_height / 2.0
@@ -142,21 +130,34 @@ def build_corridor_scene_xml(
     <global offwidth="{config.render.width}" offheight="{config.render.height}"/>
     <quality shadowsize="0"/>
     <map znear="0.01" zfar="30"/>
+    <headlight ambient="0 0 0" diffuse="0 0 0" specular="0 0 0" active="0"/>
   </visual>
+  <asset>
+    {appearance.asset_xml}
+  </asset>
   <worldbody>
-    <light name="key" directional="true" pos="0 -1 6" dir="0 0.25 -1"
-           diffuse="0.95 0.95 0.95"/>
+    <light name="key" directional="true" castshadow="false" pos="0 -1 6"
+           dir="{appearance.light_direction}" diffuse="{appearance.light_diffuse}"
+           specular="0 0 0"/>
     <geom name="corridor_floor" type="box" pos="0 {half_length} -0.05"
-          size="{half_width} {half_length} 0.05" rgba="{colours["floor"]}"/>
+          size="{half_width} {half_length} 0.05"
+          rgba="{appearance.rgba_by_surface["corridor_floor"]}"
+          {appearance.material_by_surface["corridor_floor"]}/>
     <geom name="corridor_left_surface" type="box"
           pos="{-half_width} {half_length} {half_height}"
-          size="{wall_thickness} {half_length} {half_height}" rgba="{colours["left"]}"/>
+          size="{wall_thickness} {half_length} {half_height}"
+          rgba="{appearance.rgba_by_surface["corridor_left_surface"]}"
+          {appearance.material_by_surface["corridor_left_surface"]}/>
     <geom name="corridor_right_surface" type="box"
           pos="{half_width} {half_length} {half_height}"
-          size="{wall_thickness} {half_length} {half_height}" rgba="{colours["right"]}"/>
+          size="{wall_thickness} {half_length} {half_height}"
+          rgba="{appearance.rgba_by_surface["corridor_right_surface"]}"
+          {appearance.material_by_surface["corridor_right_surface"]}/>
     <geom name="corridor_end_surface" type="box"
           pos="0 {geometry.length} {half_height}"
-          size="{half_width} {wall_thickness} {half_height}" rgba="{colours["end"]}"/>
+          size="{half_width} {wall_thickness} {half_height}"
+          rgba="{appearance.rgba_by_surface["corridor_end_surface"]}"
+          {appearance.material_by_surface["corridor_end_surface"]}/>
     <camera name="monocular_camera"
             pos="{camera_position}"
             xyaxes="1 0 0 0 0 1" fovy="{geometry.field_of_view_degrees}"/>
@@ -168,12 +169,13 @@ def build_corridor_scene_xml(
 def compile_corridor_scene_contract(
     config: CorridorConfig,
     geometry: CorridorSampledGeometry,
-    appearance_seed: int,
+    appearance: AppearanceRenderPlan | None = None,
 ) -> CompiledSceneContract:
     """Compile the sampled corridor without rendering and extract its exact facts."""
 
+    appearance = _appearance(config, appearance)
     model = mujoco.MjModel.from_xml_string(
-        build_corridor_scene_xml(config, geometry, appearance_seed)
+        build_corridor_scene_xml(config, geometry, appearance), appearance.asset_bytes
     )
     data = mujoco.MjData(model)
     return extract_compiled_scene_contract(
@@ -199,12 +201,13 @@ def _analytic_camera(
 def compute_corridor_analytic_transport(
     config: CorridorConfig,
     geometry: CorridorSampledGeometry,
-    appearance_seed: int,
+    appearance: AppearanceRenderPlan | None = None,
 ) -> AnalyticTransportArrays:
     """Independently compile and recompute transport for whole-dataset validation."""
 
+    appearance = _appearance(config, appearance)
     model = mujoco.MjModel.from_xml_string(
-        build_corridor_scene_xml(config, geometry, appearance_seed)
+        build_corridor_scene_xml(config, geometry, appearance), appearance.asset_bytes
     )
     data = mujoco.MjData(model)
     camera_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "monocular_camera")
@@ -239,12 +242,13 @@ def compute_corridor_analytic_transport(
 def compute_corridor_boundary_visibility(
     config: CorridorConfig,
     geometry: CorridorSampledGeometry,
-    appearance_seed: int,
+    appearance: AppearanceRenderPlan | None = None,
 ) -> RawBoundaryVisibilityAnalysis:
     """Independently compile and recompute the Slice 4 oracle for validation."""
 
+    appearance = _appearance(config, appearance)
     model = mujoco.MjModel.from_xml_string(
-        build_corridor_scene_xml(config, geometry, appearance_seed)
+        build_corridor_scene_xml(config, geometry, appearance), appearance.asset_bytes
     )
     data = mujoco.MjData(model)
     camera_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "monocular_camera")
@@ -340,12 +344,12 @@ def _render_frame(
 def render_corridor_transition(
     config: CorridorConfig,
     geometry: CorridorSampledGeometry,
-    appearance_seed: int,
+    appearance: AppearanceRenderPlan,
 ) -> CorridorRenderedTransition:
     """Render one prescribed forward transition in the sampled corridor."""
 
     model = mujoco.MjModel.from_xml_string(
-        build_corridor_scene_xml(config, geometry, appearance_seed)
+        build_corridor_scene_xml(config, geometry, appearance), appearance.asset_bytes
     )
     data = mujoco.MjData(model)
     camera_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "monocular_camera")

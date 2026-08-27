@@ -52,7 +52,10 @@ def appearance_datasets(
     alternate = SingleOccluderConfig.model_validate(
         {
             **benchmark_config.model_dump(mode="python"),
-            "appearance": AppearanceConfig(variant="alternate").model_dump(mode="python"),
+            "appearance": AppearanceConfig(
+                registry_version="appearance_candidate_registry_v0",
+                profile_id="legacy_solid_alternate_v1",
+            ).model_dump(mode="python"),
         }
     )
     base_path = root / "base"
@@ -89,7 +92,10 @@ def corridor_appearance_datasets(
     alternate = CorridorConfig.model_validate(
         {
             **corridor_config.model_dump(mode="python"),
-            "appearance": AppearanceConfig(variant="alternate").model_dump(mode="python"),
+            "appearance": AppearanceConfig(
+                registry_version="appearance_candidate_registry_v0",
+                profile_id="legacy_solid_alternate_v1",
+            ).model_dump(mode="python"),
         }
     )
     base_path = root / "base"

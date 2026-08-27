@@ -9,6 +9,7 @@ import numpy as np
 import numpy.typing as npt
 from PIL import Image
 
+from epsbench.appearance import AppearanceInstanceRecord
 from epsbench.data.paths import resolve_dataset_manifest
 from epsbench.schema import (
     Action,
@@ -139,6 +140,7 @@ class DatasetLoader:
             Modality.TRANSITION_RECORD,
             Modality.SCENE_FAMILY,
             Modality.PRIVILEGED_GENERATION_RECORDS,
+            Modality.APPEARANCE_CONTROL,
         )
         return self._manifest.model_copy(deep=True)
 
@@ -289,6 +291,12 @@ class DatasetLoader:
         return parse_privileged_instrumentation_json(
             self._path(episode.privileged_instrumentation.path).read_text(encoding="utf-8")
         )
+
+    def read_appearance_control(self, episode_index: int) -> AppearanceInstanceRecord:
+        """Return private appearance control only with both required permissions."""
+
+        self._require(Modality.APPEARANCE_CONTROL, Modality.PRIVILEGED_GENERATION_RECORDS)
+        return self._instrumentation(episode_index).appearance.model_copy(deep=True)
 
     def read_raw_mujoco_geom_ids(self, episode_index: int) -> dict[str, int]:
         self._require(Modality.MUJOCO_GEOM_IDS, Modality.PRIVILEGED_GENERATION_RECORDS)

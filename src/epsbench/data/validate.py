@@ -39,6 +39,15 @@ from epsbench.annotations import (
     derive_boundary_structure,
     derive_visibility,
 )
+from epsbench.appearance import (
+    AppearanceRegistry,
+    appearance_profile_hash,
+    appearance_registry_hash,
+    load_evaluation_seed_registry,
+    profile_by_id,
+    validate_appearance_instance,
+    validate_axis_isolation,
+)
 from epsbench.config import (
     BenchmarkConfig,
     CorridorConfig,
@@ -1135,6 +1144,31 @@ def validate_dataset(root: Path) -> DatasetManifest:
 
     registry = _ArtifactRegistry(resolved_root)
 
+    appearance_registry_payload = _verify_json(
+        resolved_root, manifest.appearance_registry_snapshot, registry
+    )
+    try:
+        appearance_registry = AppearanceRegistry.model_validate_json(
+            canonical_json_bytes(appearance_registry_payload)
+        )
+        validate_axis_isolation(appearance_registry)
+    except Exception as error:
+        raise DatasetValidationError("appearance registry snapshot is invalid") from error
+    if appearance_registry_hash(appearance_registry) != manifest.appearance_registry_sha256:
+        raise DatasetValidationError("appearance registry hash mismatch")
+    try:
+        selected_profile = profile_by_id(appearance_registry, manifest.appearance_profile_id)
+    except ValueError as error:
+        raise DatasetValidationError("selected appearance profile is absent") from error
+    if appearance_profile_hash(selected_profile) != manifest.appearance_profile_sha256:
+        raise DatasetValidationError("appearance profile hash mismatch")
+    try:
+        seed_registry = load_evaluation_seed_registry(
+            Path("configs/evaluation_seed_candidates_v0.yaml")
+        )
+    except Exception as error:
+        raise DatasetValidationError("evaluation seed registry is unavailable") from error
+
     config_payload = _verify_json(resolved_root, manifest.resolved_config, registry)
     try:
         config = parse_config(config_payload)
@@ -1144,8 +1178,10 @@ def validate_dataset(root: Path) -> DatasetManifest:
         raise DatasetValidationError("resolved configuration hash mismatch")
     if config.seed != manifest.root_seed:
         raise DatasetValidationError("manifest seed does not match resolved configuration")
-    if config.appearance.variant != manifest.appearance_variant:
-        raise DatasetValidationError("appearance variant is inconsistent")
+    if config.appearance.registry_version != appearance_registry.registry_version:
+        raise DatasetValidationError("appearance registry version is inconsistent")
+    if config.appearance.profile_id != manifest.appearance_profile_id:
+        raise DatasetValidationError("appearance profile selection is inconsistent")
     if config.scene_family != manifest.scene_family:
         raise DatasetValidationError("manifest scene family differs from resolved configuration")
     expected_raster_shape = (config.render.height, config.render.width)
@@ -1199,8 +1235,11 @@ def validate_dataset(root: Path) -> DatasetManifest:
             raise DatasetValidationError("instrumentation failed schema validation") from error
         if instrumentation.episode_id != episode.episode_id:
             raise DatasetValidationError("instrumentation episode identifier mismatch")
-        if instrumentation.appearance_variant != manifest.appearance_variant:
-            raise DatasetValidationError("instrumentation appearance variant mismatch")
+        if (
+            instrumentation.appearance.appearance_instance_sha256
+            != episode.appearance_instance_sha256
+        ):
+            raise DatasetValidationError("episode appearance-instance identity mismatch")
         if instrumentation.scene_family != manifest.scene_family:
             raise DatasetValidationError("instrumentation scene family mismatch")
         if len(set(instrumentation.raw_geom_ids.values())) != len(instrumentation.raw_geom_ids):
@@ -1246,19 +1285,45 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 raise DatasetValidationError(
                     "single-occluder instrumentation/configuration mismatch"
                 )
-            compiled_scene = compile_single_occluder_scene_contract(config)
+            try:
+                appearance = validate_appearance_instance(
+                    instrumentation.appearance,
+                    appearance_registry,
+                    "single_occluder",
+                    ("support_surface", "occluding_surface", "background_surface"),
+                    episode.episode_seed,
+                    config.seed,
+                    seed_registry,
+                )
+            except Exception as error:
+                raise DatasetValidationError("appearance instance failed validation") from error
+            compiled_scene = compile_single_occluder_scene_contract(config, appearance)
             _require_compiled_apparatus_contract(instrumentation, compiled_scene)
             expected_scene_content_sha256 = _single_occluder_scene_content_hash(config)
-            expected_analytic_transport = compute_single_occluder_analytic_transport(config)
-            expected_boundary_visibility = compute_single_occluder_boundary_visibility(config)
+            expected_analytic_transport = compute_single_occluder_analytic_transport(
+                config, appearance
+            )
+            expected_boundary_visibility = compute_single_occluder_boundary_visibility(
+                config, appearance
+            )
         elif isinstance(instrumentation, CorridorInstrumentation):
             if not isinstance(config, CorridorConfig):
                 raise DatasetValidationError("corridor instrumentation/configuration mismatch")
             _require_corridor_instrumentation(config, episode.episode_seed, instrumentation)
+            try:
+                appearance = validate_appearance_instance(
+                    instrumentation.appearance,
+                    appearance_registry,
+                    "corridor",
+                    CORRIDOR_SURFACE_NAMES,
+                    episode.episode_seed,
+                    config.seed,
+                    seed_registry,
+                )
+            except Exception as error:
+                raise DatasetValidationError("appearance instance failed validation") from error
             compiled_scene = compile_corridor_scene_contract(
-                config,
-                instrumentation.sampled_geometry,
-                instrumentation.generation_seeds.appearance_seed,
+                config, instrumentation.sampled_geometry, appearance
             )
             _require_compiled_apparatus_contract(instrumentation, compiled_scene)
             expected_scene_content_sha256 = _corridor_scene_content_hash(
@@ -1268,12 +1333,12 @@ def validate_dataset(root: Path) -> DatasetManifest:
             expected_analytic_transport = compute_corridor_analytic_transport(
                 config,
                 instrumentation.sampled_geometry,
-                instrumentation.generation_seeds.appearance_seed,
+                appearance,
             )
             expected_boundary_visibility = compute_corridor_boundary_visibility(
                 config,
                 instrumentation.sampled_geometry,
-                instrumentation.generation_seeds.appearance_seed,
+                appearance,
             )
         else:
             raise DatasetValidationError("unsupported scene instrumentation")

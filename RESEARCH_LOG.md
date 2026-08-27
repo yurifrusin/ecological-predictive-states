@@ -49,3 +49,15 @@ The proposed Slice 4 representation is implemented pending independent review. T
 Accretion and deletion are derived only when analytic transport establishes occlusion/disocclusion and oriented boundary ownership identifies a supported owner/affected pair. Frame entry/exit and neutral mask change remain separate.
 
 Component split/merge remains explicitly unavailable in this slice. Implementation and CI are infrastructure evidence only; Gate 0B completion and Gate 0C authorisation are not implied.
+
+## 2026-08-28 — Procedural appearance candidates, not a freeze
+
+Gate 0B appearance candidates use repository-generated procedural textures, palettes, and lighting rather than external assets while the licence question remains unresolved.
+
+Freeze-eligible candidate profiles randomise style-slot assignment independently of geometry and opaque surface remapping so a semantic surface role is not permanently tied to one colour or texture slot.
+
+Slice 5 produces a candidate registry, candidate seed pool, and reproducible admission packet. Final profile selection, split assignment, and evaluation-seed freeze remain separate owner-authorised benchmark-freeze work.
+
+These implementation decisions do not make any candidate final, complete Gate 0B, authorise Gate 0C or Gate 0D, or establish a scientific result.
+
+A pre-correction local Windows/WGL diagnostic retained 86 rejected cells and 74 admitted cells, caused only by the prospectively fixed controlled-surface exposure and textured-surface luminance-variation thresholds. Visual inspection then exposed that the renderer's built-in headlight had not been explicitly disabled, contrary to the declared lighting contract. That packet is superseded and is not qualifying local evidence. The exact profile definitions remain in `appearance_candidate_registry_v0`; no failed profile or seed was removed, relabelled, or tuned after viewing the outputs. The corrected renderer contract explicitly disables ambient, specular, and built-in headlight contributions and requires a fresh complete audit. This is negative apparatus and implementation evidence for later independent review, not a failed EPS hypothesis and not authority to freeze any profile.

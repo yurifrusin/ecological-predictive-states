@@ -1,0 +1,662 @@
+registry_version: appearance_candidate_registry_v0
+profiles:
+  - profile_id: balanced_checker_high_v1
+    profile_version: appearance_profile_v1
+    candidate_class: single_axis_candidate
+    freeze_eligible: true
+    axis_tags: [texture_frequency]
+    matched_control_profile_id: balanced_checker_low_v1
+    style_assignment_rule: balanced_cyclic_permutation_v1
+    palette:
+      single_occluder_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+      corridor_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+        - slot_id: style-slot-3
+          foreground_rgb: [180, 75, 220]
+          background_rgb: [70, 205, 190]
+    texture:
+      family: checker
+      resolution: 128
+      cycles_per_tile: 16
+      orientation: axis_x_0_degrees
+      phase_rule: namespaced_integer_phase_v1
+      contrast_rule: exact_palette_slot_bytes_v1
+      surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
+      filtering: mujoco_linear_mipmap_nearest_v1
+    material:
+      specular: 0.0
+      shininess: 0.0
+      reflectance: 0.0
+      texrepeat: [1.0, 1.0]
+      texuniform: false
+    illumination:
+      single_occluder:
+        direction: [0.2, 0.5, -1.0]
+        diffuse_intensity: 0.9
+      corridor:
+        direction: [0.0, 0.25, -1.0]
+        diffuse_intensity: 0.95
+      directional: true
+      cast_shadows: false
+      ambient_rgb: [0.0, 0.0, 0.0]
+      specular_rgb: [0.0, 0.0, 0.0]
+      camera_exposure_rule: unchanged_renderer_default_v1
+    non_degeneracy_thresholds:
+      changed_controlled_pixel_fraction_minimum: 0.2
+      normalized_controlled_rgb_mad_minimum: 0.025
+      visible_surface_mean_luminance_minimum: 0.05
+      visible_surface_mean_luminance_maximum: 0.95
+      textured_surface_minimum_pixels: 100
+      textured_surface_luminance_std_minimum: 0.025
+      frequency_partner_minimum_ratio: 4.0
+  - profile_id: balanced_checker_low_v1
+    profile_version: appearance_profile_v1
+    candidate_class: single_axis_candidate
+    freeze_eligible: true
+    axis_tags: [texture_family]
+    matched_control_profile_id: balanced_solid_palette_v1
+    style_assignment_rule: balanced_cyclic_permutation_v1
+    palette:
+      single_occluder_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+      corridor_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+        - slot_id: style-slot-3
+          foreground_rgb: [180, 75, 220]
+          background_rgb: [70, 205, 190]
+    texture:
+      family: checker
+      resolution: 128
+      cycles_per_tile: 4
+      orientation: axis_x_0_degrees
+      phase_rule: namespaced_integer_phase_v1
+      contrast_rule: exact_palette_slot_bytes_v1
+      surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
+      filtering: mujoco_linear_mipmap_nearest_v1
+    material:
+      specular: 0.0
+      shininess: 0.0
+      reflectance: 0.0
+      texrepeat: [1.0, 1.0]
+      texuniform: false
+    illumination:
+      single_occluder:
+        direction: [0.2, 0.5, -1.0]
+        diffuse_intensity: 0.9
+      corridor:
+        direction: [0.0, 0.25, -1.0]
+        diffuse_intensity: 0.95
+      directional: true
+      cast_shadows: false
+      ambient_rgb: [0.0, 0.0, 0.0]
+      specular_rgb: [0.0, 0.0, 0.0]
+      camera_exposure_rule: unchanged_renderer_default_v1
+    non_degeneracy_thresholds:
+      changed_controlled_pixel_fraction_minimum: 0.2
+      normalized_controlled_rgb_mad_minimum: 0.025
+      visible_surface_mean_luminance_minimum: 0.05
+      visible_surface_mean_luminance_maximum: 0.95
+      textured_surface_minimum_pixels: 100
+      textured_surface_luminance_std_minimum: 0.025
+      frequency_partner_minimum_ratio: 4.0
+  - profile_id: balanced_combined_stress_v1
+    profile_version: appearance_profile_v1
+    candidate_class: combined_stress_candidate
+    freeze_eligible: true
+    axis_tags: [colour, texture_family, texture_frequency, texture_orientation, illumination, combined]
+    matched_control_profile_id: balanced_solid_palette_v1
+    style_assignment_rule: balanced_cyclic_permutation_v1
+    palette:
+      single_occluder_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [245, 95, 35]
+          background_rgb: [30, 130, 210]
+        - slot_id: style-slot-1
+          foreground_rgb: [80, 225, 115]
+          background_rgb: [220, 45, 155]
+        - slot_id: style-slot-2
+          foreground_rgb: [250, 205, 45]
+          background_rgb: [55, 60, 225]
+      corridor_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [245, 95, 35]
+          background_rgb: [30, 130, 210]
+        - slot_id: style-slot-1
+          foreground_rgb: [80, 225, 115]
+          background_rgb: [220, 45, 155]
+        - slot_id: style-slot-2
+          foreground_rgb: [250, 205, 45]
+          background_rgb: [55, 60, 225]
+        - slot_id: style-slot-3
+          foreground_rgb: [190, 70, 235]
+          background_rgb: [45, 215, 175]
+    texture:
+      family: stripes
+      resolution: 128
+      cycles_per_tile: 16
+      orientation: diagonal_down_45_degrees
+      phase_rule: namespaced_integer_phase_v1
+      contrast_rule: exact_palette_slot_bytes_v1
+      surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
+      filtering: mujoco_linear_mipmap_nearest_v1
+    material:
+      specular: 0.0
+      shininess: 0.0
+      reflectance: 0.0
+      texrepeat: [1.0, 1.0]
+      texuniform: false
+    illumination:
+      single_occluder:
+        direction: [-0.8, 0.35, -1.0]
+        diffuse_intensity: 0.9
+      corridor:
+        direction: [-0.8, 0.2, -1.0]
+        diffuse_intensity: 0.95
+      directional: true
+      cast_shadows: false
+      ambient_rgb: [0.0, 0.0, 0.0]
+      specular_rgb: [0.0, 0.0, 0.0]
+      camera_exposure_rule: unchanged_renderer_default_v1
+    non_degeneracy_thresholds:
+      changed_controlled_pixel_fraction_minimum: 0.2
+      normalized_controlled_rgb_mad_minimum: 0.025
+      visible_surface_mean_luminance_minimum: 0.05
+      visible_surface_mean_luminance_maximum: 0.95
+      textured_surface_minimum_pixels: 100
+      textured_surface_luminance_std_minimum: 0.025
+      frequency_partner_minimum_ratio: 4.0
+  - profile_id: balanced_illumination_left_v1
+    profile_version: appearance_profile_v1
+    candidate_class: single_axis_candidate
+    freeze_eligible: true
+    axis_tags: [illumination]
+    matched_control_profile_id: balanced_solid_palette_v1
+    style_assignment_rule: balanced_cyclic_permutation_v1
+    palette:
+      single_occluder_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+      corridor_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+        - slot_id: style-slot-3
+          foreground_rgb: [180, 75, 220]
+          background_rgb: [70, 205, 190]
+    texture:
+      family: solid
+      resolution: 128
+      cycles_per_tile: 0
+      orientation: axis_x_0_degrees
+      phase_rule: namespaced_integer_phase_v1
+      contrast_rule: exact_palette_slot_bytes_v1
+      surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
+      filtering: mujoco_linear_mipmap_nearest_v1
+    material:
+      specular: 0.0
+      shininess: 0.0
+      reflectance: 0.0
+      texrepeat: [1.0, 1.0]
+      texuniform: false
+    illumination:
+      single_occluder:
+        direction: [-0.8, 0.35, -1.0]
+        diffuse_intensity: 0.9
+      corridor:
+        direction: [-0.8, 0.2, -1.0]
+        diffuse_intensity: 0.95
+      directional: true
+      cast_shadows: false
+      ambient_rgb: [0.0, 0.0, 0.0]
+      specular_rgb: [0.0, 0.0, 0.0]
+      camera_exposure_rule: unchanged_renderer_default_v1
+    non_degeneracy_thresholds:
+      changed_controlled_pixel_fraction_minimum: 0.2
+      normalized_controlled_rgb_mad_minimum: 0.025
+      visible_surface_mean_luminance_minimum: 0.05
+      visible_surface_mean_luminance_maximum: 0.95
+      textured_surface_minimum_pixels: 100
+      textured_surface_luminance_std_minimum: 0.025
+      frequency_partner_minimum_ratio: 4.0
+  - profile_id: balanced_illumination_right_dim_v1
+    profile_version: appearance_profile_v1
+    candidate_class: single_axis_candidate
+    freeze_eligible: true
+    axis_tags: [illumination]
+    matched_control_profile_id: balanced_solid_palette_v1
+    style_assignment_rule: balanced_cyclic_permutation_v1
+    palette:
+      single_occluder_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+      corridor_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+        - slot_id: style-slot-3
+          foreground_rgb: [180, 75, 220]
+          background_rgb: [70, 205, 190]
+    texture:
+      family: solid
+      resolution: 128
+      cycles_per_tile: 0
+      orientation: axis_x_0_degrees
+      phase_rule: namespaced_integer_phase_v1
+      contrast_rule: exact_palette_slot_bytes_v1
+      surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
+      filtering: mujoco_linear_mipmap_nearest_v1
+    material:
+      specular: 0.0
+      shininess: 0.0
+      reflectance: 0.0
+      texrepeat: [1.0, 1.0]
+      texuniform: false
+    illumination:
+      single_occluder:
+        direction: [0.8, 0.2, -1.0]
+        diffuse_intensity: 0.62
+      corridor:
+        direction: [0.8, 0.15, -1.0]
+        diffuse_intensity: 0.62
+      directional: true
+      cast_shadows: false
+      ambient_rgb: [0.0, 0.0, 0.0]
+      specular_rgb: [0.0, 0.0, 0.0]
+      camera_exposure_rule: unchanged_renderer_default_v1
+    non_degeneracy_thresholds:
+      changed_controlled_pixel_fraction_minimum: 0.2
+      normalized_controlled_rgb_mad_minimum: 0.025
+      visible_surface_mean_luminance_minimum: 0.05
+      visible_surface_mean_luminance_maximum: 0.95
+      textured_surface_minimum_pixels: 100
+      textured_surface_luminance_std_minimum: 0.025
+      frequency_partner_minimum_ratio: 4.0
+  - profile_id: balanced_solid_palette_v1
+    profile_version: appearance_profile_v1
+    candidate_class: single_axis_candidate
+    freeze_eligible: true
+    axis_tags: [colour]
+    matched_control_profile_id: legacy_solid_base_v1
+    style_assignment_rule: balanced_cyclic_permutation_v1
+    palette:
+      single_occluder_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+      corridor_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+        - slot_id: style-slot-3
+          foreground_rgb: [180, 75, 220]
+          background_rgb: [70, 205, 190]
+    texture:
+      family: solid
+      resolution: 128
+      cycles_per_tile: 0
+      orientation: axis_x_0_degrees
+      phase_rule: namespaced_integer_phase_v1
+      contrast_rule: exact_palette_slot_bytes_v1
+      surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
+      filtering: mujoco_linear_mipmap_nearest_v1
+    material:
+      specular: 0.0
+      shininess: 0.0
+      reflectance: 0.0
+      texrepeat: [1.0, 1.0]
+      texuniform: false
+    illumination:
+      single_occluder:
+        direction: [0.2, 0.5, -1.0]
+        diffuse_intensity: 0.9
+      corridor:
+        direction: [0.0, 0.25, -1.0]
+        diffuse_intensity: 0.95
+      directional: true
+      cast_shadows: false
+      ambient_rgb: [0.0, 0.0, 0.0]
+      specular_rgb: [0.0, 0.0, 0.0]
+      camera_exposure_rule: unchanged_renderer_default_v1
+    non_degeneracy_thresholds:
+      changed_controlled_pixel_fraction_minimum: 0.2
+      normalized_controlled_rgb_mad_minimum: 0.025
+      visible_surface_mean_luminance_minimum: 0.05
+      visible_surface_mean_luminance_maximum: 0.95
+      textured_surface_minimum_pixels: 100
+      textured_surface_luminance_std_minimum: 0.025
+      frequency_partner_minimum_ratio: 4.0
+  - profile_id: balanced_stripes_high_oblique_v1
+    profile_version: appearance_profile_v1
+    candidate_class: combined_stress_candidate
+    freeze_eligible: true
+    axis_tags: [texture_family, texture_frequency, texture_orientation, combined]
+    matched_control_profile_id: balanced_stripes_low_v1
+    style_assignment_rule: balanced_cyclic_permutation_v1
+    palette:
+      single_occluder_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+      corridor_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+        - slot_id: style-slot-3
+          foreground_rgb: [180, 75, 220]
+          background_rgb: [70, 205, 190]
+    texture:
+      family: stripes
+      resolution: 128
+      cycles_per_tile: 16
+      orientation: diagonal_down_45_degrees
+      phase_rule: namespaced_integer_phase_v1
+      contrast_rule: exact_palette_slot_bytes_v1
+      surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
+      filtering: mujoco_linear_mipmap_nearest_v1
+    material:
+      specular: 0.0
+      shininess: 0.0
+      reflectance: 0.0
+      texrepeat: [1.0, 1.0]
+      texuniform: false
+    illumination:
+      single_occluder:
+        direction: [0.2, 0.5, -1.0]
+        diffuse_intensity: 0.9
+      corridor:
+        direction: [0.0, 0.25, -1.0]
+        diffuse_intensity: 0.95
+      directional: true
+      cast_shadows: false
+      ambient_rgb: [0.0, 0.0, 0.0]
+      specular_rgb: [0.0, 0.0, 0.0]
+      camera_exposure_rule: unchanged_renderer_default_v1
+    non_degeneracy_thresholds:
+      changed_controlled_pixel_fraction_minimum: 0.2
+      normalized_controlled_rgb_mad_minimum: 0.025
+      visible_surface_mean_luminance_minimum: 0.05
+      visible_surface_mean_luminance_maximum: 0.95
+      textured_surface_minimum_pixels: 100
+      textured_surface_luminance_std_minimum: 0.025
+      frequency_partner_minimum_ratio: 4.0
+  - profile_id: balanced_stripes_low_v1
+    profile_version: appearance_profile_v1
+    candidate_class: single_axis_candidate
+    freeze_eligible: true
+    axis_tags: [texture_family]
+    matched_control_profile_id: balanced_checker_low_v1
+    style_assignment_rule: balanced_cyclic_permutation_v1
+    palette:
+      single_occluder_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+      corridor_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [235, 70, 75]
+          background_rgb: [40, 150, 200]
+        - slot_id: style-slot-1
+          foreground_rgb: [60, 210, 110]
+          background_rgb: [210, 65, 180]
+        - slot_id: style-slot-2
+          foreground_rgb: [235, 190, 55]
+          background_rgb: [65, 75, 220]
+        - slot_id: style-slot-3
+          foreground_rgb: [180, 75, 220]
+          background_rgb: [70, 205, 190]
+    texture:
+      family: stripes
+      resolution: 128
+      cycles_per_tile: 4
+      orientation: axis_x_0_degrees
+      phase_rule: namespaced_integer_phase_v1
+      contrast_rule: exact_palette_slot_bytes_v1
+      surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
+      filtering: mujoco_linear_mipmap_nearest_v1
+    material:
+      specular: 0.0
+      shininess: 0.0
+      reflectance: 0.0
+      texrepeat: [1.0, 1.0]
+      texuniform: false
+    illumination:
+      single_occluder:
+        direction: [0.2, 0.5, -1.0]
+        diffuse_intensity: 0.9
+      corridor:
+        direction: [0.0, 0.25, -1.0]
+        diffuse_intensity: 0.95
+      directional: true
+      cast_shadows: false
+      ambient_rgb: [0.0, 0.0, 0.0]
+      specular_rgb: [0.0, 0.0, 0.0]
+      camera_exposure_rule: unchanged_renderer_default_v1
+    non_degeneracy_thresholds:
+      changed_controlled_pixel_fraction_minimum: 0.2
+      normalized_controlled_rgb_mad_minimum: 0.025
+      visible_surface_mean_luminance_minimum: 0.05
+      visible_surface_mean_luminance_maximum: 0.95
+      textured_surface_minimum_pixels: 100
+      textured_surface_luminance_std_minimum: 0.025
+      frequency_partner_minimum_ratio: 4.0
+  - profile_id: legacy_solid_alternate_v1
+    profile_version: appearance_profile_v1
+    candidate_class: legacy_regression_control
+    freeze_eligible: false
+    axis_tags: [control]
+    matched_control_profile_id: legacy_solid_alternate_v1
+    style_assignment_rule: fixed_semantic_regression_v1
+    palette:
+      single_occluder_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [26, 117, 89]
+          background_rgb: [26, 117, 89]
+        - slot_id: style-slot-1
+          foreground_rgb: [209, 179, 31]
+          background_rgb: [209, 179, 31]
+        - slot_id: style-slot-2
+          foreground_rgb: [122, 41, 173]
+          background_rgb: [122, 41, 173]
+      corridor_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [46, 107, 77]
+          background_rgb: [46, 107, 77]
+        - slot_id: style-slot-1
+          foreground_rgb: [179, 64, 140]
+          background_rgb: [179, 64, 140]
+        - slot_id: style-slot-2
+          foreground_rgb: [59, 140, 184]
+          background_rgb: [59, 140, 184]
+        - slot_id: style-slot-3
+          foreground_rgb: [209, 173, 46]
+          background_rgb: [209, 173, 46]
+    texture:
+      family: solid
+      resolution: 128
+      cycles_per_tile: 0
+      orientation: axis_x_0_degrees
+      phase_rule: namespaced_integer_phase_v1
+      contrast_rule: exact_palette_slot_bytes_v1
+      surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
+      filtering: mujoco_linear_mipmap_nearest_v1
+    material:
+      specular: 0.0
+      shininess: 0.0
+      reflectance: 0.0
+      texrepeat: [1.0, 1.0]
+      texuniform: false
+    illumination:
+      single_occluder:
+        direction: [0.2, 0.5, -1.0]
+        diffuse_intensity: 0.9
+      corridor:
+        direction: [0.0, 0.25, -1.0]
+        diffuse_intensity: 0.95
+      directional: true
+      cast_shadows: false
+      ambient_rgb: [0.0, 0.0, 0.0]
+      specular_rgb: [0.0, 0.0, 0.0]
+      camera_exposure_rule: unchanged_renderer_default_v1
+    non_degeneracy_thresholds:
+      changed_controlled_pixel_fraction_minimum: 0.2
+      normalized_controlled_rgb_mad_minimum: 0.025
+      visible_surface_mean_luminance_minimum: 0.05
+      visible_surface_mean_luminance_maximum: 0.95
+      textured_surface_minimum_pixels: 100
+      textured_surface_luminance_std_minimum: 0.025
+      frequency_partner_minimum_ratio: 4.0
+  - profile_id: legacy_solid_base_v1
+    profile_version: appearance_profile_v1
+    candidate_class: legacy_regression_control
+    freeze_eligible: false
+    axis_tags: [control]
+    matched_control_profile_id: legacy_solid_base_v1
+    style_assignment_rule: fixed_semantic_regression_v1
+    palette:
+      single_occluder_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [82, 92, 107]
+          background_rgb: [82, 92, 107]
+        - slot_id: style-slot-1
+          foreground_rgb: [199, 46, 31]
+          background_rgb: [199, 46, 31]
+        - slot_id: style-slot-2
+          foreground_rgb: [31, 92, 194]
+          background_rgb: [31, 92, 194]
+      corridor_slots:
+        - slot_id: style-slot-0
+          foreground_rgb: [77, 82, 92]
+          background_rgb: [77, 82, 92]
+        - slot_id: style-slot-1
+          foreground_rgb: [166, 56, 46]
+          background_rgb: [166, 56, 46]
+        - slot_id: style-slot-2
+          foreground_rgb: [41, 87, 173]
+          background_rgb: [41, 87, 173]
+        - slot_id: style-slot-3
+          foreground_rgb: [82, 148, 71]
+          background_rgb: [82, 148, 71]
+    texture:
+      family: solid
+      resolution: 128
+      cycles_per_tile: 0
+      orientation: axis_x_0_degrees
+      phase_rule: namespaced_integer_phase_v1
+      contrast_rule: exact_palette_slot_bytes_v1
+      surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
+      filtering: mujoco_linear_mipmap_nearest_v1
+    material:
+      specular: 0.0
+      shininess: 0.0
+      reflectance: 0.0
+      texrepeat: [1.0, 1.0]
+      texuniform: false
+    illumination:
+      single_occluder:
+        direction: [0.2, 0.5, -1.0]
+        diffuse_intensity: 0.9
+      corridor:
+        direction: [0.0, 0.25, -1.0]
+        diffuse_intensity: 0.95
+      directional: true
+      cast_shadows: false
+      ambient_rgb: [0.0, 0.0, 0.0]
+      specular_rgb: [0.0, 0.0, 0.0]
+      camera_exposure_rule: unchanged_renderer_default_v1
+    non_degeneracy_thresholds:
+      changed_controlled_pixel_fraction_minimum: 0.2
+      normalized_controlled_rgb_mad_minimum: 0.025
+      visible_surface_mean_luminance_minimum: 0.05
+      visible_surface_mean_luminance_maximum: 0.95
+      textured_surface_minimum_pixels: 100
+      textured_surface_luminance_std_minimum: 0.025
+      frequency_partner_minimum_ratio: 4.0

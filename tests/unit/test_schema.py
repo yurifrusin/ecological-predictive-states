@@ -27,7 +27,7 @@ def test_transition_and_manifest_round_trip(smoke_dataset: Path) -> None:
     transition_bytes = transition_path.read_bytes().rstrip(b"\n")
     transition = TransitionRecord.model_validate_json(transition_bytes)
     assert canonical_json_bytes(transition) == transition_bytes
-    assert manifest.schema_version == "0.1.0-dev.4"
+    assert manifest.schema_version == "0.1.0-dev.5"
     assert transition.schema_version == "0.1.0-dev.9"
 
 
@@ -35,8 +35,8 @@ def test_schema_version_matrix_advances_only_changed_wire_contracts(
     smoke_dataset: Path,
     corridor_dataset: Path,
 ) -> None:
-    assert load_config(Path("configs/benchmark_v0.yaml")).schema_version == "0.1.0-dev.2"
-    assert load_config(Path("configs/corridor_v0.yaml")).schema_version == "0.1.0-dev.2"
+    assert load_config(Path("configs/benchmark_v0.yaml")).schema_version == "0.1.0-dev.3"
+    assert load_config(Path("configs/corridor_v0.yaml")).schema_version == "0.1.0-dev.3"
     for root in (smoke_dataset, corridor_dataset):
         manifest = DatasetManifest.model_validate_json(
             (root / "manifest.json").read_text(encoding="utf-8")
@@ -44,8 +44,8 @@ def test_schema_version_matrix_advances_only_changed_wire_contracts(
         instrumentation = parse_privileged_instrumentation_json(
             (root / manifest.episodes[0].privileged_instrumentation.path).read_bytes()
         )
-        assert manifest.schema_version == "0.1.0-dev.4"
-        assert instrumentation.schema_version == "0.1.0-dev.9"
+        assert manifest.schema_version == "0.1.0-dev.5"
+        assert instrumentation.schema_version == "0.1.0-dev.10"
 
 
 def test_historical_transition_version_is_not_byte_compatible(smoke_dataset: Path) -> None:

@@ -104,7 +104,8 @@ class ForwardActionConfig(StrictConfigModel):
 
 
 class AppearanceConfig(StrictConfigModel):
-    variant: Literal["base", "alternate"]
+    registry_version: Literal["appearance_candidate_registry_v0"]
+    profile_id: str = Field(pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*_v[0-9]+$")
 
 
 class SampleRangeConfig(StrictConfigModel):
@@ -137,9 +138,9 @@ class CorridorGeometryConfig(StrictConfigModel):
 
 
 class SingleOccluderConfig(StrictConfigModel):
-    schema_version: Literal["0.1.0-dev.2"]
+    schema_version: Literal["0.1.0-dev.3"]
     scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
-    seed: int = Field(ge=0, lt=2**63)
+    seed: int = Field(ge=0, lt=2**64)
     render: RenderConfig
     camera: SingleOccluderCameraConfig
     action: LateralActionConfig
@@ -159,9 +160,9 @@ class SingleOccluderConfig(StrictConfigModel):
 
 
 class CorridorConfig(StrictConfigModel):
-    schema_version: Literal["0.1.0-dev.2"]
+    schema_version: Literal["0.1.0-dev.3"]
     scene_family: Literal[SceneFamily.CORRIDOR]
-    seed: int = Field(ge=0, lt=2**63)
+    seed: int = Field(ge=0, lt=2**64)
     render: RenderConfig
     geometry: CorridorGeometryConfig
     camera: CorridorCameraConfig
