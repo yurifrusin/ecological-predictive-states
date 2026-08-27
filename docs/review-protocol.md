@@ -85,7 +85,7 @@ The minimum private-evidence receipt records:
 - review profile;
 - evidence class;
 - private review-manifest logical root;
-- private bundle file SHA-256;
+- whole private-bundle file SHA-256;
 - aggregate source, candidate, and report roots;
 - reviewer access status;
 - coverage examined;
@@ -299,12 +299,17 @@ validity, and scientific review does not substitute for engineering review.
 
 ## Non-reconstructive public records
 
-For `PRIVATE_REVIEW_BUNDLE`, public records may disclose only aggregate roots, aggregate counts,
-aggregate coverage, stable finding IDs, dispositions, and retention or destruction status. They
-must not disclose hidden episode or item IDs, per-item hashes, private prompts or answers, private
-oracle labels, hidden renders, private rationales that reveal expected outputs, licensed source
-content, or metadata enabling reconstruction. Reviewers must not quote hidden content in public
-GitHub comments.
+For `PRIVATE_REVIEW_BUNDLE`, a public receipt may disclose only these non-reconstructive bindings:
+repository; PR number; exact reviewed SHA; review profile; evidence class; private review-manifest
+logical root; whole private-bundle file SHA-256; aggregate source, candidate, and report roots;
+aggregate counts and coverage; reviewer-access status; stable finding IDs and unresolved
+dispositions; and retention or destruction posture. These values bind the exact private evidence
+set without exposing its item-level contents.
+
+Public records must not disclose hidden episode or item IDs, per-item hashes, private prompts or
+answers, private oracle labels, hidden renders, private rationales that reveal expected outputs,
+licensed source content, or metadata enabling reconstruction. Reviewers must not quote hidden
+content in public GitHub comments.
 
 ## Closeout boundaries
 

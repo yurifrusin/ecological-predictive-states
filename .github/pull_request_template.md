@@ -1,6 +1,9 @@
 ## Submission identity
 
-- Role: `IMPLEMENTATION_AGENT` or `CORRECTION_IMPLEMENTER`
+- Repository:
+- Pull request:
+- Role: `IMPLEMENTATION_AGENT | CORRECTION_IMPLEMENTER | CLOSEOUT_AGENT`
+- `CLOSEOUT_AGENT` authority, if applicable: `NOT APPLICABLE | PENDING — NOT AUTHORISED`; requires a separately owner-authorised `CLOSEOUT_ONLY` submission and permits only the named closeout actions
 - Review profile: `PENDING`
 - Evidence class: `PENDING`
 - Closeout boundary: `PENDING`
@@ -35,14 +38,18 @@
 
 ### `PRIVATE_REVIEW_BUNDLE`
 
+- Repository, PR, exact SHA, review profile, and evidence class: use the submission identity above
 - Private review-manifest logical root: `PENDING`
-- Private bundle SHA-256: `PENDING`
-- Reviewer access: `PENDING`
-- Aggregate coverage: `PENDING`
+- Whole private-bundle file SHA-256: `PENDING`
+- Aggregate source/candidate/report roots: `PENDING`
+- Aggregate counts and coverage: `PENDING`
+- Reviewer-access status: `PENDING`
+- Unresolved dispositions: `PENDING`
+- Retention or destruction posture: `PENDING`
 - Non-reconstructive public receipt: `PENDING`
 
-Do not paste hidden prompts, labels, item IDs, per-item hashes, private renders, or licensed content
-into this PR.
+Do not paste hidden prompts, answers, labels, item IDs, per-item hashes, private renders, rationales,
+licensed content, or reconstructive metadata into this PR.
 
 ## Active reviews
 

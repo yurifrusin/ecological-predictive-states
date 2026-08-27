@@ -46,7 +46,10 @@ reviews and all later work packages. Evidence for an older rejected or abandoned
 canonicalised prospectively only through an owner-authorised `RECORD_ONLY_CLOSEOUT` documentation
 PR from current canonical `main`; records already present remain immutable.
 
-For `PRIVATE_REVIEW_BUNDLE`, public records must remain non-reconstructive. They may report aggregate
-roots, counts, coverage, stable finding IDs, dispositions, and retention or destruction status, but
-must not expose hidden item IDs, per-item hashes, prompts, answers, oracle labels, renders, licensed
-content, or metadata that permits reconstruction.
+For `PRIVATE_REVIEW_BUNDLE`, public records must remain non-reconstructive. They may report the
+receipt bindings for repository, PR number, exact reviewed SHA, review profile, evidence class,
+private review-manifest logical root, whole private-bundle file SHA-256, aggregate source/candidate/
+report roots, aggregate counts and coverage, reviewer-access status, stable finding IDs and
+unresolved dispositions, and retention or destruction posture. They must not expose hidden item
+IDs, per-item hashes, prompts, answers, oracle labels, renders, private rationales, licensed content,
+or metadata that permits reconstruction.
