@@ -106,7 +106,7 @@ HISTORICAL_ER9_DEV_7_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES = {
         "9a49722f9ccdade242d9e72b6707544a7b293e5d9850c0ab8bacaa526d75292b",
     ),
 }
-EXPECTED_DEV_8_CROSS_PLATFORM_BOUNDARY_HASHES = {
+NOT_VERIFIED_ER9_DEV_8_CROSS_PLATFORM_BOUNDARY_HASHES = {
     "single_occluder": (
         "203c074e745c47180b2be1c385712b2d4046319e1ba0251c8cc37957c85b57a7",
         "db4a039507db60e6baf16e3f09a47ba0fb059b30836440fb7ed346c413be301b",
@@ -116,7 +116,7 @@ EXPECTED_DEV_8_CROSS_PLATFORM_BOUNDARY_HASHES = {
         "02cca96eb7aa47dfbbae87a8c90eebe5c99b7d9686b6420c5050978f6d31f328",
     ),
 }
-EXPECTED_DEV_8_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES = {
+NOT_VERIFIED_ER9_DEV_8_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES = {
     "single_occluder": (
         "b29978dbee23c77a5b05402f39b85650bdfa6149238a3220ef58dc91b47a62fc",
         "6fb12d8fe4355fccb29d45befdc138fb5e20bf686d787f0c6d241a094c18b12d",
@@ -124,6 +124,26 @@ EXPECTED_DEV_8_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES = {
     "corridor": (
         "ab89d8eb8329b634a35de470337a552baaff8b25ef2344fed28e57f44eb5fb4a",
         "a9a5271000a73c2298ccc933c448ef1cc3ebbbace2cd4d14710091ae43230e44",
+    ),
+}
+EXPECTED_DEV_9_CROSS_PLATFORM_BOUNDARY_HASHES = {
+    "single_occluder": (
+        "5a6a4792a3554d3b7670c73ac3e2c4d1ed7c438e12f2dabe8065f9dbc230a2c8",
+        "485aadab9af42e8ee5ca2194da02eff26626d2b887050675de4fcb192cad3aba",
+    ),
+    "corridor": (
+        "ddbb23daf1f7e17c936e74fd68ad63075385dcfb7c3b60f810acc835e346b235",
+        "df0c356d09e3cd601a0c896c5b4b2df34fb52b21a9dccaaefea2d7a4f4570448",
+    ),
+}
+EXPECTED_DEV_9_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES = {
+    "single_occluder": (
+        "c41807b1245faa9fe1027584ca2dcc2e050956e6a4086bad783e74381abb611a",
+        "d9d2c91fe5fd10bf90fcff316dbf6c7956ef8e34baccb3b185971c0aa16192f9",
+    ),
+    "corridor": (
+        "4ff67bac73f9c01abe6fecd8263ff8d2eda1636b9222dd9f6fc7916c7e414d33",
+        "9c8a8e1a57d6d5c43b56690812ceafe8a25c662a1e2abfd3d1c2ef035ca0cbb3",
     ),
 }
 
@@ -186,11 +206,11 @@ def test_single_occluder_boundary_and_event_hashes_match_locked_cross_platform_r
     )
     assert (
         tuple(episode.oriented_boundary_sha256 for episode in manifest.episodes)
-        == (EXPECTED_DEV_8_CROSS_PLATFORM_BOUNDARY_HASHES["single_occluder"])
+        == (EXPECTED_DEV_9_CROSS_PLATFORM_BOUNDARY_HASHES["single_occluder"])
     )
     assert (
         tuple(episode.visibility_event_sha256 for episode in manifest.episodes)
-        == (EXPECTED_DEV_8_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES["single_occluder"])
+        == (EXPECTED_DEV_9_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES["single_occluder"])
     )
 
 
@@ -202,16 +222,18 @@ def test_corridor_boundary_and_event_hashes_match_locked_cross_platform_regressi
     )
     assert (
         tuple(episode.oriented_boundary_sha256 for episode in manifest.episodes)
-        == (EXPECTED_DEV_8_CROSS_PLATFORM_BOUNDARY_HASHES["corridor"])
+        == (EXPECTED_DEV_9_CROSS_PLATFORM_BOUNDARY_HASHES["corridor"])
     )
     assert (
         tuple(episode.visibility_event_sha256 for episode in manifest.episodes)
-        == (EXPECTED_DEV_8_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES["corridor"])
+        == (EXPECTED_DEV_9_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES["corridor"])
     )
 
 
 def test_historical_slice_1_identity_is_recorded_as_migration_evidence() -> None:
-    notes = Path("docs/IMPLEMENTATION_NOTES.md").read_text(encoding="utf-8")
+    notes = Path("docs/IMPLEMENTATION_NOTES.md").read_text(encoding="utf-8") + Path(
+        "docs/GATE_0B_SLICE_4_BOUNDARY_EVENTS.md"
+    ).read_text(encoding="utf-8")
     assert HISTORICAL_SLICE_1_TRANSITION_VERSION in notes
     assert HISTORICAL_SLICE_1_EPISODE_0_ECOLOGICAL_HASH in notes
     assert HISTORICAL_DEV_2_SINGLE_OCCLUDER_EPISODE_0_ECOLOGICAL_HASH in notes
@@ -237,6 +259,8 @@ def test_historical_slice_1_identity_is_recorded_as_migration_evidence() -> None
             REJECTED_PR9_DEV_6_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES,
             HISTORICAL_ER9_DEV_7_CROSS_PLATFORM_BOUNDARY_HASHES,
             HISTORICAL_ER9_DEV_7_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES,
+            NOT_VERIFIED_ER9_DEV_8_CROSS_PLATFORM_BOUNDARY_HASHES,
+            NOT_VERIFIED_ER9_DEV_8_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES,
         )
         for values in identity_group.values()
         for value in values

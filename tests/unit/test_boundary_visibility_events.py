@@ -80,6 +80,21 @@ def _point_attachment_evidence(z: float) -> RawAttachmentContractEvidence:
     return replace(evidence, pair_evidence=(pair,))
 
 
+def _attachment_cell_evidence(
+    manifold_type: str,
+    contact_world_min: tuple[float, float, float],
+    contact_world_max: tuple[float, float, float],
+) -> RawAttachmentContractEvidence:
+    evidence = _point_attachment_evidence(-2.0)
+    pair = replace(
+        evidence.pair_evidence[0],
+        contact_manifold_type=manifold_type,
+        contact_world_min=contact_world_min,
+        contact_world_max=contact_world_max,
+    )
+    return replace(evidence, pair_evidence=(pair,))
+
+
 def test_finite_foreground_contour_is_owned_by_surface_revealing_background() -> None:
     model, data = _foreground_background_model()
     transport = compute_analytic_transport(
@@ -168,6 +183,52 @@ def test_point_attachment_one_binary64_step_beyond_epsilon_is_in_front() -> None
         2,
         1,
     )
+
+
+@pytest.mark.parametrize(
+    ("manifold_type", "contact_world_min", "contact_world_max"),
+    [
+        (
+            "axis_aligned_segment",
+            (0.0, 0.0, -RAY_DIRECTION_EPSILON),
+            (0.0, 0.0, RAY_DIRECTION_EPSILON),
+        ),
+        (
+            "axis_aligned_rectangle",
+            (-RAY_DIRECTION_EPSILON, 0.0, -RAY_DIRECTION_EPSILON),
+            (RAY_DIRECTION_EPSILON, 0.0, RAY_DIRECTION_EPSILON),
+        ),
+        (
+            "axis_aligned_overlap_volume",
+            (-RAY_DIRECTION_EPSILON, -RAY_DIRECTION_EPSILON, -RAY_DIRECTION_EPSILON),
+            (RAY_DIRECTION_EPSILON, RAY_DIRECTION_EPSILON, RAY_DIRECTION_EPSILON),
+        ),
+    ],
+)
+def test_positive_dimensional_contact_cell_threshold_requires_an_in_cell_witness(
+    manifold_type: str,
+    contact_world_min: tuple[float, float, float],
+    contact_world_max: tuple[float, float, float],
+) -> None:
+    assignment = np.asarray([[0, 1]], dtype=np.int32)
+    at_threshold = _attachment_cell_evidence(
+        manifold_type,
+        contact_world_min,
+        contact_world_max,
+    )
+    assert not projected_attachment_locus_edges(assignment, at_threshold, _camera(), 2, 1)
+
+    one_step_in_front = (
+        contact_world_min[0],
+        contact_world_min[1],
+        float(np.nextafter(-RAY_DIRECTION_EPSILON, -np.inf)),
+    )
+    beyond_threshold = _attachment_cell_evidence(
+        manifold_type,
+        one_step_in_front,
+        contact_world_max,
+    )
+    assert projected_attachment_locus_edges(assignment, beyond_threshold, _camera(), 2, 1)
 
 
 @pytest.mark.parametrize(

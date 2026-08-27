@@ -541,7 +541,7 @@ def _expected_attachment_contract(
         projection_in_front_rule=contract.projection_in_front_rule,  # type: ignore[arg-type]
         projection_in_front_epsilon=contract.projection_in_front_epsilon,
         feasibility_rule=contract.feasibility_rule,  # type: ignore[arg-type]
-        feasibility_slack=contract.feasibility_slack,
+        image_feasibility_slack=contract.image_feasibility_slack,
         edge_lattice_association_rule=contract.edge_lattice_association_rule,  # type: ignore[arg-type]
         endpoint_tie_rule=contract.endpoint_tie_rule,  # type: ignore[arg-type]
         multi_surface_rule=contract.multi_surface_rule,  # type: ignore[arg-type]

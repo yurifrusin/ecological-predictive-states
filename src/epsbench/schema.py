@@ -382,14 +382,14 @@ class OrientedBoundaryElement(StrictModel):
 
 class AvailableOrientedBoundaryOwnership(StrictModel):
     status: Literal["available"]
-    method: Literal["analytic_oriented_boundary_ownership_v3"]
+    method: Literal["analytic_oriented_boundary_ownership_v4"]
     raster_width: int = Field(gt=0)
     raster_height: int = Field(gt=0)
     coordinate_convention: EdgeLatticeCoordinateConvention
     boundary_kind_domain: Literal["oriented_boundary_kind_domain_v1"]
     owner_side_domain: Literal["oriented_boundary_owner_side_domain_v1"]
-    attachment_rule: Literal["projected_compiled_contact_locus_v2"]
-    attachment_public_contract_version: Literal["scene_attachment_public_contract_v3"]
+    attachment_rule: Literal["projected_compiled_contact_locus_v3"]
+    attachment_public_contract_version: Literal["scene_attachment_public_contract_v4"]
     attachment_contact_manifold_rule: Literal["compiled_axis_aligned_intersection_cell_v1"]
     attachment_supported_contact_manifold_types: tuple[
         Literal["point"],
@@ -399,7 +399,9 @@ class AvailableOrientedBoundaryOwnership(StrictModel):
     ]
     attachment_projection_convention: Literal["analytic_pinhole_pixel_centre_v1"]
     attachment_projection_in_front_rule: Literal["strict_forward_distance_greater_than_epsilon_v1"]
-    attachment_feasibility_rule: Literal["per_constraint_inclusive_slack_except_strict_in_front_v1"]
+    attachment_feasibility_rule: Literal[
+        "image_constraints_only_slack_strict_front_and_cell_bounds_exact_v1"
+    ]
     attachment_edge_lattice_association_rule: Literal[
         "sample_connection_segment_intersects_projected_contact_cell_v1"
     ]
@@ -725,7 +727,7 @@ DenseOpticalTransport = Annotated[
 
 
 class TransitionRecord(StrictModel):
-    schema_version: Literal["0.1.0-dev.8"]
+    schema_version: Literal["0.1.0-dev.9"]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     action: Action
     surfaces: tuple[SurfaceReference, ...] = Field(min_length=1)
@@ -1094,7 +1096,7 @@ class PrivilegedAttachmentPairEvidence(StrictModel):
 
 
 class PrivilegedAttachmentContractEvidence(StrictModel):
-    method: Literal["projected_compiled_contact_locus_v2"]
+    method: Literal["projected_compiled_contact_locus_v3"]
     contact_manifold_rule: Literal["compiled_axis_aligned_intersection_cell_v1"]
     supported_contact_manifold_types: tuple[
         Literal["point"],
@@ -1105,8 +1107,8 @@ class PrivilegedAttachmentContractEvidence(StrictModel):
     projection_convention: Literal["analytic_pinhole_pixel_centre_v1"]
     projection_in_front_rule: Literal["strict_forward_distance_greater_than_epsilon_v1"]
     projection_in_front_epsilon: float = Field(ge=1e-12, le=1e-12)
-    feasibility_rule: Literal["per_constraint_inclusive_slack_except_strict_in_front_v1"]
-    feasibility_slack: float = Field(ge=1e-12, le=1e-12)
+    feasibility_rule: Literal["image_constraints_only_slack_strict_front_and_cell_bounds_exact_v1"]
+    image_feasibility_slack: float = Field(ge=1e-12, le=1e-12)
     edge_lattice_association_rule: Literal[
         "sample_connection_segment_intersects_projected_contact_cell_v1"
     ]
@@ -1163,7 +1165,7 @@ class PrivilegedBoundaryElementEvidence(StrictModel):
 
 
 class BoundaryVisibilityDiagnostics(StrictModel):
-    boundary_method: Literal["analytic_oriented_boundary_ownership_v3"]
+    boundary_method: Literal["analytic_oriented_boundary_ownership_v4"]
     counterfactual_continuation_rule: Literal["counterfactual_nearest_surface_continuation_v1"]
     counterfactual_tie_rule: Literal["exactly_one_side_continues_v1"]
     counterfactual_ray_direction_epsilon: float = Field(ge=1e-12, le=1e-12)
@@ -1190,7 +1192,7 @@ class BoundaryVisibilityDiagnostics(StrictModel):
 
 
 class SingleOccluderInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.8"]
+    schema_version: Literal["0.1.0-dev.9"]
     scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]
@@ -1241,7 +1243,7 @@ class SingleOccluderInstrumentation(StrictModel):
 
 
 class CorridorInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.8"]
+    schema_version: Literal["0.1.0-dev.9"]
     scene_family: Literal[SceneFamily.CORRIDOR]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]

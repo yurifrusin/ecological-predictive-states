@@ -22,16 +22,18 @@ from epsbench.annotations.optical_transport import (
     validate_analytic_camera,
 )
 
-ORIENTED_BOUNDARY_METHOD: Final = "analytic_oriented_boundary_ownership_v3"
+ORIENTED_BOUNDARY_METHOD: Final = "analytic_oriented_boundary_ownership_v4"
 EDGE_LATTICE_CONVENTION: Final = "four_neighbour_sample_edge_lattice_v1"
 BOUNDARY_KIND_DOMAIN: Final = "oriented_boundary_kind_domain_v1"
 OWNER_SIDE_DOMAIN: Final = "oriented_boundary_owner_side_domain_v1"
-ATTACHMENT_PUBLIC_CONTRACT_VERSION: Final = "scene_attachment_public_contract_v3"
-ATTACHMENT_RULE: Final = "projected_compiled_contact_locus_v2"
+ATTACHMENT_PUBLIC_CONTRACT_VERSION: Final = "scene_attachment_public_contract_v4"
+ATTACHMENT_RULE: Final = "projected_compiled_contact_locus_v3"
 ATTACHMENT_CONTACT_MANIFOLD_RULE: Final = "compiled_axis_aligned_intersection_cell_v1"
 ATTACHMENT_PROJECTION_CONVENTION: Final = "analytic_pinhole_pixel_centre_v1"
 ATTACHMENT_PROJECTION_IN_FRONT_RULE: Final = "strict_forward_distance_greater_than_epsilon_v1"
-ATTACHMENT_FEASIBILITY_RULE: Final = "per_constraint_inclusive_slack_except_strict_in_front_v1"
+ATTACHMENT_FEASIBILITY_RULE: Final = (
+    "image_constraints_only_slack_strict_front_and_cell_bounds_exact_v1"
+)
 ATTACHMENT_EDGE_ASSOCIATION_RULE: Final = (
     "sample_connection_segment_intersects_projected_contact_cell_v1"
 )
@@ -44,7 +46,7 @@ SUPPORTED_CONTACT_MANIFOLD_TYPES: Final = (
     "axis_aligned_overlap_volume",
 )
 ATTACHMENT_CONTACT_TOLERANCE: Final = 1e-12
-ATTACHMENT_FEASIBILITY_SLACK: Final = 1e-12
+ATTACHMENT_IMAGE_FEASIBILITY_SLACK: Final = 1e-12
 ATTACHMENT_ROTATION_TOLERANCE: Final = 1e-12
 ATTACHMENT_IMAGE_TOLERANCE_PIXELS: Final = 0.5
 COUNTERFACTUAL_CONTINUATION_RULE: Final = "counterfactual_nearest_surface_continuation_v1"
@@ -100,7 +102,7 @@ class RawAttachmentContractEvidence:
     projection_in_front_rule: str
     projection_in_front_epsilon: float
     feasibility_rule: str
-    feasibility_slack: float
+    image_feasibility_slack: float
     edge_lattice_association_rule: str
     endpoint_tie_rule: str
     multi_surface_rule: str
@@ -285,7 +287,7 @@ def verify_attachment_contract(
         projection_in_front_rule=ATTACHMENT_PROJECTION_IN_FRONT_RULE,
         projection_in_front_epsilon=RAY_DIRECTION_EPSILON,
         feasibility_rule=ATTACHMENT_FEASIBILITY_RULE,
-        feasibility_slack=ATTACHMENT_FEASIBILITY_SLACK,
+        image_feasibility_slack=ATTACHMENT_IMAGE_FEASIBILITY_SLACK,
         edge_lattice_association_rule=ATTACHMENT_EDGE_ASSOCIATION_RULE,
         endpoint_tie_rule=ATTACHMENT_ENDPOINT_TIE_RULE,
         multi_surface_rule=ATTACHMENT_MULTI_SURFACE_RULE,
@@ -395,10 +397,10 @@ def _contact_cell_projects_to_edge(
             float(np.nextafter(-RAY_DIRECTION_EPSILON, -np.inf)),
             0.0,
         ),
-        (np.asarray((-1.0, 0.0, -u_min)), 0.0, ATTACHMENT_FEASIBILITY_SLACK),
-        (np.asarray((1.0, 0.0, u_max)), 0.0, ATTACHMENT_FEASIBILITY_SLACK),
-        (np.asarray((0.0, 1.0, -v_min)), 0.0, ATTACHMENT_FEASIBILITY_SLACK),
-        (np.asarray((0.0, -1.0, v_max)), 0.0, ATTACHMENT_FEASIBILITY_SLACK),
+        (np.asarray((-1.0, 0.0, -u_min)), 0.0, ATTACHMENT_IMAGE_FEASIBILITY_SLACK),
+        (np.asarray((1.0, 0.0, u_max)), 0.0, ATTACHMENT_IMAGE_FEASIBILITY_SLACK),
+        (np.asarray((0.0, 1.0, -v_min)), 0.0, ATTACHMENT_IMAGE_FEASIBILITY_SLACK),
+        (np.asarray((0.0, -1.0, v_max)), 0.0, ATTACHMENT_IMAGE_FEASIBILITY_SLACK),
     )
     rows: list[npt.NDArray[np.float64]] = []
     limits: list[float] = []
@@ -412,10 +414,10 @@ def _contact_cell_projects_to_edge(
         upper_bound[index] = 1.0
         rows.append(upper_bound)
         limits.append(1.0)
-        feasibility_slacks.append(ATTACHMENT_FEASIBILITY_SLACK)
+        feasibility_slacks.append(0.0)
         rows.append(-upper_bound)
         limits.append(0.0)
-        feasibility_slacks.append(ATTACHMENT_FEASIBILITY_SLACK)
+        feasibility_slacks.append(0.0)
     return _bounded_halfspace_feasible(
         np.asarray(rows, dtype=np.float64).reshape(len(rows), dimensions),
         np.asarray(limits, dtype=np.float64),

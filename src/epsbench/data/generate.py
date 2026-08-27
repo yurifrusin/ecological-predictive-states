@@ -614,7 +614,7 @@ def _attachment_contract_evidence(
         projection_in_front_rule=contract.projection_in_front_rule,  # type: ignore[arg-type]
         projection_in_front_epsilon=contract.projection_in_front_epsilon,
         feasibility_rule=contract.feasibility_rule,  # type: ignore[arg-type]
-        feasibility_slack=contract.feasibility_slack,
+        image_feasibility_slack=contract.image_feasibility_slack,
         edge_lattice_association_rule=contract.edge_lattice_association_rule,  # type: ignore[arg-type]
         endpoint_tie_rule=contract.endpoint_tie_rule,  # type: ignore[arg-type]
         multi_surface_rule=contract.multi_surface_rule,  # type: ignore[arg-type]
@@ -886,7 +886,7 @@ def _generate_single_occluder_episode(
     if not relation_frame_indices:
         raise RuntimeError("counterfactual oracle found no foreground/background occlusion")
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.8",
+        schema_version="0.1.0-dev.9",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -915,7 +915,7 @@ def _generate_single_occluder_episode(
     write_canonical_json(transition_path, transition)
 
     instrumentation = SingleOccluderInstrumentation(
-        schema_version="0.1.0-dev.8",
+        schema_version="0.1.0-dev.9",
         scene_family=SceneFamily.SINGLE_OCCLUDER,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,
@@ -1054,7 +1054,7 @@ def _generate_corridor_episode(
         analytic_transport,
     )
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.8",
+        schema_version="0.1.0-dev.9",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -1106,7 +1106,7 @@ def _generate_corridor_episode(
             )
         )
     instrumentation = CorridorInstrumentation(
-        schema_version="0.1.0-dev.8",
+        schema_version="0.1.0-dev.9",
         scene_family=SceneFamily.CORRIDOR,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,
