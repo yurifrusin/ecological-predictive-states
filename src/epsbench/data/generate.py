@@ -22,6 +22,11 @@ from epsbench.annotations import (
     ANALYTIC_BOUNDARY_WIDTH_PIXELS,
     ANALYTIC_SURFACE_INTERSECTION_RULE,
     ANALYTIC_TRANSPORT_METHOD,
+    ATTACHMENT_CONTACT_MANIFOLD_RULE,
+    ATTACHMENT_EDGE_ASSOCIATION_RULE,
+    ATTACHMENT_ENDPOINT_TIE_RULE,
+    ATTACHMENT_MULTI_SURFACE_RULE,
+    ATTACHMENT_PROJECTION_CONVENTION,
     ATTACHMENT_PUBLIC_CONTRACT_VERSION,
     ATTACHMENT_RULE,
     BEFORE_EVENT_CODE_DOMAIN,
@@ -41,6 +46,7 @@ from epsbench.annotations import (
     OWNER_SIDE_DOMAIN,
     RAY_DIRECTION_EPSILON,
     SILHOUETTE_RULE,
+    SUPPORTED_CONTACT_MANIFOLD_TYPES,
     TARGET_VISIBILITY_RULE,
     VISIBILITY_EVENT_METHOD,
     VISIBILITY_MINIMUM_TOLERANCE_SCALE,
@@ -439,6 +445,12 @@ def _write_oriented_boundaries(
         owner_side_domain=OWNER_SIDE_DOMAIN,
         attachment_rule=ATTACHMENT_RULE,
         attachment_public_contract_version=ATTACHMENT_PUBLIC_CONTRACT_VERSION,
+        attachment_contact_manifold_rule=ATTACHMENT_CONTACT_MANIFOLD_RULE,
+        attachment_supported_contact_manifold_types=SUPPORTED_CONTACT_MANIFOLD_TYPES,
+        attachment_projection_convention=ATTACHMENT_PROJECTION_CONVENTION,
+        attachment_edge_lattice_association_rule=ATTACHMENT_EDGE_ASSOCIATION_RULE,
+        attachment_endpoint_tie_rule=ATTACHMENT_ENDPOINT_TIE_RULE,
+        attachment_multi_surface_rule=ATTACHMENT_MULTI_SURFACE_RULE,
         numerical_contract_sha256=compute_boundary_numerical_contract_hash(),
         counterfactual_continuation_rule=COUNTERFACTUAL_CONTINUATION_RULE,
         counterfactual_tie_rule=COUNTERFACTUAL_TIE_RULE,
@@ -592,8 +604,15 @@ def _attachment_contract_evidence(
     contract = analysis.attachment_contract
     return PrivilegedAttachmentContractEvidence(
         method=contract.method,  # type: ignore[arg-type]
+        contact_manifold_rule=contract.contact_manifold_rule,  # type: ignore[arg-type]
+        supported_contact_manifold_types=contract.supported_contact_manifold_types,  # type: ignore[arg-type]
+        projection_convention=contract.projection_convention,  # type: ignore[arg-type]
+        edge_lattice_association_rule=contract.edge_lattice_association_rule,  # type: ignore[arg-type]
+        endpoint_tie_rule=contract.endpoint_tie_rule,  # type: ignore[arg-type]
+        multi_surface_rule=contract.multi_surface_rule,  # type: ignore[arg-type]
         contact_tolerance=contract.contact_tolerance,
         rotation_tolerance=contract.rotation_tolerance,
+        image_tolerance_pixels=contract.image_tolerance_pixels,
         geom_types=contract.geom_types,  # type: ignore[arg-type]
         geom_world_rotations_row_major=contract.geom_world_rotations_row_major,
         pair_evidence=tuple(
@@ -630,6 +649,7 @@ def _boundary_visibility_diagnostics(
                 positive_counterfactual_next_raw_geom_id=(
                     element.positive_counterfactual_next_raw_geom_id
                 ),
+                on_projected_attachment_locus=(element.on_projected_attachment_locus),
             )
         )
     return BoundaryVisibilityDiagnostics(
@@ -656,6 +676,7 @@ def _boundary_visibility_diagnostics(
 
 def _boundary_derived_occlusion(
     boundary: AvailableOrientedBoundaryOwnership,
+    oracle_rule: str,
 ) -> AvailableOcclusionAnnotation:
     frames_by_pair: dict[tuple[str, str], set[int]] = {}
     for element in boundary.elements:
@@ -674,7 +695,7 @@ def _boundary_derived_occlusion(
         frames_by_pair.setdefault((owner, affected), set()).add(element.frame_index)
     return AvailableOcclusionAnnotation(
         status="available",
-        oracle_rule="oriented_boundary_ownership_v1",
+        oracle_rule=oracle_rule,  # type: ignore[arg-type]
         relations=tuple(
             OcclusionRelation(
                 occluder_surface_id=owner,
@@ -857,7 +878,7 @@ def _generate_single_occluder_episode(
     if not relation_frame_indices:
         raise RuntimeError("counterfactual oracle found no foreground/background occlusion")
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.6",
+        schema_version="0.1.0-dev.7",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -868,16 +889,9 @@ def _generate_single_occluder_episode(
         region_mask_changes=mask_changes,
         oriented_boundary_ownership=oriented_boundaries,
         ecological_visibility_events=visibility_events,
-        occlusion=AvailableOcclusionAnnotation(
-            status="available",
-            oracle_rule="counterfactual_occluder_exclusion_v1",
-            relations=(
-                OcclusionRelation(
-                    occluder_surface_id=references["occluding_surface"].surface_id,
-                    occluded_surface_id=references["background_surface"].surface_id,
-                    frame_indices=tuple(relation_frame_indices),  # type: ignore[arg-type]
-                ),
-            ),
+        occlusion=_boundary_derived_occlusion(
+            oriented_boundaries,
+            "oriented_boundary_ownership_with_counterfactual_crosscheck_v1",
         ),
         boundary_structures=boundaries,
         analytic_optical_transport=analytic_transport,
@@ -893,7 +907,7 @@ def _generate_single_occluder_episode(
     write_canonical_json(transition_path, transition)
 
     instrumentation = SingleOccluderInstrumentation(
-        schema_version="0.1.0-dev.6",
+        schema_version="0.1.0-dev.7",
         scene_family=SceneFamily.SINGLE_OCCLUDER,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,
@@ -1032,7 +1046,7 @@ def _generate_corridor_episode(
         analytic_transport,
     )
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.6",
+        schema_version="0.1.0-dev.7",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -1043,7 +1057,10 @@ def _generate_corridor_episode(
         region_mask_changes=mask_changes,
         oriented_boundary_ownership=oriented_boundaries,
         ecological_visibility_events=visibility_events,
-        occlusion=_boundary_derived_occlusion(oriented_boundaries),
+        occlusion=_boundary_derived_occlusion(
+            oriented_boundaries,
+            "oriented_boundary_ownership_complete_v2",
+        ),
         boundary_structures=boundaries,
         analytic_optical_transport=analytic_transport,
         ecological_label_sha256="0" * 64,
@@ -1081,7 +1098,7 @@ def _generate_corridor_episode(
             )
         )
     instrumentation = CorridorInstrumentation(
-        schema_version="0.1.0-dev.6",
+        schema_version="0.1.0-dev.7",
         scene_family=SceneFamily.CORRIDOR,
         episode_id=episode_id,
         appearance_variant=config.appearance.variant,

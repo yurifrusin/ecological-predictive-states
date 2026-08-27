@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +48,7 @@ def _artifact(payload: dict[str, Any]) -> Any:
     return ArtifactRecord.model_validate(payload, strict=False)
 
 
-def test_single_occluder_boundary_owner_and_events_match_counterfactual_relation(
+def test_single_occluder_complete_graph_and_events_match_oriented_ownership(
     smoke_dataset: Path,
 ) -> None:
     transition = _transition(smoke_dataset)
@@ -57,7 +58,6 @@ def test_single_occluder_boundary_owner_and_events_match_counterfactual_relation
     assert any(item.kind == BoundaryKind.OCCLUDING_CONTOUR for item in boundary.elements)
     assert any(item.kind == BoundaryKind.ATTACHED_JUNCTION for item in boundary.elements)
     assert isinstance(transition.occlusion, AvailableOcclusionAnnotation)
-    relation = transition.occlusion.relations[0]
     owned_pairs = {
         (
             item.owner_surface_id,
@@ -69,20 +69,86 @@ def test_single_occluder_boundary_owner_and_events_match_counterfactual_relation
         for item in boundary.elements
         if item.kind == BoundaryKind.OCCLUDING_CONTOUR
     }
-    assert all(
-        (
-            relation.occluder_surface_id,
-            relation.occluded_surface_id,
-            frame_index,
-        )
-        in owned_pairs
+    declared_pairs = {
+        (relation.occluder_surface_id, relation.occluded_surface_id, frame_index)
+        for relation in transition.occlusion.relations
         for frame_index in relation.frame_indices
+    }
+    assert transition.occlusion.oracle_rule == (
+        "oriented_boundary_ownership_with_counterfactual_crosscheck_v1"
     )
+    assert declared_pairs == owned_pairs
     summaries = transition.ecological_visibility_events.occluding_event_summaries
     assert {item.kind for item in summaries} == {"accretion", "deletion"}
-    assert all(item.owner_surface_id == relation.occluder_surface_id for item in summaries)
-    assert all(item.affected_surface_id == relation.occluded_surface_id for item in summaries)
+    relation_pairs = {
+        (item.occluder_surface_id, item.occluded_surface_id)
+        for item in transition.occlusion.relations
+    }
+    assert {(item.owner_surface_id, item.affected_surface_id) for item in summaries}.issubset(
+        relation_pairs
+    )
     assert all(item.pixel_count > 0 for item in summaries)
+
+
+def test_event_summary_counts_exactly_match_corrected_dense_maps(
+    smoke_dataset: Path,
+) -> None:
+    transition = _transition(smoke_dataset)
+    label_to_surface = {
+        surface.segmentation_label: surface.surface_id for surface in transition.surfaces
+    }
+    observed: Counter[tuple[str, str, str]] = Counter()
+    for kind, direction in (
+        ("deletion", transition.ecological_visibility_events.before_fate),
+        ("accretion", transition.ecological_visibility_events.after_origin),
+    ):
+        codes = np.load(smoke_dataset / direction.event_codes.path, allow_pickle=False)
+        affected = np.load(
+            smoke_dataset / direction.affected_surface_labels.path,
+            allow_pickle=False,
+        )
+        owner = np.load(
+            smoke_dataset / direction.owner_surface_labels.path,
+            allow_pickle=False,
+        )
+        for affected_label, owner_label in zip(
+            affected[codes == 1].tolist(),
+            owner[codes == 1].tolist(),
+            strict=True,
+        ):
+            observed[
+                (
+                    kind,
+                    label_to_surface[int(affected_label)],
+                    label_to_surface[int(owner_label)],
+                )
+            ] += 1
+    declared = {
+        (item.kind, item.affected_surface_id, item.owner_surface_id): item.pixel_count
+        for item in transition.ecological_visibility_events.occluding_event_summaries
+    }
+    assert dict(observed) == declared
+
+
+def test_same_attached_pair_has_local_base_attachment_and_panel_owned_side_contour(
+    benchmark_config: SingleOccluderConfig,
+) -> None:
+    first = compute_single_occluder_boundary_visibility(benchmark_config)
+    second = compute_single_occluder_boundary_visibility(benchmark_config)
+    assert first.boundary_elements == second.boundary_elements
+    pair_elements = [
+        item
+        for item in first.boundary_elements
+        if {item.negative_raw_geom_id, item.positive_raw_geom_id} == {0, 2}
+    ]
+    assert any(
+        item.kind == "attached_junction" and item.on_projected_attachment_locus
+        for item in pair_elements
+    )
+    lateral = [item for item in pair_elements if item.kind == "occluding_contour"]
+    assert lateral
+    assert {item.owner_raw_geom_id for item in lateral} == {2}
+    assert all(not item.on_projected_attachment_locus for item in lateral)
 
 
 def test_reversed_lateral_action_reverses_accretion_and_deletion_sides(
@@ -114,6 +180,22 @@ def test_reversed_lateral_action_reverses_accretion_and_deletion_sides(
     assert reverse_deletion_column > reverse_accretion_column
     assert forward_deletion_column == pytest.approx(reverse_accretion_column)
     assert forward_accretion_column == pytest.approx(reverse_deletion_column)
+    forward_summaries = {
+        (item.kind, item.affected_raw_geom_id, item.owner_raw_geom_id): item.pixel_count
+        for item in forward.event_summaries
+    }
+    reversed_summaries = {
+        (item.kind, item.affected_raw_geom_id, item.owner_raw_geom_id): item.pixel_count
+        for item in reversed_analysis.event_summaries
+    }
+    assert {
+        (
+            "accretion" if kind == "deletion" else "deletion",
+            affected,
+            owner,
+        ): count
+        for (kind, affected, owner), count in forward_summaries.items()
+    } == reversed_summaries
 
 
 def test_corridor_attached_seams_have_no_occluding_contour_or_causal_events(
@@ -130,7 +212,7 @@ def test_corridor_attached_seams_have_no_occluding_contour_or_causal_events(
     )
     assert transition.ecological_visibility_events.occluding_event_summaries == ()
     assert isinstance(transition.occlusion, AvailableOcclusionAnnotation)
-    assert transition.occlusion.oracle_rule == "oriented_boundary_ownership_v1"
+    assert transition.occlusion.oracle_rule == "oriented_boundary_ownership_complete_v2"
     assert transition.occlusion.relations == ()
 
 
@@ -322,6 +404,24 @@ def test_fully_rehashed_attachment_geometry_evidence_corruption_is_rejected(
     shutil.copytree(smoke_dataset, broken)
     transition, instrumentation = load_episode_payloads(broken, 0)
     instrumentation["attachment_contract"]["pair_evidence"][0]["axis_interval_gaps"][0] += 0.01
+    commit_episode_payloads(broken, 0, transition, instrumentation)
+    with pytest.raises(DatasetValidationError, match="attachment contract"):
+        validate_dataset(broken)
+
+
+def test_fully_rehashed_attachment_locus_corruption_is_rejected(
+    smoke_dataset: Path,
+    tmp_path: Path,
+) -> None:
+    broken = tmp_path / "attachment-locus"
+    shutil.copytree(smoke_dataset, broken)
+    transition, instrumentation = load_episode_payloads(broken, 0)
+    pair = next(
+        item
+        for item in instrumentation["attachment_contract"]["pair_evidence"]
+        if item["observed_contact"]
+    )
+    pair["contact_world_max"][0] -= 0.01
     commit_episode_payloads(broken, 0, transition, instrumentation)
     with pytest.raises(DatasetValidationError, match="attachment contract"):
         validate_dataset(broken)

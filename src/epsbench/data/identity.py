@@ -4,6 +4,7 @@ from typing import Any
 
 from epsbench.annotations import (
     ATTACHMENT_CONTACT_TOLERANCE,
+    ATTACHMENT_IMAGE_TOLERANCE_PIXELS,
     ATTACHMENT_ROTATION_TOLERANCE,
     RAY_DIRECTION_EPSILON,
 )
@@ -111,6 +112,7 @@ def boundary_numerical_contract_domain() -> dict[str, Any]:
     return {
         "attachment_contact_tolerance": ATTACHMENT_CONTACT_TOLERANCE,
         "attachment_rotation_tolerance": ATTACHMENT_ROTATION_TOLERANCE,
+        "attachment_image_tolerance_pixels": ATTACHMENT_IMAGE_TOLERANCE_PIXELS,
         "counterfactual_ray_direction_epsilon": RAY_DIRECTION_EPSILON,
     }
 
@@ -133,6 +135,16 @@ def oriented_boundary_domain(
         "owner_side_domain": boundary.owner_side_domain,
         "attachment_rule": boundary.attachment_rule,
         "attachment_public_contract_version": boundary.attachment_public_contract_version,
+        "attachment_contact_manifold_rule": boundary.attachment_contact_manifold_rule,
+        "attachment_supported_contact_manifold_types": list(
+            boundary.attachment_supported_contact_manifold_types
+        ),
+        "attachment_projection_convention": boundary.attachment_projection_convention,
+        "attachment_edge_lattice_association_rule": (
+            boundary.attachment_edge_lattice_association_rule
+        ),
+        "attachment_endpoint_tie_rule": boundary.attachment_endpoint_tie_rule,
+        "attachment_multi_surface_rule": boundary.attachment_multi_surface_rule,
         "numerical_contract_sha256": boundary.numerical_contract_sha256,
         "counterfactual_continuation_rule": boundary.counterfactual_continuation_rule,
         "counterfactual_tie_rule": boundary.counterfactual_tie_rule,

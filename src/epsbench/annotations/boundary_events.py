@@ -13,25 +13,41 @@ import numpy as np
 import numpy.typing as npt
 
 from epsbench.annotations.optical_transport import (
+    RAY_DIRECTION_EPSILON,
     AnalyticCamera,
     AnalyticTransportArrays,
     TransportReasonCode,
     counterfactual_surface_assignments,
+    focal_scales_from_vertical_fov,
 )
 
-ORIENTED_BOUNDARY_METHOD: Final = "analytic_oriented_boundary_ownership_v1"
+ORIENTED_BOUNDARY_METHOD: Final = "analytic_oriented_boundary_ownership_v2"
 EDGE_LATTICE_CONVENTION: Final = "four_neighbour_sample_edge_lattice_v1"
 BOUNDARY_KIND_DOMAIN: Final = "oriented_boundary_kind_domain_v1"
 OWNER_SIDE_DOMAIN: Final = "oriented_boundary_owner_side_domain_v1"
-ATTACHMENT_PUBLIC_CONTRACT_VERSION: Final = "scene_attachment_public_contract_v1"
-ATTACHMENT_RULE: Final = "compiled_axis_aligned_plane_box_and_box_contact_v1"
+ATTACHMENT_PUBLIC_CONTRACT_VERSION: Final = "scene_attachment_public_contract_v2"
+ATTACHMENT_RULE: Final = "projected_compiled_contact_locus_v1"
+ATTACHMENT_CONTACT_MANIFOLD_RULE: Final = "compiled_axis_aligned_intersection_cell_v1"
+ATTACHMENT_PROJECTION_CONVENTION: Final = "analytic_pinhole_pixel_centre_v1"
+ATTACHMENT_EDGE_ASSOCIATION_RULE: Final = (
+    "sample_connection_segment_intersects_projected_contact_cell_v1"
+)
+ATTACHMENT_ENDPOINT_TIE_RULE: Final = "inclusive_contact_endpoints_v1"
+ATTACHMENT_MULTI_SURFACE_RULE: Final = "multi_surface_ambiguity_precedes_attachment_v1"
+SUPPORTED_CONTACT_MANIFOLD_TYPES: Final = (
+    "point",
+    "axis_aligned_segment",
+    "axis_aligned_rectangle",
+    "axis_aligned_overlap_volume",
+)
 ATTACHMENT_CONTACT_TOLERANCE: Final = 1e-12
 ATTACHMENT_ROTATION_TOLERANCE: Final = 1e-12
+ATTACHMENT_IMAGE_TOLERANCE_PIXELS: Final = 0.5
 COUNTERFACTUAL_CONTINUATION_RULE: Final = "counterfactual_nearest_surface_continuation_v1"
 COUNTERFACTUAL_TIE_RULE: Final = "exactly_one_side_continues_v1"
-JUNCTION_AMBIGUITY_RULE: Final = "edge_incident_3x2_or_2x3_multi_surface_v1"
+JUNCTION_AMBIGUITY_RULE: Final = "edge_incident_3x2_or_2x3_multi_assignment_v2"
 SILHOUETTE_RULE: Final = "controlled_to_uncontrolled_side_owns_v1"
-VISIBILITY_EVENT_METHOD: Final = "analytic_transport_boundary_causal_events_v1"
+VISIBILITY_EVENT_METHOD: Final = "analytic_transport_boundary_causal_events_v2"
 BEFORE_EVENT_CODE_DOMAIN: Final = "before_frame_fate_codes_v1"
 AFTER_EVENT_CODE_DOMAIN: Final = "after_frame_origin_codes_v1"
 
@@ -66,13 +82,23 @@ class RawAttachmentPairEvidence:
     expected_attached: bool
     observed_contact: bool
     axis_interval_gaps: tuple[float, float, float]
+    contact_manifold_type: str | None
+    contact_world_min: tuple[float, float, float] | None
+    contact_world_max: tuple[float, float, float] | None
 
 
 @dataclass(frozen=True)
 class RawAttachmentContractEvidence:
     method: str
+    contact_manifold_rule: str
+    supported_contact_manifold_types: tuple[str, ...]
+    projection_convention: str
+    edge_lattice_association_rule: str
+    endpoint_tie_rule: str
+    multi_surface_rule: str
     contact_tolerance: float
     rotation_tolerance: float
+    image_tolerance_pixels: float
     geom_types: dict[str, str]
     geom_world_rotations_row_major: dict[str, tuple[float, ...]]
     pair_evidence: tuple[RawAttachmentPairEvidence, ...]
@@ -92,6 +118,7 @@ class RawBoundaryElement:
     owner_raw_geom_id: int | None
     negative_counterfactual_next_raw_geom_id: int | None
     positive_counterfactual_next_raw_geom_id: int | None
+    on_projected_attachment_locus: bool
 
 
 @dataclass(frozen=True)
@@ -211,8 +238,23 @@ def verify_attachment_contract(
             raise ValueError(f"attachment verification found {relation} contact: {first}/{second}")
         first_raw = semantic_raw_geom_ids[first]
         second_raw = semantic_raw_geom_ids[second]
+        contact_manifold_type: str | None = None
+        contact_world_min: tuple[float, float, float] | None = None
+        contact_world_max: tuple[float, float, float] | None = None
         if observed_contact:
             attached_raw_pairs.add(frozenset((first_raw, second_raw)))
+            contact_min = np.maximum(first_min, second_min)
+            contact_max = np.minimum(first_max, second_max)
+            near_gap = contact_min > contact_max
+            midpoint = (contact_min + contact_max) / 2.0
+            contact_min = np.where(near_gap, midpoint, contact_min)
+            contact_max = np.where(near_gap, midpoint, contact_max)
+            manifold_dimensions = int(
+                np.count_nonzero(contact_max - contact_min > ATTACHMENT_CONTACT_TOLERANCE)
+            )
+            contact_manifold_type = SUPPORTED_CONTACT_MANIFOLD_TYPES[manifold_dimensions]
+            contact_world_min = tuple(float(value) for value in contact_min)  # type: ignore[assignment]
+            contact_world_max = tuple(float(value) for value in contact_max)  # type: ignore[assignment]
         evidence.append(
             RawAttachmentPairEvidence(
                 first_semantic_name=first,
@@ -222,12 +264,22 @@ def verify_attachment_contract(
                 expected_attached=expected_attached,
                 observed_contact=observed_contact,
                 axis_interval_gaps=tuple(float(value) for value in gaps),  # type: ignore[arg-type]
+                contact_manifold_type=contact_manifold_type,
+                contact_world_min=contact_world_min,
+                contact_world_max=contact_world_max,
             )
         )
     return RawAttachmentContractEvidence(
         method=ATTACHMENT_RULE,
+        contact_manifold_rule=ATTACHMENT_CONTACT_MANIFOLD_RULE,
+        supported_contact_manifold_types=SUPPORTED_CONTACT_MANIFOLD_TYPES,
+        projection_convention=ATTACHMENT_PROJECTION_CONVENTION,
+        edge_lattice_association_rule=ATTACHMENT_EDGE_ASSOCIATION_RULE,
+        endpoint_tie_rule=ATTACHMENT_ENDPOINT_TIE_RULE,
+        multi_surface_rule=ATTACHMENT_MULTI_SURFACE_RULE,
         contact_tolerance=ATTACHMENT_CONTACT_TOLERANCE,
         rotation_tolerance=ATTACHMENT_ROTATION_TOLERANCE,
+        image_tolerance_pixels=ATTACHMENT_IMAGE_TOLERANCE_PIXELS,
         geom_types=geom_types,
         geom_world_rotations_row_major=rotations,
         pair_evidence=tuple(evidence),
@@ -235,7 +287,154 @@ def verify_attachment_contract(
     )
 
 
-def _local_controlled_assignments(
+LocalAttachmentEdge = tuple[str, int, int, frozenset[int]]
+
+
+def _bounded_halfspace_feasible(
+    coefficients: npt.NDArray[np.float64],
+    limits: npt.NDArray[np.float64],
+    dimensions: int,
+) -> bool:
+    """Decide a bounded binary64 linear-feasibility problem by its vertices."""
+
+    tolerance = ATTACHMENT_CONTACT_TOLERANCE
+    if dimensions == 0:
+        return bool(np.all(limits >= -tolerance))
+    centre = np.full(dimensions, 0.5, dtype=np.float64)
+    if np.all(coefficients @ centre <= limits + tolerance):
+        return True
+    for active in combinations(range(coefficients.shape[0]), dimensions):
+        matrix = coefficients[np.asarray(active), :]
+        if np.linalg.matrix_rank(matrix, tol=tolerance) != dimensions:
+            continue
+        try:
+            candidate = np.linalg.solve(matrix, limits[np.asarray(active)])
+        except np.linalg.LinAlgError:
+            continue
+        if np.all(coefficients @ candidate <= limits + tolerance):
+            return True
+    return False
+
+
+def _contact_cell_projects_to_edge(
+    pair: RawAttachmentPairEvidence,
+    camera: AnalyticCamera,
+    width: int,
+    height: int,
+    axis: str,
+    row: int,
+    column: int,
+) -> bool:
+    """Test exact projective intersection of a contact cell and one sample edge."""
+
+    if pair.contact_world_min is None or pair.contact_world_max is None:
+        raise ValueError("projected attachment requires a compiled contact manifold")
+    lower = np.asarray(pair.contact_world_min, dtype=np.float64)
+    upper = np.asarray(pair.contact_world_max, dtype=np.float64)
+    spans = upper - lower
+    varying_axes = np.flatnonzero(spans > ATTACHMENT_CONTACT_TOLERANCE)
+    dimensions = int(varying_axes.size)
+    if pair.contact_manifold_type != SUPPORTED_CONTACT_MANIFOLD_TYPES[dimensions]:
+        raise ValueError("compiled contact manifold type does not match its metric extent")
+
+    position = np.asarray(camera.world_position, dtype=np.float64)
+    rotation = np.asarray(camera.world_rotation_row_major, dtype=np.float64).reshape(3, 3)
+    camera_origin = np.asarray((lower - position) @ rotation, dtype=np.float64)
+    camera_coefficients = np.zeros((3, dimensions), dtype=np.float64)
+    for variable_index, world_axis in enumerate(varying_axes.tolist()):
+        camera_coefficients[:, variable_index] = spans[world_axis] * rotation[world_axis, :]
+
+    focal_x, focal_y = focal_scales_from_vertical_fov(
+        width,
+        height,
+        camera.vertical_field_of_view_degrees,
+    )
+    image_tolerance = ATTACHMENT_IMAGE_TOLERANCE_PIXELS
+    if axis == "horizontal":
+        x_min, x_max = column + 0.5, column + 1.5
+        y_min = row + 0.5 - image_tolerance
+        y_max = row + 0.5 + image_tolerance
+    elif axis == "vertical":
+        x_min = column + 0.5 - image_tolerance
+        x_max = column + 0.5 + image_tolerance
+        y_min, y_max = row + 0.5, row + 1.5
+    else:
+        raise ValueError("attachment projection requires a known edge axis")
+    u_min = (x_min - width / 2.0) / focal_x
+    u_max = (x_max - width / 2.0) / focal_x
+    v_min = (y_min - height / 2.0) / focal_y
+    v_max = (y_max - height / 2.0) / focal_y
+
+    linear_forms = (
+        (np.asarray((0.0, 0.0, 1.0)), -RAY_DIRECTION_EPSILON),
+        (np.asarray((-1.0, 0.0, -u_min)), 0.0),
+        (np.asarray((1.0, 0.0, u_max)), 0.0),
+        (np.asarray((0.0, 1.0, -v_min)), 0.0),
+        (np.asarray((0.0, -1.0, v_max)), 0.0),
+    )
+    rows: list[npt.NDArray[np.float64]] = []
+    limits: list[float] = []
+    for form, right_hand_side in linear_forms:
+        rows.append(np.asarray(form @ camera_coefficients, dtype=np.float64))
+        limits.append(float(right_hand_side - form @ camera_origin))
+    for index in range(dimensions):
+        upper_bound = np.zeros(dimensions, dtype=np.float64)
+        upper_bound[index] = 1.0
+        rows.append(upper_bound)
+        limits.append(1.0)
+        rows.append(-upper_bound)
+        limits.append(0.0)
+    return _bounded_halfspace_feasible(
+        np.asarray(rows, dtype=np.float64).reshape(-1, dimensions),
+        np.asarray(limits, dtype=np.float64),
+        dimensions,
+    )
+
+
+def projected_attachment_locus_edges(
+    assignment: Int32Array,
+    attachment: RawAttachmentContractEvidence,
+    camera: AnalyticCamera,
+    width: int,
+    height: int,
+) -> frozenset[LocalAttachmentEdge]:
+    """Associate compiled contact manifolds with only their local image edges."""
+
+    if assignment.shape != (height, width):
+        raise ValueError("attachment projection raster shape differs from assignment")
+    pairs = {
+        frozenset((item.first_raw_geom_id, item.second_raw_geom_id)): item
+        for item in attachment.pair_evidence
+        if item.observed_contact
+    }
+    edges: set[LocalAttachmentEdge] = set()
+    for axis, negative, positive in (
+        ("horizontal", assignment[:, :-1], assignment[:, 1:]),
+        ("vertical", assignment[:-1, :], assignment[1:, :]),
+    ):
+        for row_value, column_value in np.argwhere(negative != positive):
+            row = int(row_value)
+            column = int(column_value)
+            first = int(negative[row, column])
+            second = int(positive[row, column])
+            if first < 0 or second < 0:
+                continue
+            raw_pair = frozenset((first, second))
+            evidence = pairs.get(raw_pair)
+            if evidence is not None and _contact_cell_projects_to_edge(
+                evidence,
+                camera,
+                width,
+                height,
+                axis,
+                row,
+                column,
+            ):
+                edges.add((axis, row, column, raw_pair))
+    return frozenset(edges)
+
+
+def _local_assignments(
     assignment: Int32Array,
     axis: str,
     row: int,
@@ -246,14 +445,14 @@ def _local_controlled_assignments(
         local = assignment[max(0, row - 1) : min(height, row + 2), column : column + 2]
     else:
         local = assignment[row : row + 2, max(0, column - 1) : min(width, column + 2)]
-    return {int(value) for value in np.unique(local) if int(value) >= 0}
+    return {int(value) for value in np.unique(local)}
 
 
 def _classify_frame_boundaries(
     frame_index: int,
     assignment: Int32Array,
     counterfactual: dict[int, Int32Array],
-    attached_pairs: frozenset[frozenset[int]],
+    projected_attachment_edges: frozenset[LocalAttachmentEdge],
 ) -> tuple[RawBoundaryElement, ...]:
     records: list[RawBoundaryElement] = []
     for axis, negative, positive in (
@@ -271,11 +470,17 @@ def _classify_frame_boundaries(
             owner_raw: int | None = None
             negative_next: int | None = None
             positive_next: int | None = None
-            local_assignments = _local_controlled_assignments(
+            local_assignments = _local_assignments(
                 assignment,
                 axis,
                 row,
                 column,
+            )
+            raw_pair = frozenset(
+                raw_id for raw_id in (negative_id, positive_id) if raw_id is not None
+            )
+            on_attachment_locus = (
+                len(raw_pair) == 2 and (axis, row, column, raw_pair) in projected_attachment_edges
             )
             if len(local_assignments) > 2:
                 kind = "multi_surface_junction_ambiguous"
@@ -287,7 +492,7 @@ def _classify_frame_boundaries(
                 else:
                     owner_side = "positive_axis_side"
                     owner_raw = positive_id
-            elif frozenset((negative_id, positive_id)) in attached_pairs:
+            elif on_attachment_locus:
                 kind = "attached_junction"
             else:
                 negative_next_value = int(counterfactual[negative_id][row, column])
@@ -325,6 +530,7 @@ def _classify_frame_boundaries(
                     owner_raw_geom_id=owner_raw,
                     negative_counterfactual_next_raw_geom_id=negative_next,
                     positive_counterfactual_next_raw_geom_id=positive_next,
+                    on_projected_attachment_locus=on_attachment_locus,
                 )
             )
     return tuple(records)
@@ -334,7 +540,7 @@ def classify_oriented_boundary_lattice(
     frame_index: int,
     assignment: Int32Array,
     counterfactual: dict[int, Int32Array],
-    attached_pairs: frozenset[frozenset[int]] = frozenset(),
+    projected_attachment_edges: frozenset[LocalAttachmentEdge] = frozenset(),
     *,
     strict: bool = False,
 ) -> tuple[RawBoundaryElement, ...]:
@@ -344,7 +550,7 @@ def classify_oriented_boundary_lattice(
         frame_index,
         assignment,
         counterfactual,
-        attached_pairs,
+        projected_attachment_edges,
     )
     unresolved = tuple(item for item in records if item.kind == "unresolved_boundary")
     if strict and unresolved:
@@ -378,7 +584,6 @@ def _derive_directional_events(
     source_assignment: Int32Array,
     target_hit_assignment: Int32Array,
     supported_owner_pairs: set[tuple[int, int]],
-    attached_pairs: frozenset[frozenset[int]],
     forward: bool,
     *,
     strict: bool = False,
@@ -411,13 +616,6 @@ def _derive_directional_events(
     codes[reasons == int(TransportReasonCode.ANALYTIC_BOUNDARY_AMBIGUOUS)] = ambiguous_code
     occluded = reasons == int(TransportReasonCode.OCCLUDED_AT_TARGET)
     codes[occluded] = unresolved_code
-    for pair in attached_pairs:
-        first, second = tuple(pair)
-        attached_ambiguity = occluded & (
-            ((target_hit_assignment == first) & (source_assignment == second))
-            | ((target_hit_assignment == second) & (source_assignment == first))
-        )
-        codes[attached_ambiguity] = ambiguous_code
     for owner_raw, affected_raw in sorted(supported_owner_pairs):
         supported = (
             occluded & (target_hit_assignment == owner_raw) & (source_assignment == affected_raw)
@@ -538,16 +736,30 @@ def compute_raw_boundary_visibility_analysis(
         height,
         after_camera,
     )
+    before_attachment_edges = projected_attachment_locus_edges(
+        analytic_transport.before_surface_assignment,
+        attachment,
+        before_camera,
+        width,
+        height,
+    )
+    after_attachment_edges = projected_attachment_locus_edges(
+        analytic_transport.after_surface_assignment,
+        attachment,
+        after_camera,
+        width,
+        height,
+    )
     boundaries = classify_oriented_boundary_lattice(
         0,
         analytic_transport.before_surface_assignment,
         before_counterfactual,
-        attachment.attached_raw_pairs,
+        before_attachment_edges,
     ) + classify_oriented_boundary_lattice(
         1,
         analytic_transport.after_surface_assignment,
         after_counterfactual,
-        attachment.attached_raw_pairs,
+        after_attachment_edges,
     )
     unresolved_boundaries = tuple(
         element for element in boundaries if element.kind == "unresolved_boundary"
@@ -565,7 +777,6 @@ def compute_raw_boundary_visibility_analysis(
         analytic_transport.before_surface_assignment,
         forward_target,
         _supported_owner_pairs(boundaries, 1),
-        attachment.attached_raw_pairs,
         True,
     )
     after_codes, after_affected, after_owner = _derive_directional_events(
@@ -573,7 +784,6 @@ def compute_raw_boundary_visibility_analysis(
         analytic_transport.after_surface_assignment,
         backward_target,
         _supported_owner_pairs(boundaries, 0),
-        attachment.attached_raw_pairs,
         False,
     )
     unresolved_events = int(

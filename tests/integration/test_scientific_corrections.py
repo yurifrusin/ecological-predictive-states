@@ -63,18 +63,32 @@ def test_occlusion_relation_corruption_is_rejected(
     elif corruption == "omitted":
         transition["occlusion"]["relations"] = []
     elif corruption == "invented":
-        used = {relation["occluder_surface_id"], relation["occluded_surface_id"]}
-        support_id = next(
-            surface["surface_id"]
-            for surface in transition["surfaces"]
-            if surface["surface_id"] not in used
+        existing = {
+            (item["occluder_surface_id"], item["occluded_surface_id"])
+            for item in transition["occlusion"]["relations"]
+        }
+        surface_ids = [surface["surface_id"] for surface in transition["surfaces"]]
+        invented_owner, invented_affected = next(
+            (owner, affected)
+            for owner in surface_ids
+            for affected in surface_ids
+            if owner != affected and (owner, affected) not in existing
         )
-        relation["occluder_surface_id"] = support_id
+        transition["occlusion"]["relations"].append(
+            {
+                "occluder_surface_id": invented_owner,
+                "occluded_surface_id": invented_affected,
+                "frame_indices": [0, 1],
+            }
+        )
+        transition["occlusion"]["relations"].sort(
+            key=lambda item: (item["occluder_surface_id"], item["occluded_surface_id"])
+        )
     else:
         relation["frame_indices"] = [0]
     commit_episode_payloads(broken, 0, transition, instrumentation)
 
-    with pytest.raises(DatasetValidationError, match="occlusion annotation"):
+    with pytest.raises(DatasetValidationError, match="complete oriented-boundary"):
         validate_dataset(broken)
 
 
@@ -87,7 +101,22 @@ def test_relation_referring_to_frame_without_oracle_evidence_is_rejected(
     frame_evidence = instrumentation["occlusion_oracle"]["frames"][1]
     artifact = _artifact(frame_evidence["counterfactual_segmentation"])
     counterfactual = np.load(broken / artifact.path, allow_pickle=False)
-    no_reveal = np.full(counterfactual.shape, -1, dtype=np.int32)
+    public_after = np.load(
+        broken / transition["after"]["segmentation"]["path"],
+        allow_pickle=False,
+    )
+    labels = {
+        surface["surface_id"]: surface["segmentation_label"] for surface in transition["surfaces"]
+    }
+    ordinary_raw = np.full(counterfactual.shape, -1, dtype=np.int32)
+    for raw_id, opaque_id in instrumentation["raw_to_opaque_surface_ids"].items():
+        ordinary_raw[public_after == labels[opaque_id]] = int(raw_id)
+    oracle = instrumentation["occlusion_oracle"]
+    no_reveal = counterfactual.copy()
+    reveal = (ordinary_raw == oracle["candidate_occluder_raw_geom_id"]) & (
+        counterfactual == oracle["candidate_occluded_raw_geom_id"]
+    )
+    no_reveal[reveal] = -1
     updated_artifact = rewrite_array_artifact(broken, artifact, no_reveal)
     frame_evidence["counterfactual_segmentation"] = updated_artifact.model_dump(mode="json")
     frame_evidence["revealed_pixel_count"] = 0
@@ -96,7 +125,7 @@ def test_relation_referring_to_frame_without_oracle_evidence_is_rejected(
     )
     commit_episode_payloads(broken, 0, transition, instrumentation)
 
-    with pytest.raises(DatasetValidationError, match="occluder footprint"):
+    with pytest.raises(DatasetValidationError, match="counterfactual evidence disagrees"):
         validate_dataset(broken)
 
 

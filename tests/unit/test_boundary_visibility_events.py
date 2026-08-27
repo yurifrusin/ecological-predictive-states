@@ -103,11 +103,29 @@ def test_compiled_panel_support_contact_is_attached_and_has_no_unilateral_owner(
         0,
         np.asarray([[0, 1]], dtype=np.int32),
         _counterfactual([[-1, -1]], [[-1, -1]]),
-        evidence.attached_raw_pairs,
+        frozenset({("horizontal", 0, 0, frozenset((0, 1)))}),
     )
     assert records[0].kind == "attached_junction"
     assert records[0].owner_side == "none"
     assert records[0].owner_raw_geom_id is None
+
+
+def test_local_attachment_edge_does_not_override_lateral_ownership_for_same_pair() -> None:
+    pair = frozenset((0, 1))
+    records = classify_oriented_boundary_lattice(
+        0,
+        np.asarray([[0, 1, 0]], dtype=np.int32),
+        {
+            0: np.full((1, 3), -1, dtype=np.int32),
+            1: np.asarray([[-1, 0, -1]], dtype=np.int32),
+        },
+        frozenset({("horizontal", 0, 0, pair)}),
+    )
+    assert records[0].kind == "attached_junction"
+    assert records[0].on_projected_attachment_locus
+    assert records[1].kind == "occluding_contour"
+    assert records[1].owner_raw_geom_id == 1
+    assert not records[1].on_projected_attachment_locus
 
 
 def test_two_perpendicular_axis_aligned_boxes_are_verified_as_attached() -> None:
@@ -284,7 +302,6 @@ def test_frame_exit_and_entry_are_not_deletion_or_accretion() -> None:
         source,
         target,
         set(),
-        frozenset(),
         True,
     )
     after, _, _ = _derive_directional_events(
@@ -292,11 +309,40 @@ def test_frame_exit_and_entry_are_not_deletion_or_accretion() -> None:
         source,
         target,
         set(),
-        frozenset(),
         False,
     )
     assert before[0, 0] == BeforeFateCode.FRAME_EXIT
     assert after[0, 0] == AfterOriginCode.FRAME_ENTRY
+
+
+def test_only_actual_transport_boundary_band_is_event_ambiguous() -> None:
+    reasons = np.asarray(
+        [[TransportReasonCode.ANALYTIC_BOUNDARY_AMBIGUOUS, TransportReasonCode.OCCLUDED_AT_TARGET]],
+        dtype=np.uint8,
+    )
+    codes, affected, owner = _derive_directional_events(
+        reasons,
+        np.asarray([[0, 0]], dtype=np.int32),
+        np.asarray([[1, 1]], dtype=np.int32),
+        {(1, 0)},
+        True,
+    )
+    assert codes[0, 0] == BeforeFateCode.ANALYTIC_BOUNDARY_AMBIGUOUS
+    assert codes[0, 1] == BeforeFateCode.DELETION_AT_OCCLUDING_BOUNDARY
+    assert affected[0, 1] == 0
+    assert owner[0, 1] == 1
+
+
+def test_local_attached_seam_reason_cannot_become_causal_event() -> None:
+    codes, affected, owner = _derive_directional_events(
+        np.asarray([[TransportReasonCode.ANALYTIC_BOUNDARY_AMBIGUOUS]], dtype=np.uint8),
+        np.asarray([[0]], dtype=np.int32),
+        np.asarray([[1]], dtype=np.int32),
+        {(1, 0)},
+        True,
+    )
+    assert codes[0, 0] == BeforeFateCode.ANALYTIC_BOUNDARY_AMBIGUOUS
+    assert affected[0, 0] == owner[0, 0] == -1
 
 
 def test_whole_surface_appearance_and_disappearance_require_zero_crossing() -> None:
@@ -317,7 +363,6 @@ def test_unsupported_occluder_pair_remains_unresolved() -> None:
         np.asarray([[0]], dtype=np.int32),
         np.asarray([[1]], dtype=np.int32),
         set(),
-        frozenset(),
         True,
     )
     assert codes[0, 0] == BeforeFateCode.UNRESOLVED_OCCLUSION
@@ -328,7 +373,6 @@ def test_unsupported_occluder_pair_remains_unresolved() -> None:
             np.asarray([[0]], dtype=np.int32),
             np.asarray([[1]], dtype=np.int32),
             set(),
-            frozenset(),
             True,
             strict=True,
         )

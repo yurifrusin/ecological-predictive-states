@@ -66,7 +66,7 @@ EXPECTED_DEV_5_CROSS_PLATFORM_ANALYTIC_HASHES = {
         "64706a77347aa2a98e52d6da023ba80f7a04d1b7a94eaa809124c9b7fe9fca0a",
     ),
 }
-EXPECTED_DEV_6_CROSS_PLATFORM_BOUNDARY_HASHES = {
+REJECTED_PR9_DEV_6_CROSS_PLATFORM_BOUNDARY_HASHES = {
     "single_occluder": (
         "ea99e38626142a7c3b1845c234e5b577493fbf8ff55e40169a96bffaafe84f66",
         "c690400c1c1496da23b4d8ee91af6b52d7e163a415fb7929ffa4494061becbef",
@@ -76,7 +76,7 @@ EXPECTED_DEV_6_CROSS_PLATFORM_BOUNDARY_HASHES = {
         "fd5c4360c0cc03d6be11bd9917de4909aa6f26129f95d69364d793c42e8e9ab3",
     ),
 }
-EXPECTED_DEV_6_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES = {
+REJECTED_PR9_DEV_6_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES = {
     "single_occluder": (
         "c35fe87f68dde0b282f8069a6700895d135e956a3b5ba2190f3b606f259b8ebb",
         "c9032eb0250598e95902b3c4d5001ea724a48abf6cd66158fbd5374b2d312f2b",
@@ -84,6 +84,26 @@ EXPECTED_DEV_6_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES = {
     "corridor": (
         "2db60ab41fe0f93f1fd574c0d1218d374727199b51eb3bf15625f6264cefbf0a",
         "480e283e5eecc7fc21e3a21f56e114f44c69460681e167b9292c45fa8e7b5a15",
+    ),
+}
+EXPECTED_DEV_7_CROSS_PLATFORM_BOUNDARY_HASHES = {
+    "single_occluder": (
+        "da74e273f5e6786c9093709c07147ea2666db58bb64d687665dbf563e5f9e717",
+        "1918d7616cdb39ebdd5a01d6b6b6eed82667bbfff33b06b55f59536c20e99538",
+    ),
+    "corridor": (
+        "24b330294cf15e014d25ae9eb0b883728e2e45dd999eb62b53f86c86a77aab07",
+        "a263206271e0126c0ec060b5ed7320ac76d848759980bce29dc8e1a37c350803",
+    ),
+}
+EXPECTED_DEV_7_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES = {
+    "single_occluder": (
+        "dfd7fddd2a460ed1d3147bfca55c9e9034269c4ad0cecdc5de4751b1678cd3d6",
+        "70809b9c2febd343ec459ae79be667892d6aa170a3dcc4c5b7bf0c914665392a",
+    ),
+    "corridor": (
+        "129635aab9379aa49593210c5dabdbe0ff2a206f665f54f5c9c8fe931fd9af54",
+        "9a49722f9ccdade242d9e72b6707544a7b293e5d9850c0ab8bacaa526d75292b",
     ),
 }
 
@@ -146,11 +166,11 @@ def test_single_occluder_boundary_and_event_hashes_match_locked_cross_platform_r
     )
     assert (
         tuple(episode.oriented_boundary_sha256 for episode in manifest.episodes)
-        == (EXPECTED_DEV_6_CROSS_PLATFORM_BOUNDARY_HASHES["single_occluder"])
+        == (EXPECTED_DEV_7_CROSS_PLATFORM_BOUNDARY_HASHES["single_occluder"])
     )
     assert (
         tuple(episode.visibility_event_sha256 for episode in manifest.episodes)
-        == (EXPECTED_DEV_6_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES["single_occluder"])
+        == (EXPECTED_DEV_7_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES["single_occluder"])
     )
 
 
@@ -162,11 +182,11 @@ def test_corridor_boundary_and_event_hashes_match_locked_cross_platform_regressi
     )
     assert (
         tuple(episode.oriented_boundary_sha256 for episode in manifest.episodes)
-        == (EXPECTED_DEV_6_CROSS_PLATFORM_BOUNDARY_HASHES["corridor"])
+        == (EXPECTED_DEV_7_CROSS_PLATFORM_BOUNDARY_HASHES["corridor"])
     )
     assert (
         tuple(episode.visibility_event_sha256 for episode in manifest.episodes)
-        == (EXPECTED_DEV_6_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES["corridor"])
+        == (EXPECTED_DEV_7_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES["corridor"])
     )
 
 
@@ -188,6 +208,15 @@ def test_historical_slice_1_identity_is_recorded_as_migration_evidence() -> None
     assert all(
         value in notes
         for values in REVIEWED_ER5_DEV_4_CROSS_PLATFORM_ANALYTIC_HASHES.values()
+        for value in values
+    )
+    assert all(
+        value in notes
+        for identity_group in (
+            REJECTED_PR9_DEV_6_CROSS_PLATFORM_BOUNDARY_HASHES,
+            REJECTED_PR9_DEV_6_CROSS_PLATFORM_VISIBILITY_EVENT_HASHES,
+        )
+        for values in identity_group.values()
         for value in values
     )
 

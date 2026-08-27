@@ -104,7 +104,9 @@ def test_counterfactual_oracle_derives_relation_frame_membership(smoke_dataset: 
     )
     assert evidence_frames == (0, 1)
     assert isinstance(transition.occlusion, AvailableOcclusionAnnotation)
-    assert transition.occlusion.oracle_rule == "counterfactual_occluder_exclusion_v1"
+    assert transition.occlusion.oracle_rule == (
+        "oriented_boundary_ownership_with_counterfactual_crosscheck_v1"
+    )
     assert transition.occlusion.relations[0].frame_indices == evidence_frames
 
 

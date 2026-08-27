@@ -114,6 +114,16 @@ def commit_episode_payloads(
         whole = events_payload.get("whole_surface_events")
         if isinstance(whole, list):
             whole.sort(key=lambda item: item["surface_id"])
+    occlusion_payload = transition_payload.get("occlusion")
+    if isinstance(occlusion_payload, dict):
+        relations = occlusion_payload.get("relations")
+        if isinstance(relations, list):
+            relations.sort(
+                key=lambda item: (
+                    item["occluder_surface_id"],
+                    item["occluded_surface_id"],
+                )
+            )
     transition = TransitionRecord.model_validate_json(canonical_json_bytes(transition_payload))
     if isinstance(transition.analytic_optical_transport, AvailableDenseOpticalTransport):
         analytic_transport = transition.analytic_optical_transport.model_copy(

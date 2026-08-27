@@ -228,7 +228,7 @@ def test_corridor_occlusion_must_match_boundary_oracle(
             "reason": "fabricated historical posture",
         }
         commit_episode_payloads(broken, 0, transition, instrumentation)
-        with pytest.raises(DatasetValidationError, match="corridor occlusion"):
+        with pytest.raises(DatasetValidationError, match="complete oriented-boundary"):
             validate_dataset(broken)
         return
     relations = []
@@ -243,12 +243,12 @@ def test_corridor_occlusion_must_match_boundary_oracle(
     transition["occlusion"] = {
         "status": "available",
         "oracle_rule": (
-            "counterfactual_occluder_exclusion_v1"
+            "oriented_boundary_ownership_with_counterfactual_crosscheck_v1"
             if fabrication == "wrong_rule"
-            else "oriented_boundary_ownership_v1"
+            else "oriented_boundary_ownership_complete_v2"
         ),
         "relations": relations,
     }
     commit_episode_payloads(broken, 0, transition, instrumentation)
-    with pytest.raises(DatasetValidationError, match="corridor occlusion"):
+    with pytest.raises(DatasetValidationError, match="complete oriented-boundary"):
         validate_dataset(broken)

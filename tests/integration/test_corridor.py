@@ -186,7 +186,7 @@ def test_corridor_visibility_is_available_and_occlusion_is_oracle_known_empty(
     transition = _transition(corridor_dataset, 0)
     assert transition.ecological_visibility_events.status == "available"
     assert isinstance(transition.occlusion, AvailableOcclusionAnnotation)
-    assert transition.occlusion.oracle_rule == "oriented_boundary_ownership_v1"
+    assert transition.occlusion.oracle_rule == "oriented_boundary_ownership_complete_v2"
     assert transition.occlusion.relations == ()
 
 

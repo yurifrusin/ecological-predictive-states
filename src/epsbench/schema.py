@@ -264,10 +264,27 @@ class OcclusionRelation(StrictModel):
 class AvailableOcclusionAnnotation(StrictModel):
     status: Literal["available"]
     oracle_rule: Literal[
-        "counterfactual_occluder_exclusion_v1",
-        "oriented_boundary_ownership_v1",
+        "oriented_boundary_ownership_complete_v2",
+        "oriented_boundary_ownership_with_counterfactual_crosscheck_v1",
     ]
     relations: tuple[OcclusionRelation, ...]
+
+    @model_validator(mode="after")
+    def relations_are_complete_form_and_canonical(self) -> AvailableOcclusionAnnotation:
+        keys = [
+            (relation.occluder_surface_id, relation.occluded_surface_id)
+            for relation in self.relations
+        ]
+        if keys != sorted(keys) or len(keys) != len(set(keys)):
+            raise ValueError("occlusion relations must be uniquely canonical-ordered")
+        if any(not relation.frame_indices for relation in self.relations):
+            raise ValueError("an available occlusion relation requires at least one frame")
+        if any(
+            relation.frame_indices != tuple(sorted(relation.frame_indices))
+            for relation in self.relations
+        ):
+            raise ValueError("occlusion relation frame indices must be canonical-ordered")
+        return self
 
 
 class UnavailableOcclusionAnnotation(StrictModel):
@@ -365,18 +382,31 @@ class OrientedBoundaryElement(StrictModel):
 
 class AvailableOrientedBoundaryOwnership(StrictModel):
     status: Literal["available"]
-    method: Literal["analytic_oriented_boundary_ownership_v1"]
+    method: Literal["analytic_oriented_boundary_ownership_v2"]
     raster_width: int = Field(gt=0)
     raster_height: int = Field(gt=0)
     coordinate_convention: EdgeLatticeCoordinateConvention
     boundary_kind_domain: Literal["oriented_boundary_kind_domain_v1"]
     owner_side_domain: Literal["oriented_boundary_owner_side_domain_v1"]
-    attachment_rule: Literal["compiled_axis_aligned_plane_box_and_box_contact_v1"]
-    attachment_public_contract_version: Literal["scene_attachment_public_contract_v1"]
+    attachment_rule: Literal["projected_compiled_contact_locus_v1"]
+    attachment_public_contract_version: Literal["scene_attachment_public_contract_v2"]
+    attachment_contact_manifold_rule: Literal["compiled_axis_aligned_intersection_cell_v1"]
+    attachment_supported_contact_manifold_types: tuple[
+        Literal["point"],
+        Literal["axis_aligned_segment"],
+        Literal["axis_aligned_rectangle"],
+        Literal["axis_aligned_overlap_volume"],
+    ]
+    attachment_projection_convention: Literal["analytic_pinhole_pixel_centre_v1"]
+    attachment_edge_lattice_association_rule: Literal[
+        "sample_connection_segment_intersects_projected_contact_cell_v1"
+    ]
+    attachment_endpoint_tie_rule: Literal["inclusive_contact_endpoints_v1"]
+    attachment_multi_surface_rule: Literal["multi_surface_ambiguity_precedes_attachment_v1"]
     numerical_contract_sha256: Sha256
     counterfactual_continuation_rule: Literal["counterfactual_nearest_surface_continuation_v1"]
     counterfactual_tie_rule: Literal["exactly_one_side_continues_v1"]
-    junction_ambiguity_rule: Literal["edge_incident_3x2_or_2x3_multi_surface_v1"]
+    junction_ambiguity_rule: Literal["edge_incident_3x2_or_2x3_multi_assignment_v2"]
     silhouette_rule: Literal["controlled_to_uncontrolled_side_owns_v1"]
     elements: tuple[OrientedBoundaryElement, ...]
     oriented_boundary_sha256: Sha256
@@ -523,7 +553,7 @@ class WholeSurfaceVisibilityEvent(StrictModel):
 
 class AvailableEcologicalVisibilityEvents(StrictModel):
     status: Literal["available"]
-    method: Literal["analytic_transport_boundary_causal_events_v1"]
+    method: Literal["analytic_transport_boundary_causal_events_v2"]
     capabilities: VisibilityEventCapabilities
     before_event_code_domain: Literal["before_frame_fate_codes_v1"]
     after_event_code_domain: Literal["after_frame_origin_codes_v1"]
@@ -693,7 +723,7 @@ DenseOpticalTransport = Annotated[
 
 
 class TransitionRecord(StrictModel):
-    schema_version: Literal["0.1.0-dev.6"]
+    schema_version: Literal["0.1.0-dev.7"]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     action: Action
     surfaces: tuple[SurfaceReference, ...] = Field(min_length=1)
@@ -1015,6 +1045,17 @@ class PrivilegedAttachmentPairEvidence(StrictModel):
     expected_attached: bool
     observed_contact: bool
     axis_interval_gaps: tuple[float, float, float]
+    contact_manifold_type: (
+        Literal[
+            "point",
+            "axis_aligned_segment",
+            "axis_aligned_rectangle",
+            "axis_aligned_overlap_volume",
+        ]
+        | None
+    )
+    contact_world_min: tuple[float, float, float] | None
+    contact_world_max: tuple[float, float, float] | None
 
     @model_validator(mode="after")
     def pair_is_distinct_finite_and_truthful(self) -> PrivilegedAttachmentPairEvidence:
@@ -1026,13 +1067,48 @@ class PrivilegedAttachmentPairEvidence(StrictModel):
             raise ValueError("attachment interval gaps must be finite")
         if self.expected_attached != self.observed_contact:
             raise ValueError("canonical attachment evidence cannot retain a contact mismatch")
+        has_manifold = self.contact_manifold_type is not None
+        if has_manifold != self.observed_contact:
+            raise ValueError("contact manifold presence must equal observed contact")
+        if (self.contact_world_min is None) != (self.contact_world_max is None):
+            raise ValueError("contact manifold bounds must be both present or both absent")
+        if (self.contact_world_min is not None) != has_manifold:
+            raise ValueError("contact manifold bounds must match manifold presence")
+        if self.contact_world_min is not None and self.contact_world_max is not None:
+            if not all(
+                math.isfinite(value) for value in (*self.contact_world_min, *self.contact_world_max)
+            ):
+                raise ValueError("contact manifold bounds must be finite")
+            if any(
+                lower > upper
+                for lower, upper in zip(
+                    self.contact_world_min,
+                    self.contact_world_max,
+                    strict=True,
+                )
+            ):
+                raise ValueError("contact manifold bounds must be ordered")
         return self
 
 
 class PrivilegedAttachmentContractEvidence(StrictModel):
-    method: Literal["compiled_axis_aligned_plane_box_and_box_contact_v1"]
+    method: Literal["projected_compiled_contact_locus_v1"]
+    contact_manifold_rule: Literal["compiled_axis_aligned_intersection_cell_v1"]
+    supported_contact_manifold_types: tuple[
+        Literal["point"],
+        Literal["axis_aligned_segment"],
+        Literal["axis_aligned_rectangle"],
+        Literal["axis_aligned_overlap_volume"],
+    ]
+    projection_convention: Literal["analytic_pinhole_pixel_centre_v1"]
+    edge_lattice_association_rule: Literal[
+        "sample_connection_segment_intersects_projected_contact_cell_v1"
+    ]
+    endpoint_tie_rule: Literal["inclusive_contact_endpoints_v1"]
+    multi_surface_rule: Literal["multi_surface_ambiguity_precedes_attachment_v1"]
     contact_tolerance: float = Field(ge=1e-12, le=1e-12)
     rotation_tolerance: float = Field(ge=1e-12, le=1e-12)
+    image_tolerance_pixels: float = Field(ge=0.5, le=0.5)
     geom_types: dict[str, Literal["plane", "box"]]
     geom_world_rotations_row_major: dict[str, tuple[float, ...]]
     pair_evidence: tuple[PrivilegedAttachmentPairEvidence, ...]
@@ -1064,16 +1140,30 @@ class PrivilegedBoundaryElementEvidence(StrictModel):
     owner_raw_geom_id: int | None = Field(default=None, ge=0)
     negative_counterfactual_next_raw_geom_id: int | None = Field(default=None, ge=0)
     positive_counterfactual_next_raw_geom_id: int | None = Field(default=None, ge=0)
+    on_projected_attachment_locus: bool
+
+    @model_validator(mode="after")
+    def local_attachment_evidence_matches_kind(self) -> PrivilegedBoundaryElementEvidence:
+        if self.kind == BoundaryKind.ATTACHED_JUNCTION and not (self.on_projected_attachment_locus):
+            raise ValueError("attached junction requires local projected-locus evidence")
+        if self.on_projected_attachment_locus and self.kind not in {
+            BoundaryKind.ATTACHED_JUNCTION,
+            BoundaryKind.MULTI_SURFACE_JUNCTION_AMBIGUOUS,
+        }:
+            raise ValueError(
+                "projected attachment locus can only yield attachment or junction ambiguity"
+            )
+        return self
 
 
 class BoundaryVisibilityDiagnostics(StrictModel):
-    boundary_method: Literal["analytic_oriented_boundary_ownership_v1"]
+    boundary_method: Literal["analytic_oriented_boundary_ownership_v2"]
     counterfactual_continuation_rule: Literal["counterfactual_nearest_surface_continuation_v1"]
     counterfactual_tie_rule: Literal["exactly_one_side_continues_v1"]
     counterfactual_ray_direction_epsilon: float = Field(ge=1e-12, le=1e-12)
-    junction_ambiguity_rule: Literal["edge_incident_3x2_or_2x3_multi_surface_v1"]
+    junction_ambiguity_rule: Literal["edge_incident_3x2_or_2x3_multi_assignment_v2"]
     silhouette_rule: Literal["controlled_to_uncontrolled_side_owns_v1"]
-    visibility_event_method: Literal["analytic_transport_boundary_causal_events_v1"]
+    visibility_event_method: Literal["analytic_transport_boundary_causal_events_v2"]
     boundary_evidence: tuple[PrivilegedBoundaryElementEvidence, ...]
     boundary_kind_counts: dict[BoundaryKind, int]
     owner_side_counts: dict[BoundaryOwnerSide, int]
@@ -1094,7 +1184,7 @@ class BoundaryVisibilityDiagnostics(StrictModel):
 
 
 class SingleOccluderInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.6"]
+    schema_version: Literal["0.1.0-dev.7"]
     scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]
@@ -1145,7 +1235,7 @@ class SingleOccluderInstrumentation(StrictModel):
 
 
 class CorridorInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.6"]
+    schema_version: Literal["0.1.0-dev.7"]
     scene_family: Literal[SceneFamily.CORRIDOR]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance_variant: Literal["base", "alternate"]

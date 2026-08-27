@@ -11,6 +11,11 @@ from PIL import Image
 
 from epsbench.annotations import (
     ANALYTIC_TRANSPORT_METHOD,
+    ATTACHMENT_CONTACT_MANIFOLD_RULE,
+    ATTACHMENT_EDGE_ASSOCIATION_RULE,
+    ATTACHMENT_ENDPOINT_TIE_RULE,
+    ATTACHMENT_MULTI_SURFACE_RULE,
+    ATTACHMENT_PROJECTION_CONVENTION,
     ATTACHMENT_PUBLIC_CONTRACT_VERSION,
     ATTACHMENT_RULE,
     BOUNDARY_KIND_DOMAIN,
@@ -22,6 +27,7 @@ from epsbench.annotations import (
     OWNER_SIDE_DOMAIN,
     RAY_DIRECTION_EPSILON,
     SILHOUETTE_RULE,
+    SUPPORTED_CONTACT_MANIFOLD_TYPES,
     AfterOriginCode,
     AnalyticTransportArrays,
     BeforeFateCode,
@@ -345,6 +351,12 @@ def _expected_oriented_boundary(
         owner_side_domain=OWNER_SIDE_DOMAIN,
         attachment_rule=ATTACHMENT_RULE,
         attachment_public_contract_version=ATTACHMENT_PUBLIC_CONTRACT_VERSION,
+        attachment_contact_manifold_rule=ATTACHMENT_CONTACT_MANIFOLD_RULE,
+        attachment_supported_contact_manifold_types=SUPPORTED_CONTACT_MANIFOLD_TYPES,
+        attachment_projection_convention=ATTACHMENT_PROJECTION_CONVENTION,
+        attachment_edge_lattice_association_rule=ATTACHMENT_EDGE_ASSOCIATION_RULE,
+        attachment_endpoint_tie_rule=ATTACHMENT_ENDPOINT_TIE_RULE,
+        attachment_multi_surface_rule=ATTACHMENT_MULTI_SURFACE_RULE,
         numerical_contract_sha256=compute_boundary_numerical_contract_hash(),
         counterfactual_continuation_rule=COUNTERFACTUAL_CONTINUATION_RULE,
         counterfactual_tie_rule=COUNTERFACTUAL_TIE_RULE,
@@ -360,6 +372,7 @@ def _expected_oriented_boundary(
 
 def _expected_boundary_occlusion(
     boundary: AvailableOrientedBoundaryOwnership,
+    oracle_rule: str,
 ) -> AvailableOcclusionAnnotation:
     frames_by_pair: dict[tuple[str, str], set[int]] = {}
     for element in boundary.elements:
@@ -378,7 +391,7 @@ def _expected_boundary_occlusion(
         frames_by_pair.setdefault((owner, affected), set()).add(element.frame_index)
     return AvailableOcclusionAnnotation(
         status="available",
-        oracle_rule="oriented_boundary_ownership_v1",
+        oracle_rule=oracle_rule,  # type: ignore[arg-type]
         relations=tuple(
             OcclusionRelation(
                 occluder_surface_id=owner,
@@ -518,8 +531,15 @@ def _expected_attachment_contract(
     contract = analysis.attachment_contract
     return PrivilegedAttachmentContractEvidence(
         method=contract.method,  # type: ignore[arg-type]
+        contact_manifold_rule=contract.contact_manifold_rule,  # type: ignore[arg-type]
+        supported_contact_manifold_types=contract.supported_contact_manifold_types,  # type: ignore[arg-type]
+        projection_convention=contract.projection_convention,  # type: ignore[arg-type]
+        edge_lattice_association_rule=contract.edge_lattice_association_rule,  # type: ignore[arg-type]
+        endpoint_tie_rule=contract.endpoint_tie_rule,  # type: ignore[arg-type]
+        multi_surface_rule=contract.multi_surface_rule,  # type: ignore[arg-type]
         contact_tolerance=contract.contact_tolerance,
         rotation_tolerance=contract.rotation_tolerance,
+        image_tolerance_pixels=contract.image_tolerance_pixels,
         geom_types=contract.geom_types,  # type: ignore[arg-type]
         geom_world_rotations_row_major=contract.geom_world_rotations_row_major,
         pair_evidence=tuple(
@@ -556,16 +576,17 @@ def _expected_boundary_diagnostics(
                 positive_counterfactual_next_raw_geom_id=(
                     item.positive_counterfactual_next_raw_geom_id
                 ),
+                on_projected_attachment_locus=item.on_projected_attachment_locus,
             )
         )
     return BoundaryVisibilityDiagnostics(
-        boundary_method="analytic_oriented_boundary_ownership_v1",
+        boundary_method=ORIENTED_BOUNDARY_METHOD,
         counterfactual_continuation_rule="counterfactual_nearest_surface_continuation_v1",
         counterfactual_tie_rule="exactly_one_side_continues_v1",
         counterfactual_ray_direction_epsilon=RAY_DIRECTION_EPSILON,
-        junction_ambiguity_rule="edge_incident_3x2_or_2x3_multi_surface_v1",
+        junction_ambiguity_rule=JUNCTION_AMBIGUITY_RULE,
         silhouette_rule="controlled_to_uncontrolled_side_owns_v1",
-        visibility_event_method="analytic_transport_boundary_causal_events_v1",
+        visibility_event_method="analytic_transport_boundary_causal_events_v2",
         boundary_evidence=tuple(evidence),
         boundary_kind_counts=kind_counts,
         owner_side_counts=owner_counts,
@@ -1057,19 +1078,20 @@ def _require_occlusion_oracle(
         if count > 0:
             supported_frames.append(frame_index)
 
-    expected_occlusion = AvailableOcclusionAnnotation(
-        status="available",
-        oracle_rule="counterfactual_occluder_exclusion_v1",
-        relations=(
-            OcclusionRelation(
-                occluder_surface_id=occluder_id,
-                occluded_surface_id=occluded_id,
-                frame_indices=tuple(supported_frames),  # type: ignore[arg-type]
-            ),
-        ),
+    if not supported_frames:
+        raise DatasetValidationError("counterfactual cross-check found no designated occlusion")
+    if not isinstance(transition.occlusion, AvailableOcclusionAnnotation):
+        raise DatasetValidationError("single-occluder occlusion must be available")
+    designated = tuple(
+        relation
+        for relation in transition.occlusion.relations
+        if relation.occluder_surface_id == occluder_id
+        and relation.occluded_surface_id == occluded_id
     )
-    if not supported_frames or transition.occlusion != expected_occlusion:
-        raise DatasetValidationError("occlusion annotation does not match counterfactual evidence")
+    if len(designated) != 1 or designated[0].frame_indices != tuple(supported_frames):
+        raise DatasetValidationError(
+            "designated counterfactual evidence disagrees with the complete boundary graph"
+        )
 
 
 def validate_dataset(root: Path) -> DatasetManifest:
@@ -1358,6 +1380,26 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 "corridor optical field contains uncontrolled renderer background"
             )
 
+        raw_surfaces = _raw_surface_records(transition, instrumentation)
+        expected_boundary = _expected_oriented_boundary(
+            expected_boundary_visibility,
+            raw_surfaces,
+            expected_raster_shape[1],
+            expected_raster_shape[0],
+        )
+        occlusion_rule = (
+            "oriented_boundary_ownership_with_counterfactual_crosscheck_v1"
+            if isinstance(instrumentation, SingleOccluderInstrumentation)
+            else "oriented_boundary_ownership_complete_v2"
+        )
+        if transition.occlusion != _expected_boundary_occlusion(
+            expected_boundary,
+            occlusion_rule,
+        ):
+            raise DatasetValidationError(
+                "public occlusion graph is not the complete oriented-boundary relation set"
+            )
+
         if isinstance(instrumentation, SingleOccluderInstrumentation):
             if not isinstance(config, SingleOccluderConfig):
                 raise DatasetValidationError(
@@ -1371,32 +1413,6 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 expected_raster_shape,
                 registry,
             )
-            if not isinstance(transition.occlusion, AvailableOcclusionAnnotation):
-                raise DatasetValidationError("single-occluder occlusion must be available")
-            owned_pairs = {
-                (
-                    element.owner_surface_id,
-                    element.positive_surface_id
-                    if element.owner_surface_id == element.negative_surface_id
-                    else element.negative_surface_id,
-                    element.frame_index,
-                )
-                for element in transition.oriented_boundary_ownership.elements
-                if element.kind == BoundaryKind.OCCLUDING_CONTOUR
-            }
-            for relation in transition.occlusion.relations:
-                if any(
-                    (
-                        relation.occluder_surface_id,
-                        relation.occluded_surface_id,
-                        frame_index,
-                    )
-                    not in owned_pairs
-                    for frame_index in relation.frame_indices
-                ):
-                    raise DatasetValidationError(
-                        "single-occluder relation lacks matching oriented-boundary ownership"
-                    )
         else:
             _require_corridor_raw_segmentation(
                 resolved_root,
@@ -1406,17 +1422,6 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 expected_raster_shape,
                 registry,
             )
-            raw_surfaces = _raw_surface_records(transition, instrumentation)
-            expected_boundary = _expected_oriented_boundary(
-                expected_boundary_visibility,
-                raw_surfaces,
-                expected_raster_shape[1],
-                expected_raster_shape[0],
-            )
-            if transition.occlusion != _expected_boundary_occlusion(expected_boundary):
-                raise DatasetValidationError(
-                    "corridor occlusion does not match oriented-boundary evidence"
-                )
 
         derived_visibility, derived_correspondence, derived_mask_changes = derive_visibility(
             frame_arrays[0][2], frame_arrays[1][2], transition.surfaces

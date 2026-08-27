@@ -24,25 +24,37 @@ Each record contains only frame index, edge axis and coordinate, opaque episode-
 `oriented_boundary_kind_domain_v1` preserves six states:
 
 - `NO_BOUNDARY`: both analytic neighbouring samples have the same assignment; represented implicitly by no sparse record.
-- `OCCLUDING_CONTOUR`: two non-attached controlled surfaces meet and exactly one counterfactual exclusion establishes continuation of the other surface. The nearer terminating surface owns the edge.
-- `ATTACHED_JUNCTION`: the pair is declared by the scene contract and compiled geometry verifies its contact or intersection. It has no owner.
+- `OCCLUDING_CONTOUR`: two controlled surfaces meet away from a projected attachment locus and exactly one counterfactual exclusion establishes continuation of the other surface. The terminating surface owns the edge, even when that pair contacts elsewhere in the apparatus.
+- `ATTACHED_JUNCTION`: the sampled image edge is locally associated with the analytic projection of that pair's compiled 3D contact cell. It has no owner. Scene-level contact membership alone is insufficient.
 - `CONTROLLED_SILHOUETTE`: exactly one side is a controlled surface and the other is uncontrolled space. The controlled side owns the edge; uncontrolled space is not assigned a synthetic surface.
-- `MULTI_SURFACE_JUNCTION_AMBIGUOUS`: the deterministic incident neighbourhood contains more than two controlled assignments. It has no owner.
+- `MULTI_SURFACE_JUNCTION_AMBIGUOUS`: the deterministic incident neighbourhood contains more than two assignments, including uncontrolled space at a contact or silhouette endpoint. It has no owner.
 - `UNRESOLVED_BOUNDARY`: the bounded analytic method cannot choose a supported state. It has no owner, and strict canonical generation rejects it.
 
-The ambiguity rule is `edge_incident_3x2_or_2x3_multi_surface_v1`: a horizontal edge examines the clipped three-row by two-column neighbourhood incident to its samples, while a vertical edge examines the clipped two-row by three-column neighbourhood. More than two controlled assignments makes the edge multi-surface ambiguous before owner testing.
+The ambiguity rule is `edge_incident_3x2_or_2x3_multi_assignment_v2`: a horizontal edge examines the clipped three-row by two-column neighbourhood incident to its samples, while a vertical edge examines the clipped two-row by three-column neighbourhood. More than two assignments makes the edge ambiguous before local attachment or owner testing. This precedence gives contact endpoints and controlled/uncontrolled meetings a typed, deterministic posture.
 
 ## Privileged attachment contract
 
-`compiled_axis_aligned_plane_box_and_box_contact_v1` independently recompiles each apparatus and verifies the complete controlled-surface contact graph. It accepts only compiled MuJoCo planes and boxes whose world rotations are axis aligned within `1e-12`. Plane optical thickness is zero; box half-extents and plane finite visual extents define world-axis intervals. Two controlled geoms contact when all three closed interval gaps are at most `1e-12`.
+`projected_compiled_contact_locus_v1` independently recompiles each apparatus, verifies the complete controlled-surface contact graph, derives each observed pair's exact axis-aligned intersection cell, and associates that cell with individual image-lattice edges. It accepts only compiled MuJoCo planes and boxes whose world rotations are axis aligned within `1e-12`. Plane optical thickness is zero; box half-extents and plane finite visual extents define world-axis intervals. Two controlled geoms contact when all three closed interval gaps are at most `1e-12`.
 
-The verifier fails closed for unsupported geom types or rotations, missing declared contacts, undeclared observed contacts, duplicate declarations, bad semantic/raw-ID bindings, and out-of-range raw IDs. Compiled types, rotations, interval gaps, tolerances, semantic names, raw IDs, and the complete pair evidence remain privileged instrumentation. The public annotation carries only the method/version and a numerical-contract hash.
+The privileged numerical and type contract binds:
+
+- contact-cell derivation `compiled_axis_aligned_intersection_cell_v1`;
+- supported cell types `point`, `axis_aligned_segment`, `axis_aligned_rectangle`, and `axis_aligned_overlap_volume`;
+- projection convention `analytic_pinhole_pixel_centre_v1`;
+- association rule `sample_connection_segment_intersects_projected_contact_cell_v1`;
+- a `0.5` image-pixel band perpendicular to the sample-to-sample edge segment;
+- inclusive contact endpoints; and
+- `multi_surface_ambiguity_precedes_attachment_v1`.
+
+Association is a bounded linear-feasibility test in camera coordinates. It asks whether any point in the compiled contact cell projects onto the relevant centre-to-centre edge segment within the declared perpendicular band while remaining in front of the camera. It does not use rendered depth or renderer segmentation. A globally attached pair outside that local projected locus proceeds to ordinary counterfactual ownership, allowing a resting panel's base to be attached while its lateral edge owns support-surface occlusion.
+
+The verifier fails closed for unsupported geom types or rotations, missing declared contacts, undeclared observed contacts, duplicate declarations, bad semantic/raw-ID bindings, out-of-range raw IDs, malformed contact cells, and unsupported projection conditions. Compiled types, rotations, interval gaps, contact-cell bounds/types, tolerances, semantic names, raw IDs, and per-edge locus booleans remain privileged instrumentation. The public annotation carries only typed non-metric method versions and a numerical-contract hash.
 
 The single-occluder contract declares support-to-foreground-panel and support-to-background-panel contact. It does not declare foreground-to-background contact. The corridor declares floor-to-left-wall, floor-to-right-wall, floor-to-end-wall, left-wall-to-end-wall, and right-wall-to-end-wall contact. It does not declare left-wall-to-right-wall contact.
 
 ## Counterfactual ownership
 
-For a controlled-controlled non-attached edge, `counterfactual_nearest_surface_continuation_v1` excludes the surface visible at each neighbouring pixel centre in turn and analytically finds the next nearest controlled hit on that same ray. Ownership is assigned only under `exactly_one_side_continues_v1`:
+For a controlled-controlled edge that is not on its pair's local projected contact locus, `counterfactual_nearest_surface_continuation_v1` excludes the surface visible at each neighbouring pixel centre in turn and analytically finds the next nearest controlled hit on that same ray. Ownership is assigned only under `exactly_one_side_continues_v1`:
 
 - if excluding the negative-side surface reveals the positive-side surface, only the negative side owns;
 - if excluding the positive-side surface reveals the negative-side surface, only the positive side owns;
@@ -52,7 +64,7 @@ This computation uses compiled metric geometry as privileged apparatus evidence.
 
 ## Visibility-event contract
 
-`analytic_transport_boundary_causal_events_v1` provides two lossless `uint8` directional maps plus aligned `int32` affected-surface and owner-surface label maps. The labels map back to the transition's opaque `SurfaceId` records; zero is the canonical no-surface value. Owner and affected labels are non-zero only for accretion/deletion code `1`.
+`analytic_transport_boundary_causal_events_v2` provides two lossless `uint8` directional maps plus aligned `int32` affected-surface and owner-surface label maps. The labels map back to the transition's opaque `SurfaceId` records; zero is the canonical no-surface value. Owner and affected labels are non-zero only for accretion/deletion code `1`.
 
 The before-frame fate domain is:
 
@@ -67,7 +79,9 @@ The before-frame fate domain is:
 
 The after-frame origin domain uses the same numeric layout, with code `1` meaning accretion at an occluding boundary and code `2` meaning frame entry.
 
-Stable transport means the same visible static surface point remains visible in the other frame. Frame exit and entry are field-of-view outcomes and are not deletion or accretion. Deletion requires forward transport to be blocked by a controlled owner/affected pair supported by an `OCCLUDING_CONTOUR` in the target frame. Accretion applies the symmetric backward analysis against an owner/affected pair supported in the prior frame. Occlusions between globally verified attached pairs remain analytic-boundary ambiguous. Unsupported occluder pairs remain unresolved, and strict canonical generation rejects any such pixel.
+Stable transport means the same visible static surface point remains visible in the other frame. Frame exit and entry are field-of-view outcomes and are not deletion or accretion. Code `3`, `ANALYTIC_BOUNDARY_AMBIGUOUS`, is copied only from the transport oracle's actual source or projected-target analytic boundary band. It is never inferred merely because two surfaces contact elsewhere.
+
+Deletion requires an interior forward-transport sample to be blocked by a controlled owner/affected pair supported by an `OCCLUDING_CONTOUR` in the target frame. Accretion applies the symmetric backward analysis against a supported pair in the prior frame. Thus the locally supported side contours of the panel/support pairs produce causal support-surface events, while samples on the local attached seam retain the analytic boundary-band code and cannot become causal. Unsupported interior occluder pairs remain `UNRESOLVED_OCCLUSION`, and strict canonical generation rejects any such pixel.
 
 `OccludingVisibilityEventSummary` aggregates exact non-zero counts by event kind and opaque affected/owner pair and must agree with the dense maps. `WholeSurfaceVisibilityEvent` uses exact analytic controlled-surface visibility counts:
 
@@ -80,11 +94,13 @@ Partial accretion or deletion does not become whole-surface appearance or disapp
 
 `RegionMaskChange` remains a neutral aligned-raster observation and is not an event oracle.
 
-## Corridor occlusion posture
+## Complete public occlusion graph
 
-For the current closed corridor, independent analytic boundary recomputation finds only verified attached controlled-controlled junctions, plus bounded multi-surface ambiguity at their local meetings. It finds no controlled-controlled occluding contour. Corridor occlusion is therefore `status: available`, `relations: []`, with oracle rule `oriented_boundary_ownership_v1`. This known-empty state is distinct from the historical unavailable posture.
+For both scene families the public occlusion annotation is exactly the complete canonical set of oriented owner/affected pairs and their frame memberships. Validation requires equality, not subset membership, so omitted, invented, reversed, unsupported, or incorrectly framed relations fail after independent recomputation.
 
-The single-occluder retains its separately derived `counterfactual_occluder_exclusion_v1` relation. Validation requires every declared relation frame to have a matching opaque owner/affected `OCCLUDING_CONTOUR` pair.
+The single-occluder uses `oriented_boundary_ownership_with_counterfactual_crosscheck_v1`. Its public graph includes every supported foreground/background and panel/support relation. The privileged `counterfactual_occluder_exclusion_v1` foreground/background evidence remains an independent cross-check: its exact frame membership must agree with the corresponding member of the complete public graph, but it no longer limits the graph to that relation.
+
+For the current closed corridor, independent analytic boundary recomputation finds only locally projected attached controlled-controlled junctions, plus bounded multi-surface ambiguity at their meetings. It finds no controlled-controlled occluding contour. Corridor occlusion is therefore `status: available`, `relations: []`, with oracle rule `oriented_boundary_ownership_complete_v2`. This oracle-supported known-empty result is distinct from an unavailable posture.
 
 ## Public and privileged boundaries
 
@@ -105,37 +121,58 @@ The wire-version matrix is:
 | Contract | Version |
 | --- | --- |
 | Single-occluder and corridor configuration | `0.1.0-dev.2` (unchanged) |
-| Transition record | `0.1.0-dev.6` |
+| Transition record | `0.1.0-dev.7` |
 | Dataset and episode manifest | `0.1.0-dev.4` |
-| Privileged instrumentation | `0.1.0-dev.6` |
+| Privileged instrumentation | `0.1.0-dev.7` |
+
+The manifest remains `0.1.0-dev.4` because its wire shape is unchanged. Transition and instrumentation advance because the public attachment/occlusion methods and privileged contact-locus evidence changed. Boundary ownership advances to `analytic_oriented_boundary_ownership_v2`; visibility events advance to `analytic_transport_boundary_causal_events_v2`. The six numeric event codes remain truthful under their existing v1 domains, so those domains do not change.
 
 ## Validation, tests, and inspection
 
-Whole-dataset validation independently recompiles the exact scene, verifies its complete attachment graph, recomputes analytic assignments and counterfactual next hits, reconstructs every boundary record, and recomputes both event directions, summaries, whole-surface states, and identities. It also checks the privileged compiled-geometry and raw diagnostic evidence. Renderer segmentation remains a non-authoritative exact-interior diagnostic inherited from Slice 3.
+Whole-dataset validation independently recompiles the exact scene, verifies its complete attachment graph and contact cells, recomputes projected attachment-locus membership, analytic assignments, and counterfactual next hits, reconstructs every boundary record, complete occlusion graph, both event directions, summaries, whole-surface states, and identities. It also checks the privileged compiled-geometry and raw diagnostic evidence and the designated counterfactual cross-check. Renderer segmentation remains a non-authoritative exact-interior diagnostic inherited from Slice 3.
 
-Closed-form tests constrain foreground/background continuation, support attachment, perpendicular attachment, silhouettes, multi-surface ambiguity, unresolved both/neither continuation, horizontal/vertical owner sides, static transport, frame entry/exit, exact whole-surface zero crossings, and strict unresolved occlusion. Scene tests constrain counterfactual consistency, action reversal, corridor known-empty truthfulness, appearance invariance, opaque remapping, capability status, permissions, and semantic/metric leakage. Fully rehashed mutations of boundary kind/owner/method/identity, event code/owner/summary/method/identity, and attachment evidence must fail.
+Closed-form tests constrain local versus global attachment, foreground/background continuation, support attachment, perpendicular attachment, silhouettes, multi-surface ambiguity, unresolved both/neither continuation, horizontal/vertical owner sides, actual boundary-band ambiguity, interior pair-level occlusion, attached-seam non-causality, static transport, frame entry/exit, exact whole-surface zero crossings, and strict unresolved occlusion. Scene tests constrain base attachment plus a panel-owned side contour for the same pair, deterministic contact projection, counterfactual consistency, complete graph equality, action reversal, corridor known-empty truthfulness, appearance invariance, opaque remapping, capability status, permissions, and semantic/metric leakage. Fully rehashed mutations of boundary kind/owner/method/identity, event code/owner/summary/method/identity, contact-locus bounds, and every public graph posture must fail.
 
 Inspection validates the entire dataset before publication and then shows RGB, opaque segmentation, forward/backward transport and reasons, oriented-boundary overlays with kind and owner legends, before/after event maps, opaque accretion/deletion pair summaries, and occlusion/capability status. Output remains atomic, no-replace, outside the immutable dataset, and outside scientific identity.
 
 ## Determinism and cross-platform evidence
 
-The locked Windows/WGL two-episode identities are:
+The scientifically reviewed head `c82ac9d68463fea82ad132194007549ed955adf3` was rejected for the three local-attachment, ambiguity, and graph-completeness findings. Its v1 boundary/event identities remain historical evidence and must not be treated as corrected results:
 
-| Scene | Episode | Boundary | Visibility events |
+| Rejected head scene | Episode | Boundary | Visibility events |
 | --- | ---: | --- | --- |
 | Single occluder | 0 | `ea99e38626142a7c3b1845c234e5b577493fbf8ff55e40169a96bffaafe84f66` | `c35fe87f68dde0b282f8069a6700895d135e956a3b5ba2190f3b606f259b8ebb` |
 | Single occluder | 1 | `c690400c1c1496da23b4d8ee91af6b52d7e163a415fb7929ffa4494061becbef` | `c9032eb0250598e95902b3c4d5001ea724a48abf6cd66158fbd5374b2d312f2b` |
 | Corridor | 0 | `77e4aba8aa763827ce3c3a1e20ebc03f134c0c44edb127235f071b32c769f503` | `2db60ab41fe0f93f1fd574c0d1218d374727199b51eb3bf15625f6264cefbf0a` |
 | Corridor | 1 | `fd5c4360c0cc03d6be11bd9917de4909aa6f26129f95d69364d793c42e8e9ab3` | `480e283e5eecc7fc21e3a21f56e114f44c69460681e167b9292c45fa8e7b5a15` |
 
-These exact values are regression assertions in the full test suite. The same assertions run under locked Ubuntu/OSMesa CI; its exact-head outcome belongs to the public PR evidence and must be evaluated rather than assumed. Complete dataset and RGB identities remain renderer-specific.
+The corrected local Windows/WGL v2 identities are:
+
+| Corrected scene | Episode | Boundary | Visibility events |
+| --- | ---: | --- | --- |
+| Single occluder | 0 | `da74e273f5e6786c9093709c07147ea2666db58bb64d687665dbf563e5f9e717` | `dfd7fddd2a460ed1d3147bfca55c9e9034269c4ad0cecdc5de4751b1678cd3d6` |
+| Single occluder | 1 | `1918d7616cdb39ebdd5a01d6b6b6eed82667bbfff33b06b55f59536c20e99538` | `70809b9c2febd343ec459ae79be667892d6aa170a3dcc4c5b7bf0c914665392a` |
+| Corridor | 0 | `24b330294cf15e014d25ae9eb0b883728e2e45dd999eb62b53f86c86a77aab07` | `129635aab9379aa49593210c5dabdbe0ff2a206f665f54f5c9c8fe931fd9af54` |
+| Corridor | 1 | `a263206271e0126c0ec060b5ed7320ac76d848759980bce29dc8e1a37c350803` | `9a49722f9ccdade242d9e72b6707544a7b293e5d9850c0ab8bacaa526d75292b` |
+
+These corrected exact values are regression assertions rather than renderer-backend dispatches. The same values must pass under locked Ubuntu/OSMesa exact-head CI; disagreement must be preserved as a failing result, not hidden behind backend-specific expectations. Complete dataset and RGB identities remain renderer-specific. Until that CI evidence exists and independent review converges, the corrected identities are implementation evidence only.
+
+The corrected two-episode Windows/WGL count evidence is:
+
+| Scene/episode | Boundary kinds | Before-event codes | After-event codes |
+| --- | --- | --- | --- |
+| Single occluder 0 and 1 | attached 186; silhouette 504; junction-ambiguous 24; occluding 324 | stable 10382; deletion 229; exit 1523; boundary-ambiguous 839; no-surface 6227; unresolved 0 | stable 10382; accretion 229; entry 1523; boundary-ambiguous 839; no-surface 6227; unresolved 0 |
+| Corridor 0 | attached 760; junction-ambiguous 12; occluding 0 | stable 11232; deletion 0; exit 7422; boundary-ambiguous 546; unresolved 0 | stable 18234; accretion 0; entry 0; boundary-ambiguous 966; unresolved 0 |
+| Corridor 1 | attached 752; junction-ambiguous 12; occluding 0 | stable 11046; deletion 0; exit 7624; boundary-ambiguous 530; unresolved 0 | stable 18346; accretion 0; entry 0; boundary-ambiguous 854; unresolved 0 |
+
+For each single-occluder episode and direction, the 229 causal pixels decompose into 203 foreground-panel-over-background pixels, 13 background-panel-over-support pixels, and 13 foreground-panel-over-support pixels. The support events are newly visible after localising attachment; all 839 code-3 pixels come from the analytic transport boundary band rather than pair-level contact.
 
 ## Limitations and remaining work
 
 - The method is bounded to static controlled MuJoCo planes and axis-aligned boxes in the two canonical scene families. Moving surfaces, arbitrary rotations/types, openings, T-junction scene semantics, and nested enclosures are not supported.
 - Multi-surface junctions are intentionally ambiguous at the declared local lattice neighbourhood. No subpixel contour or component topology is inferred.
-- Attached-pair occlusion during transport is conservatively boundary-ambiguous; it is not coerced to causal accretion/deletion.
-- Event ownership is a pair-level consequence of exact analytic transport and the presence of a supported contour pair; this slice does not trace a continuous boundary component to each transported ray.
+- Contact-locus association is bounded to compiled axis-aligned intersection cells and the declared half-pixel lattice band; it is not a general arbitrary-mesh contact oracle.
+- Event ownership for an interior occluded sample is a consequence of exact analytic transport plus a supported owner/affected contour pair in the relevant target frame. Actual source/projected-target boundary-band samples take precedence. This slice does not trace a continuous boundary component to every transported ray.
 - Cross-platform evidence is limited to the locked Windows/WGL and Ubuntu/OSMesa environments and does not imply stability under arbitrary drivers or dependency versions.
 - Broader appearance assets, final evaluation seeds, full Gate 0B exit-criterion evidence, and owner decisions remain future work. Independent dual review and linked closeout are still required before Slice 4 can become canonical.
 
