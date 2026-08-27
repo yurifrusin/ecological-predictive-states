@@ -2,7 +2,7 @@
 
 ## Status and scientific purpose
 
-This document describes implementation work on `codex/gate-0b-slice-4-boundary-events` under review profile `DUAL_REVIEW`, evidence class `PUBLIC_REPOSITORY_ONLY`, and closeout boundary `WORK_PACKAGE`. The work is implemented pending independent engineering review, independent scientific review, and owner approval. It is not canonical and is not a scientific result.
+Slice 4 is canonical after exact-head engineering and scientific review under review profile `DUAL_REVIEW`, evidence class `PUBLIC_REPOSITORY_ONLY`, and closeout boundary `WORK_PACKAGE`. The exact reviewed implementation head was `24deb074d4ba0cf3e1044e466ecbbb6e0b2a4cc4`; it received `ENGINEERING_PASS`, renewed `SCIENTIFIC_PASS`, and exact-head owner approval before merge. This apparatus closeout has no phase-gate effect and is not a scientific result.
 
 Slice 4 adds an analytic image-plane oracle for oriented boundary ownership and uses that oracle with the canonical analytic optical transport to distinguish stable transport, accretion/deletion at supported occluding contours, frame entry/exit, and whole-surface visibility states. It does not infer those events from aligned mask differences, RGB, rendered depth, or renderer segmentation.
 
@@ -166,18 +166,18 @@ The not-verified EPS-ER9-0002 head `ec71e2c9bfba2c2e00c9a11b5ed8d05370dda1d8` su
 | Corridor | 0 | `a24fb5965418145b8abb9ee9ec7f344fb514895a492a4902f6cc0b327077423b` | `ab89d8eb8329b634a35de470337a552baaff8b25ef2344fed28e57f44eb5fb4a` |
 | Corridor | 1 | `02cca96eb7aa47dfbbae87a8c90eebe5c99b7d9686b6420c5050978f6d31f328` | `a9a5271000a73c2298ccc933c448ef1cc3ebbbace2cd4d14710091ae43230e44` |
 
-The active dev.9 correction identities are:
+The final reviewed dev.9 identities are:
 
-| Active corrected scene | Episode | Boundary | Visibility events |
+| Final reviewed scene | Episode | Boundary | Visibility events |
 | --- | ---: | --- | --- |
 | Single occluder | 0 | `5a6a4792a3554d3b7670c73ac3e2c4d1ed7c438e12f2dabe8065f9dbc230a2c8` | `c41807b1245faa9fe1027584ca2dcc2e050956e6a4086bad783e74381abb611a` |
 | Single occluder | 1 | `485aadab9af42e8ee5ca2194da02eff26626d2b887050675de4fcb192cad3aba` | `d9d2c91fe5fd10bf90fcff316dbf6c7956ef8e34baccb3b185971c0aa16192f9` |
 | Corridor | 0 | `ddbb23daf1f7e17c936e74fd68ad63075385dcfb7c3b60f810acc835e346b235` | `4ff67bac73f9c01abe6fecd8263ff8d2eda1636b9222dd9f6fc7916c7e414d33` |
 | Corridor | 1 | `df0c356d09e3cd601a0c896c5b4b2df34fb52b21a9dccaaefea2d7a4f4570448` | `9c8a8e1a57d6d5c43b56690812ceafe8a25c662a1e2abfd3d1c2ef035ca0cbb3` |
 
-These active exact values are regression assertions rather than renderer-backend dispatches. The same values must pass under locked Ubuntu/OSMesa exact-head CI; disagreement must be preserved as a failing result, not hidden behind backend-specific expectations. Complete dataset and RGB identities remain renderer-specific. Until that CI evidence exists and independent review converges, the corrected identities are implementation evidence only.
+These final exact values are regression assertions rather than renderer-backend dispatches. Exact-head Ubuntu/OSMesa CI run `33047664727` at `24deb074d4ba0cf3e1044e466ecbbb6e0b2a4cc4` reproduced all four Windows/WGL boundary and visibility-event identity pairs. Complete dataset and RGB identities remain renderer-specific; disagreement in another environment must be preserved as a failing result rather than hidden behind backend-specific boundary/event expectations.
 
-The corrected two-episode Windows/WGL count evidence is:
+The final two-episode canonical counts, matched under locked Windows/WGL and Ubuntu/OSMesa, are:
 
 | Scene/episode | Boundary kinds | Before-event codes | After-event codes |
 | --- | --- | --- | --- |
@@ -187,6 +187,16 @@ The corrected two-episode Windows/WGL count evidence is:
 
 For each single-occluder episode and direction, the 229 causal pixels decompose into 203 foreground-panel-over-background pixels, 13 background-panel-over-support pixels, and 13 foreground-panel-over-support pixels. The support events are newly visible after localising attachment; all 839 code-3 pixels come from the analytic transport boundary band rather than pair-level contact.
 
+## Final review evidence
+
+The final method/schema posture is `analytic_oriented_boundary_ownership_v4`, `projected_compiled_contact_locus_v3`, `scene_attachment_public_contract_v4`, `compiled_axis_aligned_intersection_cell_v1`, `strict_forward_distance_greater_than_epsilon_v1`, `image_constraints_only_slack_strict_front_and_cell_bounds_exact_v1`, and `analytic_transport_boundary_causal_events_v2`, with transition and privileged instrumentation `0.1.0-dev.9`, dataset/episode manifest `0.1.0-dev.4`, and configuration `0.1.0-dev.2`.
+
+The final strict witness contract requires an actual witness inside the closed compiled contact cell. Contact-cell parameters have exact `[0, 1]` bounds; the `1e-12` feasibility slack applies only to inclusive image-association inequalities, and neither the strict in-front plane nor the contact-cell bounds receive slack. Point, segment, rectangle, and overlap-volume cases are accepted only where an actual supported in-cell witness exists. Segment, rectangle, and overlap-volume cells with no strictly in-front in-cell point are rejected. Camera validation remains fail-closed.
+
+Local Windows/WGL review evidence recorded 299 passed and 3 platform skips. Exact-head Ubuntu/OSMesa CI run `33047664727` passed locked installation, lint, formatting, typing, all 302 tests, and both two-episode generation, validation, and inspection workflows. Inspection composites were coherent. The exact identities and counts above matched across the two locked environments. The final correction deliberately changed boundary/event identities because the formal numerical contract changed, while leaving canonical boundary/event records and counts unchanged from the preceding dev.8 correction.
+
+The accepted posture retains projected local attachment, ambiguity only at the actual analytic transport boundary band, equality of the public graph with all supported oriented owner/affected pairs and frame memberships, typed fail-closed permissions, and the privileged historical foreground/background counterfactual cross-check. Engineering and scientific review concern apparatus and construct validity; they do not establish that an ecological predictive state outperforms a baseline.
+
 ## Limitations and remaining work
 
 - The method is bounded to static controlled MuJoCo planes and axis-aligned boxes in the two canonical scene families. Moving surfaces, arbitrary rotations/types, openings, T-junction scene semantics, and nested enclosures are not supported.
@@ -194,6 +204,6 @@ For each single-occluder episode and direction, the 229 causal pixels decompose 
 - Contact-locus association is bounded to compiled axis-aligned intersection cells and the declared half-pixel lattice band; it is not a general arbitrary-mesh contact oracle.
 - Event ownership for an interior occluded sample is a consequence of exact analytic transport plus a supported owner/affected contour pair in the relevant target frame. Actual source/projected-target boundary-band samples take precedence. This slice does not trace a continuous boundary component to every transported ray.
 - Cross-platform evidence is limited to the locked Windows/WGL and Ubuntu/OSMesa environments and does not imply stability under arbitrary drivers or dependency versions.
-- Broader appearance assets, final evaluation seeds, full Gate 0B exit-criterion evidence, and owner decisions remain future work. Independent dual review and linked closeout are still required before Slice 4 can become canonical.
+- Broader appearance assets, final evaluation seeds, and remaining full Gate 0B exit-criterion evidence and owner decisions remain future work.
 
 This work does not implement a component split/merge oracle, ecological graph or state conversion, model interface, learned method, navigation, robot integration, Gate 0C, or Gate 0D model. Full Gate 0B completion is not claimed, Gate 0C is not authorised, and no scientific result is claimed.
