@@ -14,8 +14,10 @@ from epsbench.annotations import (
     ATTACHMENT_CONTACT_MANIFOLD_RULE,
     ATTACHMENT_EDGE_ASSOCIATION_RULE,
     ATTACHMENT_ENDPOINT_TIE_RULE,
+    ATTACHMENT_FEASIBILITY_RULE,
     ATTACHMENT_MULTI_SURFACE_RULE,
     ATTACHMENT_PROJECTION_CONVENTION,
+    ATTACHMENT_PROJECTION_IN_FRONT_RULE,
     ATTACHMENT_PUBLIC_CONTRACT_VERSION,
     ATTACHMENT_RULE,
     BOUNDARY_KIND_DOMAIN,
@@ -354,6 +356,8 @@ def _expected_oriented_boundary(
         attachment_contact_manifold_rule=ATTACHMENT_CONTACT_MANIFOLD_RULE,
         attachment_supported_contact_manifold_types=SUPPORTED_CONTACT_MANIFOLD_TYPES,
         attachment_projection_convention=ATTACHMENT_PROJECTION_CONVENTION,
+        attachment_projection_in_front_rule=ATTACHMENT_PROJECTION_IN_FRONT_RULE,
+        attachment_feasibility_rule=ATTACHMENT_FEASIBILITY_RULE,
         attachment_edge_lattice_association_rule=ATTACHMENT_EDGE_ASSOCIATION_RULE,
         attachment_endpoint_tie_rule=ATTACHMENT_ENDPOINT_TIE_RULE,
         attachment_multi_surface_rule=ATTACHMENT_MULTI_SURFACE_RULE,
@@ -534,6 +538,10 @@ def _expected_attachment_contract(
         contact_manifold_rule=contract.contact_manifold_rule,  # type: ignore[arg-type]
         supported_contact_manifold_types=contract.supported_contact_manifold_types,  # type: ignore[arg-type]
         projection_convention=contract.projection_convention,  # type: ignore[arg-type]
+        projection_in_front_rule=contract.projection_in_front_rule,  # type: ignore[arg-type]
+        projection_in_front_epsilon=contract.projection_in_front_epsilon,
+        feasibility_rule=contract.feasibility_rule,  # type: ignore[arg-type]
+        feasibility_slack=contract.feasibility_slack,
         edge_lattice_association_rule=contract.edge_lattice_association_rule,  # type: ignore[arg-type]
         endpoint_tie_rule=contract.endpoint_tie_rule,  # type: ignore[arg-type]
         multi_surface_rule=contract.multi_surface_rule,  # type: ignore[arg-type]

@@ -19,16 +19,19 @@ from epsbench.annotations.optical_transport import (
     TransportReasonCode,
     counterfactual_surface_assignments,
     focal_scales_from_vertical_fov,
+    validate_analytic_camera,
 )
 
-ORIENTED_BOUNDARY_METHOD: Final = "analytic_oriented_boundary_ownership_v2"
+ORIENTED_BOUNDARY_METHOD: Final = "analytic_oriented_boundary_ownership_v3"
 EDGE_LATTICE_CONVENTION: Final = "four_neighbour_sample_edge_lattice_v1"
 BOUNDARY_KIND_DOMAIN: Final = "oriented_boundary_kind_domain_v1"
 OWNER_SIDE_DOMAIN: Final = "oriented_boundary_owner_side_domain_v1"
-ATTACHMENT_PUBLIC_CONTRACT_VERSION: Final = "scene_attachment_public_contract_v2"
-ATTACHMENT_RULE: Final = "projected_compiled_contact_locus_v1"
+ATTACHMENT_PUBLIC_CONTRACT_VERSION: Final = "scene_attachment_public_contract_v3"
+ATTACHMENT_RULE: Final = "projected_compiled_contact_locus_v2"
 ATTACHMENT_CONTACT_MANIFOLD_RULE: Final = "compiled_axis_aligned_intersection_cell_v1"
 ATTACHMENT_PROJECTION_CONVENTION: Final = "analytic_pinhole_pixel_centre_v1"
+ATTACHMENT_PROJECTION_IN_FRONT_RULE: Final = "strict_forward_distance_greater_than_epsilon_v1"
+ATTACHMENT_FEASIBILITY_RULE: Final = "per_constraint_inclusive_slack_except_strict_in_front_v1"
 ATTACHMENT_EDGE_ASSOCIATION_RULE: Final = (
     "sample_connection_segment_intersects_projected_contact_cell_v1"
 )
@@ -41,6 +44,7 @@ SUPPORTED_CONTACT_MANIFOLD_TYPES: Final = (
     "axis_aligned_overlap_volume",
 )
 ATTACHMENT_CONTACT_TOLERANCE: Final = 1e-12
+ATTACHMENT_FEASIBILITY_SLACK: Final = 1e-12
 ATTACHMENT_ROTATION_TOLERANCE: Final = 1e-12
 ATTACHMENT_IMAGE_TOLERANCE_PIXELS: Final = 0.5
 COUNTERFACTUAL_CONTINUATION_RULE: Final = "counterfactual_nearest_surface_continuation_v1"
@@ -93,6 +97,10 @@ class RawAttachmentContractEvidence:
     contact_manifold_rule: str
     supported_contact_manifold_types: tuple[str, ...]
     projection_convention: str
+    projection_in_front_rule: str
+    projection_in_front_epsilon: float
+    feasibility_rule: str
+    feasibility_slack: float
     edge_lattice_association_rule: str
     endpoint_tie_rule: str
     multi_surface_rule: str
@@ -274,6 +282,10 @@ def verify_attachment_contract(
         contact_manifold_rule=ATTACHMENT_CONTACT_MANIFOLD_RULE,
         supported_contact_manifold_types=SUPPORTED_CONTACT_MANIFOLD_TYPES,
         projection_convention=ATTACHMENT_PROJECTION_CONVENTION,
+        projection_in_front_rule=ATTACHMENT_PROJECTION_IN_FRONT_RULE,
+        projection_in_front_epsilon=RAY_DIRECTION_EPSILON,
+        feasibility_rule=ATTACHMENT_FEASIBILITY_RULE,
+        feasibility_slack=ATTACHMENT_FEASIBILITY_SLACK,
         edge_lattice_association_rule=ATTACHMENT_EDGE_ASSOCIATION_RULE,
         endpoint_tie_rule=ATTACHMENT_ENDPOINT_TIE_RULE,
         multi_surface_rule=ATTACHMENT_MULTI_SURFACE_RULE,
@@ -293,25 +305,37 @@ LocalAttachmentEdge = tuple[str, int, int, frozenset[int]]
 def _bounded_halfspace_feasible(
     coefficients: npt.NDArray[np.float64],
     limits: npt.NDArray[np.float64],
+    feasibility_slacks: npt.NDArray[np.float64],
     dimensions: int,
 ) -> bool:
     """Decide a bounded binary64 linear-feasibility problem by its vertices."""
 
-    tolerance = ATTACHMENT_CONTACT_TOLERANCE
+    if coefficients.ndim != 2 or coefficients.shape[1] != dimensions:
+        raise ValueError("halfspace coefficients do not match the declared dimensions")
+    if limits.shape != (coefficients.shape[0],) or feasibility_slacks.shape != limits.shape:
+        raise ValueError("halfspace limits and feasibility slacks must match the constraints")
+    if not (
+        np.all(np.isfinite(coefficients))
+        and np.all(np.isfinite(limits))
+        and np.all(np.isfinite(feasibility_slacks))
+        and np.all(feasibility_slacks >= 0.0)
+    ):
+        raise ValueError("halfspace constraints and feasibility slacks must be finite and valid")
+    effective_limits = limits + feasibility_slacks
     if dimensions == 0:
-        return bool(np.all(limits >= -tolerance))
+        return bool(np.all(0.0 <= effective_limits))
     centre = np.full(dimensions, 0.5, dtype=np.float64)
-    if np.all(coefficients @ centre <= limits + tolerance):
+    if np.all(coefficients @ centre <= effective_limits):
         return True
     for active in combinations(range(coefficients.shape[0]), dimensions):
         matrix = coefficients[np.asarray(active), :]
-        if np.linalg.matrix_rank(matrix, tol=tolerance) != dimensions:
+        if np.linalg.matrix_rank(matrix, tol=ATTACHMENT_CONTACT_TOLERANCE) != dimensions:
             continue
         try:
             candidate = np.linalg.solve(matrix, limits[np.asarray(active)])
         except np.linalg.LinAlgError:
             continue
-        if np.all(coefficients @ candidate <= limits + tolerance):
+        if np.all(coefficients @ candidate <= effective_limits):
             return True
     return False
 
@@ -366,27 +390,36 @@ def _contact_cell_projects_to_edge(
     v_max = (y_max - height / 2.0) / focal_y
 
     linear_forms = (
-        (np.asarray((0.0, 0.0, 1.0)), -RAY_DIRECTION_EPSILON),
-        (np.asarray((-1.0, 0.0, -u_min)), 0.0),
-        (np.asarray((1.0, 0.0, u_max)), 0.0),
-        (np.asarray((0.0, 1.0, -v_min)), 0.0),
-        (np.asarray((0.0, -1.0, v_max)), 0.0),
+        (
+            np.asarray((0.0, 0.0, 1.0)),
+            float(np.nextafter(-RAY_DIRECTION_EPSILON, -np.inf)),
+            0.0,
+        ),
+        (np.asarray((-1.0, 0.0, -u_min)), 0.0, ATTACHMENT_FEASIBILITY_SLACK),
+        (np.asarray((1.0, 0.0, u_max)), 0.0, ATTACHMENT_FEASIBILITY_SLACK),
+        (np.asarray((0.0, 1.0, -v_min)), 0.0, ATTACHMENT_FEASIBILITY_SLACK),
+        (np.asarray((0.0, -1.0, v_max)), 0.0, ATTACHMENT_FEASIBILITY_SLACK),
     )
     rows: list[npt.NDArray[np.float64]] = []
     limits: list[float] = []
-    for form, right_hand_side in linear_forms:
+    feasibility_slacks: list[float] = []
+    for form, right_hand_side, feasibility_slack in linear_forms:
         rows.append(np.asarray(form @ camera_coefficients, dtype=np.float64))
         limits.append(float(right_hand_side - form @ camera_origin))
+        feasibility_slacks.append(feasibility_slack)
     for index in range(dimensions):
         upper_bound = np.zeros(dimensions, dtype=np.float64)
         upper_bound[index] = 1.0
         rows.append(upper_bound)
         limits.append(1.0)
+        feasibility_slacks.append(ATTACHMENT_FEASIBILITY_SLACK)
         rows.append(-upper_bound)
         limits.append(0.0)
+        feasibility_slacks.append(ATTACHMENT_FEASIBILITY_SLACK)
     return _bounded_halfspace_feasible(
-        np.asarray(rows, dtype=np.float64).reshape(-1, dimensions),
+        np.asarray(rows, dtype=np.float64).reshape(len(rows), dimensions),
         np.asarray(limits, dtype=np.float64),
+        np.asarray(feasibility_slacks, dtype=np.float64),
         dimensions,
     )
 
@@ -400,6 +433,8 @@ def projected_attachment_locus_edges(
 ) -> frozenset[LocalAttachmentEdge]:
     """Associate compiled contact manifolds with only their local image edges."""
 
+    validate_analytic_camera(camera)
+    focal_scales_from_vertical_fov(width, height, camera.vertical_field_of_view_degrees)
     if assignment.shape != (height, width):
         raise ValueError("attachment projection raster shape differs from assignment")
     pairs = {

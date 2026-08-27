@@ -124,6 +124,12 @@ def _validated_camera_arrays(camera: AnalyticCamera) -> tuple[FloatArray, FloatA
     return position, rotation, _validated_vertical_fov(camera.vertical_field_of_view_degrees)
 
 
+def validate_analytic_camera(camera: AnalyticCamera) -> None:
+    """Fail closed unless an analytic camera satisfies the complete pose contract."""
+
+    _validated_camera_arrays(camera)
+
+
 def _validated_controlled_geom_ids(
     model: mujoco.MjModel,
     controlled_geom_ids: tuple[int, ...],

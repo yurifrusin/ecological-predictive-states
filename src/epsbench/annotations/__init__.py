@@ -6,9 +6,12 @@ from epsbench.annotations.boundary_events import (
     ATTACHMENT_CONTACT_TOLERANCE,
     ATTACHMENT_EDGE_ASSOCIATION_RULE,
     ATTACHMENT_ENDPOINT_TIE_RULE,
+    ATTACHMENT_FEASIBILITY_RULE,
+    ATTACHMENT_FEASIBILITY_SLACK,
     ATTACHMENT_IMAGE_TOLERANCE_PIXELS,
     ATTACHMENT_MULTI_SURFACE_RULE,
     ATTACHMENT_PROJECTION_CONVENTION,
+    ATTACHMENT_PROJECTION_IN_FRONT_RULE,
     ATTACHMENT_PUBLIC_CONTRACT_VERSION,
     ATTACHMENT_ROTATION_TOLERANCE,
     ATTACHMENT_RULE,
@@ -62,6 +65,7 @@ from epsbench.annotations.optical_transport import (
     focal_scales_from_vertical_fov,
     pixel_rays_world,
     project_world_points,
+    validate_analytic_camera,
 )
 
 __all__ = [
@@ -74,9 +78,12 @@ __all__ = [
     "ATTACHMENT_CONTACT_TOLERANCE",
     "ATTACHMENT_EDGE_ASSOCIATION_RULE",
     "ATTACHMENT_ENDPOINT_TIE_RULE",
+    "ATTACHMENT_FEASIBILITY_RULE",
+    "ATTACHMENT_FEASIBILITY_SLACK",
     "ATTACHMENT_IMAGE_TOLERANCE_PIXELS",
     "ATTACHMENT_MULTI_SURFACE_RULE",
     "ATTACHMENT_PROJECTION_CONVENTION",
+    "ATTACHMENT_PROJECTION_IN_FRONT_RULE",
     "ATTACHMENT_PUBLIC_CONTRACT_VERSION",
     "ATTACHMENT_ROTATION_TOLERANCE",
     "ATTACHMENT_RULE",
@@ -121,5 +128,6 @@ __all__ = [
     "pixel_rays_world",
     "project_world_points",
     "projected_attachment_locus_edges",
+    "validate_analytic_camera",
     "verify_attachment_contract",
 ]

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 
 import mujoco
 import numpy as np
 import pytest
 
 from epsbench.annotations import (
+    RAY_DIRECTION_EPSILON,
     AfterOriginCode,
     AnalyticCamera,
     BeforeFateCode,
@@ -14,9 +16,11 @@ from epsbench.annotations import (
     classify_oriented_boundary_lattice,
     compute_analytic_transport,
     compute_raw_boundary_visibility_analysis,
+    projected_attachment_locus_edges,
     verify_attachment_contract,
 )
 from epsbench.annotations.boundary_events import (
+    RawAttachmentContractEvidence,
     _derive_directional_events,
     _whole_surface_events,
 )
@@ -52,6 +56,28 @@ def _counterfactual(
         0: np.asarray(first, dtype=np.int32),
         1: np.asarray(second, dtype=np.int32),
     }
+
+
+def _point_attachment_evidence(z: float) -> RawAttachmentContractEvidence:
+    model = mujoco.MjModel.from_xml_string(
+        "<mujoco><worldbody>"
+        '<geom name="first" type="box" pos="-0.5 -0.5 -2.5" size="0.5 0.5 0.5"/>'
+        '<geom name="second" type="box" pos="0.5 0.5 -1.5" size="0.5 0.5 0.5"/>'
+        "</worldbody></mujoco>"
+    )
+    evidence = verify_attachment_contract(
+        model,
+        mujoco.MjData(model),
+        {"first": 0, "second": 1},
+        (("first", "second"),),
+    )
+    point = (0.0, 0.0, z)
+    pair = replace(
+        evidence.pair_evidence[0],
+        contact_world_min=point,
+        contact_world_max=point,
+    )
+    return replace(evidence, pair_evidence=(pair,))
 
 
 def test_finite_foreground_contour_is_owned_by_surface_revealing_background() -> None:
@@ -108,6 +134,65 @@ def test_compiled_panel_support_contact_is_attached_and_has_no_unilateral_owner(
     assert records[0].kind == "attached_junction"
     assert records[0].owner_side == "none"
     assert records[0].owner_raw_geom_id is None
+
+
+def test_zero_dimensional_point_manifold_projects_to_local_edge() -> None:
+    evidence = _point_attachment_evidence(-2.0)
+    assert evidence.pair_evidence[0].contact_manifold_type == "point"
+    assert projected_attachment_locus_edges(
+        np.asarray([[0, 1]], dtype=np.int32),
+        evidence,
+        _camera(),
+        2,
+        1,
+    ) == frozenset({("horizontal", 0, 0, frozenset((0, 1)))})
+
+
+@pytest.mark.parametrize("z", [0.0, -RAY_DIRECTION_EPSILON])
+def test_point_attachment_at_camera_plane_or_exact_epsilon_is_not_in_front(z: float) -> None:
+    assert not projected_attachment_locus_edges(
+        np.asarray([[0, 1]], dtype=np.int32),
+        _point_attachment_evidence(z),
+        _camera(),
+        2,
+        1,
+    )
+
+
+def test_point_attachment_one_binary64_step_beyond_epsilon_is_in_front() -> None:
+    forward_distance = float(np.nextafter(RAY_DIRECTION_EPSILON, np.inf))
+    assert projected_attachment_locus_edges(
+        np.asarray([[0, 1]], dtype=np.int32),
+        _point_attachment_evidence(-forward_distance),
+        _camera(),
+        2,
+        1,
+    )
+
+
+@pytest.mark.parametrize(
+    "rotation",
+    [
+        (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0),
+        (1.0, 0.0, 0.0, 0.0, np.nan, 0.0, 0.0, 0.0, 1.0),
+    ],
+)
+def test_projected_attachment_entry_rejects_malformed_or_nonfinite_camera_rotation(
+    rotation: tuple[float, ...],
+) -> None:
+    camera = AnalyticCamera(
+        world_position=(0.0, 0.0, 0.0),
+        world_rotation_row_major=rotation,
+        vertical_field_of_view_degrees=60.0,
+    )
+    with pytest.raises(ValueError, match="rotation"):
+        projected_attachment_locus_edges(
+            np.asarray([[0, 0]], dtype=np.int32),
+            _point_attachment_evidence(-2.0),
+            camera,
+            2,
+            1,
+        )
 
 
 def test_local_attachment_edge_does_not_override_lateral_ownership_for_same_pair() -> None:

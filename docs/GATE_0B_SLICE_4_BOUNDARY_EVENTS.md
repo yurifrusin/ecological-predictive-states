@@ -34,21 +34,23 @@ The ambiguity rule is `edge_incident_3x2_or_2x3_multi_assignment_v2`: a horizont
 
 ## Privileged attachment contract
 
-`projected_compiled_contact_locus_v1` independently recompiles each apparatus, verifies the complete controlled-surface contact graph, derives each observed pair's exact axis-aligned intersection cell, and associates that cell with individual image-lattice edges. It accepts only compiled MuJoCo planes and boxes whose world rotations are axis aligned within `1e-12`. Plane optical thickness is zero; box half-extents and plane finite visual extents define world-axis intervals. Two controlled geoms contact when all three closed interval gaps are at most `1e-12`.
+`projected_compiled_contact_locus_v2` independently recompiles each apparatus, verifies the complete controlled-surface contact graph, derives each observed pair's exact axis-aligned intersection cell, and associates that cell with individual image-lattice edges. It accepts only compiled MuJoCo planes and boxes whose world rotations are axis aligned within `1e-12`. Plane optical thickness is zero; box half-extents and plane finite visual extents define world-axis intervals. Two controlled geoms contact when all three closed interval gaps are at most `1e-12`.
 
 The privileged numerical and type contract binds:
 
 - contact-cell derivation `compiled_axis_aligned_intersection_cell_v1`;
 - supported cell types `point`, `axis_aligned_segment`, `axis_aligned_rectangle`, and `axis_aligned_overlap_volume`;
 - projection convention `analytic_pinhole_pixel_centre_v1`;
+- strict in-front rule `strict_forward_distance_greater_than_epsilon_v1`, with forward distance required to be greater than `1e-12`;
+- feasibility rule `per_constraint_inclusive_slack_except_strict_in_front_v1`, with `1e-12` slack on inclusive projection/cell constraints and zero slack on the strict in-front constraint;
 - association rule `sample_connection_segment_intersects_projected_contact_cell_v1`;
 - a `0.5` image-pixel band perpendicular to the sample-to-sample edge segment;
 - inclusive contact endpoints; and
 - `multi_surface_ambiguity_precedes_attachment_v1`.
 
-Association is a bounded linear-feasibility test in camera coordinates. It asks whether any point in the compiled contact cell projects onto the relevant centre-to-centre edge segment within the declared perpendicular band while remaining in front of the camera. It does not use rendered depth or renderer segmentation. A globally attached pair outside that local projected locus proceeds to ordinary counterfactual ownership, allowing a resting panel's base to be attached while its lateral edge owns support-surface occlusion.
+Association is a bounded linear-feasibility test in camera coordinates, including an explicit zero-dimensional branch for point contact manifolds. It asks whether any point in the compiled contact cell projects onto the relevant centre-to-centre edge segment within the declared perpendicular band while satisfying the same strict in-front epsilon as analytic transport. The general feasibility slack cannot relax that front condition: camera-plane points and points exactly at the epsilon are excluded, while the next representable greater forward distance is included. It does not use rendered depth or renderer segmentation. A globally attached pair outside that local projected locus proceeds to ordinary counterfactual ownership, allowing a resting panel's base to be attached while its lateral edge owns support-surface occlusion.
 
-The verifier fails closed for unsupported geom types or rotations, missing declared contacts, undeclared observed contacts, duplicate declarations, bad semantic/raw-ID bindings, out-of-range raw IDs, malformed contact cells, and unsupported projection conditions. Compiled types, rotations, interval gaps, contact-cell bounds/types, tolerances, semantic names, raw IDs, and per-edge locus booleans remain privileged instrumentation. The public annotation carries only typed non-metric method versions and a numerical-contract hash.
+The verifier fails closed for unsupported geom types or rotations, missing declared contacts, undeclared observed contacts, duplicate declarations, bad semantic/raw-ID bindings, out-of-range raw IDs, malformed contact cells, and unsupported projection conditions. The exported projected-attachment entry point validates the complete analytic camera pose and FOV before scanning edges, including the no-boundary case; malformed, non-finite, non-orthonormal, and improper rotations are rejected. Compiled types, rotations, interval gaps, contact-cell bounds/types, tolerances, semantic names, raw IDs, and per-edge locus booleans remain privileged instrumentation. The public annotation carries only typed non-metric method versions and a numerical-contract hash.
 
 The single-occluder contract declares support-to-foreground-panel and support-to-background-panel contact. It does not declare foreground-to-background contact. The corridor declares floor-to-left-wall, floor-to-right-wall, floor-to-end-wall, left-wall-to-end-wall, and right-wall-to-end-wall contact. It does not declare left-wall-to-right-wall contact.
 
@@ -121,11 +123,11 @@ The wire-version matrix is:
 | Contract | Version |
 | --- | --- |
 | Single-occluder and corridor configuration | `0.1.0-dev.2` (unchanged) |
-| Transition record | `0.1.0-dev.7` |
+| Transition record | `0.1.0-dev.8` |
 | Dataset and episode manifest | `0.1.0-dev.4` |
-| Privileged instrumentation | `0.1.0-dev.7` |
+| Privileged instrumentation | `0.1.0-dev.8` |
 
-The manifest remains `0.1.0-dev.4` because its wire shape is unchanged. Transition and instrumentation advance because the public attachment/occlusion methods and privileged contact-locus evidence changed. Boundary ownership advances to `analytic_oriented_boundary_ownership_v2`; visibility events advance to `analytic_transport_boundary_causal_events_v2`. The six numeric event codes remain truthful under their existing v1 domains, so those domains do not change.
+The manifest remains `0.1.0-dev.4` because its wire shape is unchanged. Transition and instrumentation advance because the public attachment projection rules and privileged numerical evidence changed. Boundary ownership advances to `analytic_oriented_boundary_ownership_v3`; attachment projection advances to `projected_compiled_contact_locus_v2` and public attachment contract v3. Visibility events remain `analytic_transport_boundary_causal_events_v2` because event derivation and code semantics are unchanged, although event identities change through their required boundary-identity binding. The six numeric event codes remain truthful under their existing v1 domains, so those domains do not change.
 
 ## Validation, tests, and inspection
 
@@ -146,16 +148,25 @@ The scientifically reviewed head `c82ac9d68463fea82ad132194007549ed955adf3` was 
 | Corridor | 0 | `77e4aba8aa763827ce3c3a1e20ebc03f134c0c44edb127235f071b32c769f503` | `2db60ab41fe0f93f1fd574c0d1218d374727199b51eb3bf15625f6264cefbf0a` |
 | Corridor | 1 | `fd5c4360c0cc03d6be11bd9917de4909aa6f26129f95d69364d793c42e8e9ab3` | `480e283e5eecc7fc21e3a21f56e114f44c69460681e167b9292c45fa8e7b5a15` |
 
-The corrected local Windows/WGL v2 identities are:
+The first scientific-correction head `66f23ccc88fb1003411069e50ed6b5051754bbf8` supplied the following dev.7 identities. They are now historical engineering-review input, not the active corrected-head evidence:
 
-| Corrected scene | Episode | Boundary | Visibility events |
+| Historical dev.7 scene | Episode | Boundary | Visibility events |
 | --- | ---: | --- | --- |
 | Single occluder | 0 | `da74e273f5e6786c9093709c07147ea2666db58bb64d687665dbf563e5f9e717` | `dfd7fddd2a460ed1d3147bfca55c9e9034269c4ad0cecdc5de4751b1678cd3d6` |
 | Single occluder | 1 | `1918d7616cdb39ebdd5a01d6b6b6eed82667bbfff33b06b55f59536c20e99538` | `70809b9c2febd343ec459ae79be667892d6aa170a3dcc4c5b7bf0c914665392a` |
 | Corridor | 0 | `24b330294cf15e014d25ae9eb0b883728e2e45dd999eb62b53f86c86a77aab07` | `129635aab9379aa49593210c5dabdbe0ff2a206f665f54f5c9c8fe931fd9af54` |
 | Corridor | 1 | `a263206271e0126c0ec060b5ed7320ac76d848759980bce29dc8e1a37c350803` | `9a49722f9ccdade242d9e72b6707544a7b293e5d9850c0ab8bacaa526d75292b` |
 
-These corrected exact values are regression assertions rather than renderer-backend dispatches. The same values must pass under locked Ubuntu/OSMesa exact-head CI; disagreement must be preserved as a failing result, not hidden behind backend-specific expectations. Complete dataset and RGB identities remain renderer-specific. Until that CI evidence exists and independent review converges, the corrected identities are implementation evidence only.
+The active dev.8 correction identities are:
+
+| Active corrected scene | Episode | Boundary | Visibility events |
+| --- | ---: | --- | --- |
+| Single occluder | 0 | `203c074e745c47180b2be1c385712b2d4046319e1ba0251c8cc37957c85b57a7` | `b29978dbee23c77a5b05402f39b85650bdfa6149238a3220ef58dc91b47a62fc` |
+| Single occluder | 1 | `db4a039507db60e6baf16e3f09a47ba0fb059b30836440fb7ed346c413be301b` | `6fb12d8fe4355fccb29d45befdc138fb5e20bf686d787f0c6d241a094c18b12d` |
+| Corridor | 0 | `a24fb5965418145b8abb9ee9ec7f344fb514895a492a4902f6cc0b327077423b` | `ab89d8eb8329b634a35de470337a552baaff8b25ef2344fed28e57f44eb5fb4a` |
+| Corridor | 1 | `02cca96eb7aa47dfbbae87a8c90eebe5c99b7d9686b6420c5050978f6d31f328` | `a9a5271000a73c2298ccc933c448ef1cc3ebbbace2cd4d14710091ae43230e44` |
+
+These active exact values are regression assertions rather than renderer-backend dispatches. The same values must pass under locked Ubuntu/OSMesa exact-head CI; disagreement must be preserved as a failing result, not hidden behind backend-specific expectations. Complete dataset and RGB identities remain renderer-specific. Until that CI evidence exists and independent review converges, the corrected identities are implementation evidence only.
 
 The corrected two-episode Windows/WGL count evidence is:
 

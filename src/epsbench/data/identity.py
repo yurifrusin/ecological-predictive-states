@@ -4,6 +4,7 @@ from typing import Any
 
 from epsbench.annotations import (
     ATTACHMENT_CONTACT_TOLERANCE,
+    ATTACHMENT_FEASIBILITY_SLACK,
     ATTACHMENT_IMAGE_TOLERANCE_PIXELS,
     ATTACHMENT_ROTATION_TOLERANCE,
     RAY_DIRECTION_EPSILON,
@@ -111,6 +112,8 @@ def boundary_numerical_contract_domain() -> dict[str, Any]:
 
     return {
         "attachment_contact_tolerance": ATTACHMENT_CONTACT_TOLERANCE,
+        "attachment_feasibility_slack": ATTACHMENT_FEASIBILITY_SLACK,
+        "attachment_projection_in_front_epsilon": RAY_DIRECTION_EPSILON,
         "attachment_rotation_tolerance": ATTACHMENT_ROTATION_TOLERANCE,
         "attachment_image_tolerance_pixels": ATTACHMENT_IMAGE_TOLERANCE_PIXELS,
         "counterfactual_ray_direction_epsilon": RAY_DIRECTION_EPSILON,
@@ -140,6 +143,8 @@ def oriented_boundary_domain(
             boundary.attachment_supported_contact_manifold_types
         ),
         "attachment_projection_convention": boundary.attachment_projection_convention,
+        "attachment_projection_in_front_rule": (boundary.attachment_projection_in_front_rule),
+        "attachment_feasibility_rule": boundary.attachment_feasibility_rule,
         "attachment_edge_lattice_association_rule": (
             boundary.attachment_edge_lattice_association_rule
         ),
