@@ -2,18 +2,31 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, TypeVar
 
 import numpy as np
 import numpy.typing as npt
-from PIL import Image
 
-from epsbench.data.paths import resolve_dataset_manifest
+from epsbench.appearance import AppearanceInstanceRecord, EvaluationSeedRegistry
+from epsbench.data.decoding import (
+    decode_json_artifact,
+    decode_npy_artifact,
+    decode_rgb_artifact,
+)
+from epsbench.data.paths import (
+    UnsafeOwnedFileError,
+    open_dataset_manifest,
+    open_owned_regular_file,
+    sha256_open_file,
+)
 from epsbench.schema import (
     Action,
     AnalyticBoundaryAmbiguityRule,
     AnalyticIntersectionVisibilityContract,
+    ArtifactRecord,
     AvailableDenseOpticalTransport,
     AvailableEcologicalVisibilityEvents,
     AvailableOrientedBoundaryOwnership,
@@ -32,6 +45,8 @@ from epsbench.schema import (
     TransitionRecord,
     parse_privileged_instrumentation_json,
 )
+
+_Decoded = TypeVar("_Decoded")
 
 
 class PermissionDeniedError(PermissionError):
@@ -82,11 +97,11 @@ class DatasetLoader:
     """Dataset reader that requires a declared permission set at construction."""
 
     def __init__(self, root: Path, permissions: ModalityPermissionSet) -> None:
-        self.root, manifest_path = resolve_dataset_manifest(root)
+        with open_dataset_manifest(root) as (resolved_root, owned_manifest):
+            manifest = DatasetManifest.model_validate_json(owned_manifest.payload)
+        self.root = resolved_root
         self.permissions = permissions
-        self._manifest = DatasetManifest.model_validate_json(
-            manifest_path.read_text(encoding="utf-8")
-        )
+        self._manifest = manifest
 
     def _require(self, *modalities: Modality) -> None:
         denied = [modality for modality in modalities if not self.permissions.permits(modality)]
@@ -94,11 +109,34 @@ class DatasetLoader:
             names = ", ".join(modality.value for modality in denied)
             raise PermissionDeniedError(f"modality permission denied: {names}")
 
-    def _path(self, relative_path: str) -> Path:
-        candidate = (self.root / relative_path).resolve()
-        if not candidate.is_relative_to(self.root):
-            raise ValueError("artifact path escapes the dataset root")
-        return candidate
+    def _decode_owned(
+        self,
+        record: ArtifactRecord,
+        decoder: Callable[[bytes], _Decoded],
+    ) -> _Decoded:
+        try:
+            with open_owned_regular_file(self.root, record.path) as owned:
+                if owned.byte_count != record.byte_count:
+                    raise ValueError(f"artifact byte count mismatch: {record.path}")
+                if sha256_open_file(owned) != record.file_sha256:
+                    raise ValueError(f"artifact file hash mismatch: {record.path}")
+                return decoder(owned.payload)
+        except UnsafeOwnedFileError as error:
+            raise ValueError(str(error)) from error
+
+    def _load_npy(self, record: ArtifactRecord) -> np.ndarray[Any, Any]:
+        return self._decode_owned(record, lambda snapshot: decode_npy_artifact(snapshot, record))
+
+    def _load_json(
+        self,
+        record: ArtifactRecord,
+        decoder: Callable[[bytes], _Decoded],
+    ) -> _Decoded:
+        def verify_and_decode(snapshot: bytes) -> _Decoded:
+            decode_json_artifact(snapshot, record)
+            return decoder(snapshot)
+
+        return self._decode_owned(record, verify_and_decode)
 
     def _episode(self, episode_index: int) -> EpisodeManifest:
         try:
@@ -112,8 +150,9 @@ class DatasetLoader:
 
     def _transition(self, episode_index: int) -> TransitionRecord:
         episode = self._episode(episode_index)
-        return TransitionRecord.model_validate_json(
-            self._path(episode.transition.path).read_text(encoding="utf-8")
+        return self._load_json(
+            episode.transition,
+            TransitionRecord.model_validate_json,
         )
 
     @staticmethod
@@ -139,6 +178,7 @@ class DatasetLoader:
             Modality.TRANSITION_RECORD,
             Modality.SCENE_FAMILY,
             Modality.PRIVILEGED_GENERATION_RECORDS,
+            Modality.APPEARANCE_CONTROL,
         )
         return self._manifest.model_copy(deep=True)
 
@@ -186,30 +226,26 @@ class DatasetLoader:
         transition = self._transition(episode_index)
         events = transition.ecological_visibility_events
 
-        def load_uint8(relative_path: str) -> npt.NDArray[np.uint8]:
+        def load_uint8(record: ArtifactRecord) -> npt.NDArray[np.uint8]:
             return np.asarray(
-                np.load(self._path(relative_path), allow_pickle=False),
+                self._load_npy(record),
                 dtype=np.uint8,
             )
 
-        def load_int32(relative_path: str) -> npt.NDArray[np.int32]:
+        def load_int32(record: ArtifactRecord) -> npt.NDArray[np.int32]:
             return np.asarray(
-                np.load(self._path(relative_path), allow_pickle=False),
+                self._load_npy(record),
                 dtype=np.int32,
             )
 
         return LoadedEcologicalVisibilityEvents(
             annotation=events.model_copy(deep=True),
-            before_fate_codes=load_uint8(events.before_fate.event_codes.path),
-            before_affected_surface_labels=load_int32(
-                events.before_fate.affected_surface_labels.path
-            ),
-            before_owner_surface_labels=load_int32(events.before_fate.owner_surface_labels.path),
-            after_origin_codes=load_uint8(events.after_origin.event_codes.path),
-            after_affected_surface_labels=load_int32(
-                events.after_origin.affected_surface_labels.path
-            ),
-            after_owner_surface_labels=load_int32(events.after_origin.owner_surface_labels.path),
+            before_fate_codes=load_uint8(events.before_fate.event_codes),
+            before_affected_surface_labels=load_int32(events.before_fate.affected_surface_labels),
+            before_owner_surface_labels=load_int32(events.before_fate.owner_surface_labels),
+            after_origin_codes=load_uint8(events.after_origin.event_codes),
+            after_affected_surface_labels=load_int32(events.after_origin.affected_surface_labels),
+            after_owner_surface_labels=load_int32(events.after_origin.owner_surface_labels),
             surface_ids_by_label={
                 surface.segmentation_label: surface.surface_id for surface in transition.surfaces
             },
@@ -224,25 +260,25 @@ class DatasetLoader:
         if not isinstance(transport, AvailableDenseOpticalTransport):
             raise ValueError(f"analytic optical transport is unavailable: {transport.reason}")
 
-        def load_int32(relative_path: str) -> npt.NDArray[np.int32]:
+        def load_int32(record: ArtifactRecord) -> npt.NDArray[np.int32]:
             return np.asarray(
-                np.load(self._path(relative_path), allow_pickle=False),
+                self._load_npy(record),
                 dtype=np.int32,
             )
 
-        def load_uint8(relative_path: str) -> npt.NDArray[np.uint8]:
+        def load_uint8(record: ArtifactRecord) -> npt.NDArray[np.uint8]:
             return np.asarray(
-                np.load(self._path(relative_path), allow_pickle=False),
+                self._load_npy(record),
                 dtype=np.uint8,
             )
 
         return LoadedAnalyticOpticalTransport(
-            forward_vectors_fixed=load_int32(transport.forward.vectors_fixed.path),
-            forward_validity=load_uint8(transport.forward.validity.path),
-            forward_reasons=load_uint8(transport.forward.reasons.path),
-            backward_vectors_fixed=load_int32(transport.backward.vectors_fixed.path),
-            backward_validity=load_uint8(transport.backward.validity.path),
-            backward_reasons=load_uint8(transport.backward.reasons.path),
+            forward_vectors_fixed=load_int32(transport.forward.vectors_fixed),
+            forward_validity=load_uint8(transport.forward.validity),
+            forward_reasons=load_uint8(transport.forward.reasons),
+            backward_vectors_fixed=load_int32(transport.backward.vectors_fixed),
+            backward_validity=load_uint8(transport.backward.validity),
+            backward_reasons=load_uint8(transport.backward.reasons),
             fixed_point_scale=transport.quantisation.fixed_point_scale,
             method=transport.method,
             coordinate_convention=transport.coordinate_convention,
@@ -255,24 +291,23 @@ class DatasetLoader:
         self._require(Modality.RGB)
         transition = self._transition(episode_index)
         frame = self._frame(transition, frame_index)
-        with Image.open(self._path(frame.rgb.path)) as image:
-            return np.asarray(image.convert("RGB"), dtype=np.uint8).copy()
+
+        return self._decode_owned(
+            frame.rgb,
+            lambda snapshot: decode_rgb_artifact(snapshot, frame.rgb),
+        )
 
     def read_depth(self, episode_index: int, frame_index: int) -> npt.NDArray[np.float32]:
         self._require(Modality.DEPTH)
         transition = self._transition(episode_index)
         frame = self._frame(transition, frame_index)
-        return np.asarray(
-            np.load(self._path(frame.depth.path), allow_pickle=False), dtype=np.float32
-        )
+        return np.asarray(self._load_npy(frame.depth), dtype=np.float32)
 
     def read_segmentation(self, episode_index: int, frame_index: int) -> npt.NDArray[np.int32]:
         self._require(Modality.SURFACE_REGIONS)
         transition = self._transition(episode_index)
         frame = self._frame(transition, frame_index)
-        return np.asarray(
-            np.load(self._path(frame.segmentation.path), allow_pickle=False), dtype=np.int32
-        )
+        return np.asarray(self._load_npy(frame.segmentation), dtype=np.int32)
 
     def read_camera_world_transform(
         self, episode_index: int, frame_index: int
@@ -280,14 +315,32 @@ class DatasetLoader:
         self._require(Modality.CAMERA_WORLD_TRANSFORM)
         transition = self._transition(episode_index)
         frame = self._frame(transition, frame_index)
-        return CameraInstrumentation.model_validate_json(
-            self._path(frame.camera_world_transform.path).read_text(encoding="utf-8")
+        return self._load_json(
+            frame.camera_world_transform,
+            CameraInstrumentation.model_validate_json,
         )
 
     def _instrumentation(self, episode_index: int) -> PrivilegedInstrumentation:
         episode = self._episode(episode_index)
-        return parse_privileged_instrumentation_json(
-            self._path(episode.privileged_instrumentation.path).read_text(encoding="utf-8")
+        return self._load_json(
+            episode.privileged_instrumentation,
+            parse_privileged_instrumentation_json,
+        )
+
+    def read_appearance_control(self, episode_index: int) -> AppearanceInstanceRecord:
+        """Return private appearance control only with both required permissions."""
+
+        self._require(Modality.APPEARANCE_CONTROL, Modality.PRIVILEGED_GENERATION_RECORDS)
+        return self._instrumentation(episode_index).appearance.model_copy(deep=True)
+
+    def read_evaluation_seed_registry_snapshot(self) -> EvaluationSeedRegistry:
+        """Return the dataset-bound assignment registry only with private permissions."""
+
+        self._require(Modality.APPEARANCE_CONTROL, Modality.PRIVILEGED_GENERATION_RECORDS)
+        artifact = self._manifest.evaluation_seed_registry_snapshot
+        return self._load_json(
+            artifact,
+            EvaluationSeedRegistry.model_validate_json,
         )
 
     def read_raw_mujoco_geom_ids(self, episode_index: int) -> dict[str, int]:

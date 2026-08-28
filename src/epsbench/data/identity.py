@@ -302,7 +302,11 @@ def dataset_logical_domain(manifest: DatasetManifest) -> dict[str, Any]:
         "scene_family": manifest.scene_family,
         "root_seed": manifest.root_seed,
         "config_logical_sha256": manifest.config_logical_sha256,
-        "appearance_variant": manifest.appearance_variant,
+        "appearance_registry_sha256": manifest.appearance_registry_sha256,
+        "appearance_profile_id": manifest.appearance_profile_id,
+        "appearance_profile_sha256": manifest.appearance_profile_sha256,
+        "evaluation_seed_registry_sha256": manifest.evaluation_seed_registry_sha256,
+        "appearance_assignment_schedule_source": (manifest.appearance_assignment_schedule_source),
         "episodes": [
             {
                 "episode_id": episode.episode_id,
@@ -313,6 +317,7 @@ def dataset_logical_domain(manifest: DatasetManifest) -> dict[str, Any]:
                 "analytic_transport_sha256": episode.analytic_transport_sha256,
                 "oriented_boundary_sha256": episode.oriented_boundary_sha256,
                 "visibility_event_sha256": episode.visibility_event_sha256,
+                "appearance_instance_sha256": episode.appearance_instance_sha256,
                 "rgb_logical_sha256": list(episode.rgb_logical_sha256),
             }
             for episode in manifest.episodes

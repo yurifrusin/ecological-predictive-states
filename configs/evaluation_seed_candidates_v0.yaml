@@ -1,0 +1,14 @@
+registry_version: evaluation_seed_candidate_registry_v0
+root_seed: 1729
+derivation_rule: derive_seed_v1
+namespace: gate0b-slice5-appearance-candidate
+indices: [0, 1, 2, 3, 4, 5, 6, 7]
+candidate_episode_seeds:
+  - 6594827050443514047
+  - 8414348828724831316
+  - 12608688243639701226
+  - 12500538448662680758
+  - 8773669028651797023
+  - 13662469654622758661
+  - 17452811338195253152
+  - 18258777022364122176

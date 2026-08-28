@@ -2,7 +2,7 @@
 
 ## Scope and architecture
 
-This implementation completes the repository foundation in Gate 0A and preserves the canonical single-occluder Gate 0B Slice 1, corridor Slice 2, analytic optical-transport Slice 3, and oriented-boundary and ecological visibility-event Slice 4. Slice 4 became canonical after exact-head dual independent review and owner approval at `24deb074d4ba0cf3e1044e466ecbbb6e0b2a4cc4`. It does not satisfy the full Gate 0B deliverable list in `MILESTONE_0.md` and makes no scientific claim.
+This implementation completes the repository foundation in Gate 0A and preserves the canonical single-occluder Gate 0B Slice 1, corridor Slice 2, analytic optical-transport Slice 3, and oriented-boundary and ecological visibility-event Slice 4. Slice 4 became canonical after exact-head dual independent review and owner approval at `24deb074d4ba0cf3e1044e466ecbbb6e0b2a4cc4`. Slice 5 procedural appearance-candidate work is implemented on the current branch pending independent review and owner approval. It does not satisfy the full Gate 0B deliverable list in `MILESTONE_0.md` and makes no scientific claim.
 
 The path is intentionally short:
 
@@ -28,7 +28,7 @@ strict scene-family-discriminated YAML config
 
 `src/epsbench/sim/single_occluder.py` generates a small MuJoCo XML model using the official `mujoco` package. It contains a support plane, one opaque foreground panel, one opaque background surface, a directional light, and one fixed monocular camera. The executed action is a discrete lateral translation from `x=-0.35` to `x=0.35`; forward displacement and yaw are zero. MuJoCo world coordinates and camera matrices are retained only as privileged instrumentation.
 
-The `base` and `alternate` appearance variants change procedurally specified surface colours while preserving geometry, camera trajectory, action, correspondence, neutral mask-change records, and the single-occluder counterfactual occlusion relation. Configuration validation rejects non-finite values, forward or yaw actions, zero lateral displacement, and action names with the wrong lateral sign. Whole-dataset validation separately checks the persisted before/after camera positions and proper, approximately orthonormal rotations against the configured action and the compiled MuJoCo camera orientation and field of view.
+The unreleased `base` and `alternate` appearance enum has been migrated to a strict registry/profile selection. The two legacy solid profiles retain that regression purpose, while eight balanced candidate profiles add colour, checker, stripe, orientation, and directional-light interventions. Fixed seed/profile changes preserve geometry, camera trajectory, action, correspondence, neutral mask-change records, boundary/event identities, and the single-occluder counterfactual occlusion relation. Configuration validation rejects unknown registry fields, malformed profiles, non-finite values, forward or yaw actions, zero lateral displacement, and action names with the wrong lateral sign. Whole-dataset validation independently regenerates appearance source arrays and assignment, recomputes profile/instance identities, and separately checks persisted before/after camera positions and proper, approximately orthonormal rotations against the configured action and compiled MuJoCo camera orientation and field of view.
 
 `src/epsbench/sim/corridor.py` generates a parametrically sized four-surface corridor containing the floor, left surface, right surface, and end surface. Width and length vary deterministically per episode; wall height, camera start, camera height, field of view, and positive forward displacement are strictly configured. The corridor is open above, but the configuration contract requires the walls to cover the complete optical field for the longest permitted scene. The camera translates only on the forward axis and must remain clear of the side and end walls with unchanged height and rotation. Whole-dataset validation independently resamples the geometry, recompiles the scene, binds each semantic surface name to its exact compiled raw geom ID, world position, and three compiled size dimensions, reconstructs public opaque segmentation from privileged raw renderer arrays, and compares the action with both camera artifacts and duplicated scene instrumentation. The same compiled contract is enforced for the single-occluder apparatus.
 
@@ -83,7 +83,8 @@ All hashes are SHA-256 and lowercase hexadecimal.
 - `ecological_label_sha256` covers schema version, executed action values, opaque surface references, logical segmentation hashes, visibility states, region correspondence, neutral region-mask changes, separate oriented-boundary and visibility-event domains/identities, typed occlusion availability/relations, boundary structures, and the available analytic transport annotation while retaining its separate identity. Known-empty and unavailable occlusion therefore have different identities.
 - The ecological-label domain excludes RGB, depth, colour/appearance identity, camera transforms, raw simulator IDs, raw/world coordinates, paths, timestamps, and hostnames.
 - `scene_content_sha256` covers non-appearance scene layout and camera/action trajectory. The single-occluder domain contains the scene family, fixed apparatus version, exact support/background/occluder shapes and poses, before/after camera positions and orientation rule, field of view, and action. The corridor domain contains the scene family, apparatus version and surface membership, sampled width and length, wall height and fixed thicknesses, before/after camera positions and orientation rule, camera height, field of view, and action. Both domains exclude episode seed, appearance, opaque IDs, segmentation labels, timestamps, and source/renderer provenance. Episode seed remains separately recorded in the manifest and privileged generation evidence.
-- `dataset_logical_sha256` covers schema/generator versions, scene family, root seed, resolved-config logical hash, appearance variant, and each episode's stable identifier, derived seed, scene-content hash, ecological-label hash, analytic-transport hash, and RGB logical hashes. It excludes renderer provenance, file-container hashes, timestamps, hostname, and absolute paths.
+- `appearance_registry_sha256` binds the complete canonical resolved candidate registry; `appearance_profile_sha256` binds the selected label-defining profile; and private `appearance_instance_sha256` binds the appearance namespaces, semantic-to-slot assignment, procedural source-array hashes, material records, and lighting without geometry, action, camera pose, opaque IDs, segmentation, rendered RGB, renderer, provenance, paths, or volatile metadata.
+- `dataset_logical_sha256` covers schema/generator versions, scene family, root seed, resolved-config logical hash, appearance registry/profile identities, and each episode's stable identifier, derived seed, scene-content hash, ecological-label hash, analytic-transport hash, boundary/event hashes, appearance-instance hash, and RGB logical hashes. It excludes renderer provenance, file-container hashes, timestamps, hostname, and absolute paths.
 - `source_provenance_sha256` independently covers the typed inline source record: sanitized repository reference, exact commit and truthful dirty state, dirty-diff hash when applicable, lock-file identity, governing-document hashes, package version, and Python version. HTTP credentials and query/fragment data are removed; SSH user information is removed; file and local-path origins are replaced with a non-path redaction marker. Git unavailability is recorded as unavailable with a reason and never represented as clean.
 - `renderer_execution_provenance_sha256` independently covers stable renderer/execution facts: MuJoCo and NumPy versions, renderer, backend, and operating system. These facts remain outside the scientific content domain.
 - `content_provenance_binding_sha256` hashes the already-computed dataset logical hash together with the already-computed source-provenance and renderer/execution-provenance hashes. This binds content and both provenance domains without making any domain self-referential. The existing scientific content identity deliberately continues to exclude provenance.
@@ -169,12 +170,68 @@ The final numerical contract requires an actual witness inside the closed compil
 
 The review evidence is bounded to the two canonical scene families, static planes and axis-aligned boxes, the declared half-pixel association band, and the locked Windows/WGL and Ubuntu/OSMesa environments. Component topology, continuous boundary-component tracing, broader scenes and appearance assets, final evaluation seeds, Gate 0C, and models remain outside scope. The review establishes apparatus and construct validity, not a comparative scientific result.
 
+## Slice 5 appearance-candidate implementation pending review
+
+Slice 5 adds repository-generated `128 x 128 x 3` sRGB textures, exact byte palettes, explicit non-specular directional lighting, balanced private semantic-to-style permutations, a strict ten-profile registry, and an independently recomputed prospective eight-seed registry. No external appearance asset or licence is introduced. Full appearance control requires both the typed `appearance_control` and privileged-generation permissions before instrumentation is opened; ecological projections remain unchanged.
+
+The current Slice 5 schema matrix is:
+
+| Contract | Pending Slice 5 version |
+| --- | --- |
+| Single-occluder and corridor configuration | `0.1.0-dev.4` |
+| Dataset and episode manifest | `0.1.0-dev.7` |
+| Transition | `0.1.0-dev.9` unchanged |
+| Privileged instrumentation | `0.1.0-dev.12` |
+| Appearance registry/profile | `appearance_candidate_registry_v1` / `appearance_profile_v2` |
+| Procedural texture generator | `repository_procedural_texture_v1` |
+| Appearance instance | `appearance_instance_v3` |
+| Candidate audit packet | `appearance_candidate_audit_v2` |
+| Candidate root domains | `appearance_candidate_root_domains_v2` |
+
+Every generated dataset snapshots the protected evaluation-seed candidate registry. Its version,
+hash, artifact, and assignment-schedule source enter dataset logical identity; appearance-instance
+v2 additionally binds the registry identity, root seed, candidate index or explicit non-candidate
+posture, and semantic-to-style assignment. Whole-dataset validation uses only the dataset snapshot,
+never an ambient repository file. The snapshot and appearance instrumentation require typed
+`appearance_control` plus privileged-generation permission before opening.
+
+The audit runs every profile over all eight candidate roots and both scene families through ordinary
+generation and whole-dataset validation, repeats each cell for same-renderer determinism, retains
+rejected cells, and publishes a deterministic candidate packet plus separate volatile run metadata.
+Audit v2 separates portable registry/seed/procedural/assignment and analytic identities, a portable
+within-renderer appearance-invariance outcome root, a renderer-local complete ecological-label root,
+and renderer-local RGB diagnostics. Appearance invariance is tested against the matched control
+inside each renderer; complete raster-derived ecological-label roots are reported rather than
+compared across WGL and OSMesa. Representative contact sheets remain outside datasets. See
+`docs/GATE_0B_SLICE_5_APPEARANCE_CANDIDATES.md` for the full contract and limitations.
+
+The scientifically reviewed v0 head `e6449cdfcf8a64e5ffd8339a325f21d48a893122`
+remains historical negative apparatus evidence. Its clean Windows/WGL packet/root values were packet
+`f9ac102adac3f5e3b2434ddbc6bcb7504eb0800ac711bda853235364d01f218b`, renderer
+`51c40d2adf569900fa02817bcc8abffc4aa89f67d31851aa40067d8272586b7e`, and nominal ecological
+`556d2c1761823d607188b36401569c584f8f1d1dc1387d1732987bb82bd80ef8`. Exact-head Ubuntu/OSMesa
+run `33130502434` produced packet
+`cd99a9397e8f40b2d95007b8a6c1064d0ee472a169d86c0f29afb6779ae16e84`, renderer
+`ccc0c99a2fe6795119c573e14cbdb49d7655d3b7bd547b61bc3cd00d0854d05b`, and nominal ecological
+`e06d0139c59da07bb229bc26cb783642403e9ec43357bf329e33194792a63a22` before correctly failing the
+over-broad cross-platform assertion. Audit v1 versions the corrected root semantics rather than
+silently redefining v0.
+
+This development-schema migration is not byte compatible with Slice 4 manifests or instrumentation. It does not modify the public transition wire contract or the established Slice 1–4 scene, transport, boundary, visibility-event, or ecological-label identity domains. Historical identities remain evidence for their exact historical heads only.
+
+Candidate admission is neither scientific evidence nor a benchmark freeze. The exact candidate
+result remains 44 admitted cells and 116 rejected cells, with every profile rejected at profile
+level. `freeze_eligible` means eligible to be audited prospectively, not admitted or freeze-ready;
+the admitted-profile set is empty. Final development/OOD role selection, final evaluation-seed
+selection, cross-platform exact-head review convergence, owner approval, and remaining Gate 0B exit
+criteria are still absent. Gate 0C and model work remain unauthorised.
+
 ## Remaining Gate 0B work
 
 - Complete the remaining Gate 0B exit-criterion evidence and obtain separate owner authority before any full Gate 0B completion decision.
 - Decide whether later authorised work should define component topology, continuous boundary-component attribution, or broader scene geometry. Slice 4 deliberately leaves these unavailable.
 - Extend the reviewed cross-platform posture beyond the locked Windows/WGL and Ubuntu/OSMesa environments.
-- Decide and freeze broader appearance assets and final evaluation seeds before comparative work.
+- Independently review the Slice 5 candidate definitions and packet, then separately decide which admitted profile IDs and candidate seeds should enter an owner-authorised benchmark freeze.
 
 Gate 0B completion is therefore not claimed. Gate 0C should not begin until these items and every Gate 0B exit criterion have owner-reviewed evidence.
 

@@ -397,7 +397,7 @@ def test_hardlink_artifact_alias_is_rejected(
     transition["after"]["depth"] = aliased.model_dump(mode="json")
     commit_episode_payloads(broken, 0, transition, instrumentation)
 
-    with pytest.raises(DatasetValidationError, match="aliases another role"):
+    with pytest.raises(DatasetValidationError, match=r"hard-link alias|aliases another role"):
         validate_dataset(broken)
 
 

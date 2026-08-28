@@ -60,7 +60,7 @@ def test_corridor_scene_content_constants_match_compiled_mujoco_contract(
 ) -> None:
     episode_seed = derive_seed(corridor_config.seed, "episode:0")
     geometry = sample_corridor_geometry(corridor_config, episode_seed)
-    compiled = compile_corridor_scene_contract(corridor_config, geometry, appearance_seed=0)
+    compiled = compile_corridor_scene_contract(corridor_config, geometry)
     domain = corridor_scene_content_domain(corridor_config, geometry)
     surface_domain = domain["surfaces"]
     half_width = surface_domain["width"] / 2.0

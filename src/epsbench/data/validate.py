@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
-from PIL import Image
 
 from epsbench.annotations import (
     ANALYTIC_TRANSPORT_METHOD,
@@ -39,11 +39,27 @@ from epsbench.annotations import (
     derive_boundary_structure,
     derive_visibility,
 )
+from epsbench.appearance import (
+    AppearanceRegistry,
+    EvaluationSeedRegistry,
+    appearance_profile_hash,
+    appearance_registry_hash,
+    profile_by_id,
+    seed_registry_hash,
+    validate_appearance_instance,
+    validate_axis_isolation,
+)
 from epsbench.config import (
     BenchmarkConfig,
     CorridorConfig,
     SingleOccluderConfig,
     parse_config,
+)
+from epsbench.data.decoding import (
+    ArtifactDecodeError,
+    decode_json_artifact,
+    decode_npy_artifact,
+    decode_rgb_artifact,
 )
 from epsbench.data.identity import (
     compute_analytic_transport_hash,
@@ -56,7 +72,14 @@ from epsbench.data.identity import (
     compute_source_provenance_hash,
     compute_visibility_event_hash,
 )
-from epsbench.data.paths import UnsafeDatasetManifestError, resolve_dataset_manifest
+from epsbench.data.paths import (
+    OwnedRegularFile,
+    UnsafeDatasetManifestError,
+    UnsafeOwnedFileError,
+    open_dataset_manifest,
+    open_owned_regular_file,
+    sha256_open_file,
+)
 from epsbench.schema import (
     Action,
     AnalyticRendererFrameDiagnostic,
@@ -104,7 +127,6 @@ from epsbench.utils.canonical import (
     canonical_json_bytes,
     logical_array_hash,
     sha256_bytes,
-    sha256_file,
 )
 from epsbench.utils.seeding import derive_seed
 
@@ -122,33 +144,32 @@ class _ArtifactRegistry:
         self.resolved_paths: set[Path] = set()
         self.file_identities: set[tuple[int, int]] = set()
 
-    def claim(self, record: ArtifactRecord) -> None:
-        candidate = (self.root / record.path).resolve()
+    @contextmanager
+    def claim(self, record: ArtifactRecord) -> Iterator[OwnedRegularFile]:
         if record.path in self.paths:
             raise DatasetValidationError(f"duplicate artifact path: {record.path}")
-        if candidate in self.resolved_paths:
-            raise DatasetValidationError(f"artifact path aliases another role: {record.path}")
-        if candidate.is_file():
-            stat = candidate.stat()
-            identity = (stat.st_dev, stat.st_ino)
-            if identity in self.file_identities:
-                raise DatasetValidationError(f"artifact path aliases another role: {record.path}")
-            self.file_identities.add(identity)
-        self.paths.add(record.path)
-        self.resolved_paths.add(candidate)
-
-
-def _path(root: Path, record: ArtifactRecord) -> Path:
-    candidate = (root / record.path).resolve()
-    if not candidate.is_relative_to(root):
-        raise DatasetValidationError(f"artifact escapes dataset root: {record.path}")
-    if not candidate.is_file():
-        raise DatasetValidationError(f"missing artifact: {record.path}")
-    if candidate.stat().st_size != record.byte_count:
-        raise DatasetValidationError(f"artifact byte count mismatch: {record.path}")
-    if sha256_file(candidate) != record.file_sha256:
-        raise DatasetValidationError(f"artifact file hash mismatch: {record.path}")
-    return candidate
+        try:
+            owned_context = open_owned_regular_file(self.root, record.path)
+            with owned_context as owned:
+                if owned.path in self.resolved_paths:
+                    raise DatasetValidationError(
+                        f"artifact path aliases another role: {record.path}"
+                    )
+                identity = (owned.device, owned.inode)
+                if identity in self.file_identities:
+                    raise DatasetValidationError(
+                        f"artifact path aliases another role: {record.path}"
+                    )
+                if owned.byte_count != record.byte_count:
+                    raise DatasetValidationError(f"artifact byte count mismatch: {record.path}")
+                if sha256_open_file(owned) != record.file_sha256:
+                    raise DatasetValidationError(f"artifact file hash mismatch: {record.path}")
+                self.paths.add(record.path)
+                self.resolved_paths.add(owned.path)
+                self.file_identities.add(identity)
+                yield owned
+        except UnsafeOwnedFileError as error:
+            raise DatasetValidationError(str(error)) from error
 
 
 def _verify_json(
@@ -156,32 +177,12 @@ def _verify_json(
     record: ArtifactRecord,
     registry: _ArtifactRegistry,
 ) -> dict[str, Any]:
-    registry.claim(record)
-    path = _path(root, record)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise DatasetValidationError(f"invalid JSON artifact: {record.path}") from error
-    if not isinstance(payload, dict):
-        raise DatasetValidationError(f"JSON artifact must contain an object: {record.path}")
-    logical_bytes = canonical_json_bytes(payload)
-    if sha256_bytes(logical_bytes) != record.logical_sha256:
-        raise DatasetValidationError(f"artifact logical hash mismatch: {record.path}")
-    if record.dtype != "json" or record.shape != (len(logical_bytes),):
-        raise DatasetValidationError(f"JSON artifact metadata mismatch: {record.path}")
-    return payload
-
-
-def _verify_array(
-    root: Path,
-    record: ArtifactRecord,
-    array: np.ndarray[Any, Any],
-) -> None:
-    _path(root, record)
-    if tuple(array.shape) != record.shape or str(array.dtype) != record.dtype:
-        raise DatasetValidationError(f"array metadata mismatch: {record.path}")
-    if logical_array_hash(array) != record.logical_sha256:
-        raise DatasetValidationError(f"array logical hash mismatch: {record.path}")
+    del root
+    with registry.claim(record) as owned:
+        try:
+            return decode_json_artifact(owned.payload, record)
+        except ArtifactDecodeError as error:
+            raise DatasetValidationError(str(error)) from error
 
 
 def _load_rgb(
@@ -189,17 +190,12 @@ def _load_rgb(
     record: ArtifactRecord,
     registry: _ArtifactRegistry,
 ) -> np.ndarray[Any, Any]:
-    registry.claim(record)
-    path = _path(root, record)
-    try:
-        with Image.open(path) as image:
-            if image.mode != "RGB":
-                raise DatasetValidationError(f"RGB artifact must use RGB mode: {record.path}")
-            rgb = np.asarray(image, dtype=np.uint8).copy()
-    except OSError as error:
-        raise DatasetValidationError(f"unreadable RGB artifact: {record.path}") from error
-    _verify_array(root, record, rgb)
-    return rgb
+    del root
+    with registry.claim(record) as owned:
+        try:
+            return decode_rgb_artifact(owned.payload, record)
+        except ArtifactDecodeError as error:
+            raise DatasetValidationError(str(error)) from error
 
 
 def _load_npy(
@@ -207,14 +203,12 @@ def _load_npy(
     record: ArtifactRecord,
     registry: _ArtifactRegistry,
 ) -> np.ndarray[Any, Any]:
-    registry.claim(record)
-    path = _path(root, record)
-    try:
-        array = cast(np.ndarray[Any, Any], np.load(path, allow_pickle=False))
-    except (OSError, ValueError) as error:
-        raise DatasetValidationError(f"unreadable NumPy artifact: {record.path}") from error
-    _verify_array(root, record, array)
-    return array
+    del root
+    with registry.claim(record) as owned:
+        try:
+            return decode_npy_artifact(owned.payload, record)
+        except ArtifactDecodeError as error:
+            raise DatasetValidationError(str(error)) from error
 
 
 def _load_transport_direction(
@@ -1106,11 +1100,11 @@ def validate_dataset(root: Path) -> DatasetManifest:
     """Validate every declared artifact and cross-record invariant."""
 
     try:
-        resolved_root, manifest_path = resolve_dataset_manifest(root)
+        manifest_context = open_dataset_manifest(root)
+        with manifest_context as (resolved_root, owned_manifest):
+            manifest = DatasetManifest.model_validate_json(owned_manifest.payload)
     except UnsafeDatasetManifestError as error:
         raise DatasetValidationError(str(error)) from error
-    try:
-        manifest = DatasetManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
     except Exception as error:
         raise DatasetValidationError("dataset manifest failed schema validation") from error
     if compute_dataset_logical_hash(manifest) != manifest.dataset_logical_sha256:
@@ -1135,6 +1129,43 @@ def validate_dataset(root: Path) -> DatasetManifest:
 
     registry = _ArtifactRegistry(resolved_root)
 
+    appearance_registry_payload = _verify_json(
+        resolved_root, manifest.appearance_registry_snapshot, registry
+    )
+    try:
+        appearance_registry = AppearanceRegistry.model_validate_json(
+            canonical_json_bytes(appearance_registry_payload)
+        )
+        validate_axis_isolation(appearance_registry)
+    except Exception as error:
+        raise DatasetValidationError("appearance registry snapshot is invalid") from error
+    if appearance_registry_hash(appearance_registry) != manifest.appearance_registry_sha256:
+        raise DatasetValidationError("appearance registry hash mismatch")
+    try:
+        selected_profile = profile_by_id(appearance_registry, manifest.appearance_profile_id)
+    except ValueError as error:
+        raise DatasetValidationError("selected appearance profile is absent") from error
+    if appearance_profile_hash(selected_profile) != manifest.appearance_profile_sha256:
+        raise DatasetValidationError("appearance profile hash mismatch")
+    seed_registry_payload = _verify_json(
+        resolved_root,
+        manifest.evaluation_seed_registry_snapshot,
+        registry,
+    )
+    try:
+        seed_registry = EvaluationSeedRegistry.model_validate_json(
+            canonical_json_bytes(seed_registry_payload)
+        )
+    except Exception as error:
+        raise DatasetValidationError("evaluation seed registry snapshot is invalid") from error
+    if seed_registry_hash(seed_registry) != manifest.evaluation_seed_registry_sha256:
+        raise DatasetValidationError("evaluation seed registry hash mismatch")
+    if (
+        manifest.evaluation_seed_registry_snapshot.logical_sha256
+        != manifest.evaluation_seed_registry_sha256
+    ):
+        raise DatasetValidationError("evaluation seed registry artifact identity mismatch")
+
     config_payload = _verify_json(resolved_root, manifest.resolved_config, registry)
     try:
         config = parse_config(config_payload)
@@ -1144,8 +1175,10 @@ def validate_dataset(root: Path) -> DatasetManifest:
         raise DatasetValidationError("resolved configuration hash mismatch")
     if config.seed != manifest.root_seed:
         raise DatasetValidationError("manifest seed does not match resolved configuration")
-    if config.appearance.variant != manifest.appearance_variant:
-        raise DatasetValidationError("appearance variant is inconsistent")
+    if config.appearance.registry_version != appearance_registry.registry_version:
+        raise DatasetValidationError("appearance registry version is inconsistent")
+    if config.appearance.profile_id != manifest.appearance_profile_id:
+        raise DatasetValidationError("appearance profile selection is inconsistent")
     if config.scene_family != manifest.scene_family:
         raise DatasetValidationError("manifest scene family differs from resolved configuration")
     expected_raster_shape = (config.render.height, config.render.width)
@@ -1199,8 +1232,11 @@ def validate_dataset(root: Path) -> DatasetManifest:
             raise DatasetValidationError("instrumentation failed schema validation") from error
         if instrumentation.episode_id != episode.episode_id:
             raise DatasetValidationError("instrumentation episode identifier mismatch")
-        if instrumentation.appearance_variant != manifest.appearance_variant:
-            raise DatasetValidationError("instrumentation appearance variant mismatch")
+        if (
+            instrumentation.appearance.appearance_instance_sha256
+            != episode.appearance_instance_sha256
+        ):
+            raise DatasetValidationError("episode appearance-instance identity mismatch")
         if instrumentation.scene_family != manifest.scene_family:
             raise DatasetValidationError("instrumentation scene family mismatch")
         if len(set(instrumentation.raw_geom_ids.values())) != len(instrumentation.raw_geom_ids):
@@ -1246,19 +1282,45 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 raise DatasetValidationError(
                     "single-occluder instrumentation/configuration mismatch"
                 )
-            compiled_scene = compile_single_occluder_scene_contract(config)
+            try:
+                appearance = validate_appearance_instance(
+                    instrumentation.appearance,
+                    appearance_registry,
+                    "single_occluder",
+                    ("support_surface", "occluding_surface", "background_surface"),
+                    episode.episode_seed,
+                    config.seed,
+                    seed_registry,
+                )
+            except Exception as error:
+                raise DatasetValidationError("appearance instance failed validation") from error
+            compiled_scene = compile_single_occluder_scene_contract(config, appearance)
             _require_compiled_apparatus_contract(instrumentation, compiled_scene)
             expected_scene_content_sha256 = _single_occluder_scene_content_hash(config)
-            expected_analytic_transport = compute_single_occluder_analytic_transport(config)
-            expected_boundary_visibility = compute_single_occluder_boundary_visibility(config)
+            expected_analytic_transport = compute_single_occluder_analytic_transport(
+                config, appearance
+            )
+            expected_boundary_visibility = compute_single_occluder_boundary_visibility(
+                config, appearance
+            )
         elif isinstance(instrumentation, CorridorInstrumentation):
             if not isinstance(config, CorridorConfig):
                 raise DatasetValidationError("corridor instrumentation/configuration mismatch")
             _require_corridor_instrumentation(config, episode.episode_seed, instrumentation)
+            try:
+                appearance = validate_appearance_instance(
+                    instrumentation.appearance,
+                    appearance_registry,
+                    "corridor",
+                    CORRIDOR_SURFACE_NAMES,
+                    episode.episode_seed,
+                    config.seed,
+                    seed_registry,
+                )
+            except Exception as error:
+                raise DatasetValidationError("appearance instance failed validation") from error
             compiled_scene = compile_corridor_scene_contract(
-                config,
-                instrumentation.sampled_geometry,
-                instrumentation.generation_seeds.appearance_seed,
+                config, instrumentation.sampled_geometry, appearance
             )
             _require_compiled_apparatus_contract(instrumentation, compiled_scene)
             expected_scene_content_sha256 = _corridor_scene_content_hash(
@@ -1268,12 +1330,12 @@ def validate_dataset(root: Path) -> DatasetManifest:
             expected_analytic_transport = compute_corridor_analytic_transport(
                 config,
                 instrumentation.sampled_geometry,
-                instrumentation.generation_seeds.appearance_seed,
+                appearance,
             )
             expected_boundary_visibility = compute_corridor_boundary_visibility(
                 config,
                 instrumentation.sampled_geometry,
-                instrumentation.generation_seeds.appearance_seed,
+                appearance,
             )
         else:
             raise DatasetValidationError("unsupported scene instrumentation")

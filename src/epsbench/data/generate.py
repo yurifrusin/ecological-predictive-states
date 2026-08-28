@@ -59,6 +59,19 @@ from epsbench.annotations import (
     derive_boundary_structure,
     derive_visibility,
 )
+from epsbench.appearance import (
+    ASSIGNMENT_SCHEDULE_SOURCE,
+    AppearanceRegistry,
+    EvaluationSeedRegistry,
+    appearance_profile_hash,
+    appearance_registry_hash,
+    load_appearance_registry,
+    load_evaluation_seed_registry,
+    profile_by_id,
+    resolve_appearance,
+    seed_registry_hash,
+    validate_axis_isolation,
+)
 from epsbench.config import BenchmarkConfig, CorridorConfig, SingleOccluderConfig
 from epsbench.data.identity import (
     compute_analytic_transport_hash,
@@ -138,6 +151,8 @@ from epsbench.utils.canonical import (
 from epsbench.utils.seeding import derive_seed, rng_for
 
 _SURFACE_NAMES = ("support_surface", "occluding_surface", "background_surface")
+_APPEARANCE_REGISTRY_PATH = Path("configs/appearance_candidates_v0.yaml")
+_EVALUATION_SEED_REGISTRY_PATH = Path("configs/evaluation_seed_candidates_v0.yaml")
 
 
 def _relative(path: Path, root: Path) -> str:
@@ -776,12 +791,23 @@ def _generate_single_occluder_episode(
     root: Path,
     config: SingleOccluderConfig,
     episode_index: int,
+    appearance_registry: AppearanceRegistry,
+    seed_registry: EvaluationSeedRegistry,
 ) -> EpisodeManifest:
     episode_id = f"episode-{episode_index:06d}"
     episode_seed = derive_seed(config.seed, f"episode:{episode_index}")
     episode_directory = root / "episodes" / episode_id
     episode_directory.mkdir(parents=True)
-    rendered = render_single_occluder_transition(config)
+    appearance = resolve_appearance(
+        appearance_registry,
+        config.appearance.profile_id,
+        "single_occluder",
+        _SURFACE_NAMES,
+        episode_seed,
+        config.seed,
+        seed_registry,
+    )
+    rendered = render_single_occluder_transition(config, appearance)
     surfaces, references = _surface_references(config.seed, episode_index)
     before_segmentation = _remap_segmentation(
         rendered.before.raw_geom_segmentation,
@@ -915,10 +941,10 @@ def _generate_single_occluder_episode(
     write_canonical_json(transition_path, transition)
 
     instrumentation = SingleOccluderInstrumentation(
-        schema_version="0.1.0-dev.9",
+        schema_version="0.1.0-dev.12",
         scene_family=SceneFamily.SINGLE_OCCLUDER,
         episode_id=episode_id,
-        appearance_variant=config.appearance.variant,
+        appearance=appearance.record,
         raw_geom_ids=rendered.raw_geom_ids,
         raw_to_opaque_surface_ids={
             str(raw_id): references[name].surface_id
@@ -969,6 +995,7 @@ def _generate_single_occluder_episode(
         analytic_transport_sha256=analytic_transport.analytic_transport_sha256,
         oriented_boundary_sha256=oriented_boundaries.oriented_boundary_sha256,
         visibility_event_sha256=visibility_events.visibility_event_sha256,
+        appearance_instance_sha256=appearance.record.appearance_instance_sha256,
         rgb_logical_sha256=(before.rgb.logical_sha256, after.rgb.logical_sha256),
     )
 
@@ -977,6 +1004,8 @@ def _generate_corridor_episode(
     root: Path,
     config: CorridorConfig,
     episode_index: int,
+    appearance_registry: AppearanceRegistry,
+    seed_registry: EvaluationSeedRegistry,
 ) -> EpisodeManifest:
     episode_id = f"episode-{episode_index:06d}"
     episode_seed = derive_seed(config.seed, f"episode:{episode_index}")
@@ -984,7 +1013,18 @@ def _generate_corridor_episode(
     geometry = sample_corridor_geometry(config, episode_seed)
     episode_directory = root / "episodes" / episode_id
     episode_directory.mkdir(parents=True)
-    rendered = render_corridor_transition(config, geometry, appearance_seed)
+    appearance = resolve_appearance(
+        appearance_registry,
+        config.appearance.profile_id,
+        "corridor",
+        CORRIDOR_SURFACE_NAMES,
+        episode_seed,
+        config.seed,
+        seed_registry,
+    )
+    if appearance.record.seeds.appearance_base_seed != appearance_seed:
+        raise RuntimeError("corridor appearance namespace differs from the resolved instance")
+    rendered = render_corridor_transition(config, geometry, appearance)
     surfaces, references = _corridor_surface_references(remapping_seed)
     before_segmentation = _remap_segmentation(
         rendered.before.raw_geom_segmentation,
@@ -1106,10 +1146,10 @@ def _generate_corridor_episode(
             )
         )
     instrumentation = CorridorInstrumentation(
-        schema_version="0.1.0-dev.9",
+        schema_version="0.1.0-dev.12",
         scene_family=SceneFamily.CORRIDOR,
         episode_id=episode_id,
-        appearance_variant=config.appearance.variant,
+        appearance=appearance.record,
         apparatus_surface_names=CORRIDOR_SURFACE_NAMES,
         raw_geom_ids=rendered.raw_geom_ids,
         raw_to_opaque_surface_ids={
@@ -1126,7 +1166,7 @@ def _generate_corridor_episode(
         generation_seeds=generation_seeds,
         raw_segmentation_frames=tuple(raw_segmentation_evidence),  # type: ignore[arg-type]
         geometry_sampling_rule="uniform_width_length_v1",
-        appearance_rule="solid_colour_variant_v1",
+        appearance_rule="procedural_profile_instance_v1",
         analytic_transport_diagnostics=_analytic_transport_diagnostics(
             rendered.analytic_transport,
             rendered.before.raw_geom_segmentation,
@@ -1163,6 +1203,7 @@ def _generate_corridor_episode(
         analytic_transport_sha256=analytic_transport.analytic_transport_sha256,
         oriented_boundary_sha256=oriented_boundaries.oriented_boundary_sha256,
         visibility_event_sha256=visibility_events.visibility_event_sha256,
+        appearance_instance_sha256=appearance.record.appearance_instance_sha256,
         rgb_logical_sha256=(before.rgb.logical_sha256, after.rgb.logical_sha256),
     )
 
@@ -1171,11 +1212,17 @@ def _generate_episode(
     root: Path,
     config: BenchmarkConfig,
     episode_index: int,
+    appearance_registry: AppearanceRegistry,
+    seed_registry: EvaluationSeedRegistry,
 ) -> EpisodeManifest:
     if isinstance(config, SingleOccluderConfig):
-        return _generate_single_occluder_episode(root, config, episode_index)
+        return _generate_single_occluder_episode(
+            root, config, episode_index, appearance_registry, seed_registry
+        )
     if isinstance(config, CorridorConfig):
-        return _generate_corridor_episode(root, config, episode_index)
+        return _generate_corridor_episode(
+            root, config, episode_index, appearance_registry, seed_registry
+        )
     raise TypeError(f"unsupported scene configuration: {type(config).__name__}")
 
 
@@ -1192,7 +1239,14 @@ def _renderer_provenance() -> RendererProvenance:
     )
 
 
-def generate_dataset(config: BenchmarkConfig, episodes: int, output: Path) -> DatasetManifest:
+def generate_dataset(
+    config: BenchmarkConfig,
+    episodes: int,
+    output: Path,
+    *,
+    appearance_registry: AppearanceRegistry | None = None,
+    seed_registry: EvaluationSeedRegistry | None = None,
+) -> DatasetManifest:
     """Generate a new dataset directory, refusing to overwrite existing content."""
 
     if episodes < 1:
@@ -1201,6 +1255,15 @@ def generate_dataset(config: BenchmarkConfig, episodes: int, output: Path) -> Da
         raise FileExistsError(f"output directory is not empty: {output}")
     source_provenance = collect_source_provenance(Path.cwd())
     source_provenance_sha256 = compute_source_provenance_hash(source_provenance)
+    appearance_registry = appearance_registry or load_appearance_registry(_APPEARANCE_REGISTRY_PATH)
+    seed_registry = seed_registry or load_evaluation_seed_registry(_EVALUATION_SEED_REGISTRY_PATH)
+    validate_axis_isolation(appearance_registry)
+    if config.appearance.registry_version != appearance_registry.registry_version:
+        raise ValueError("selected appearance registry version is unavailable")
+    selected_profile = profile_by_id(appearance_registry, config.appearance.profile_id)
+    registry_sha256 = appearance_registry_hash(appearance_registry)
+    profile_sha256 = appearance_profile_hash(selected_profile)
+    evaluation_seed_registry_sha256 = seed_registry_hash(seed_registry)
     output.mkdir(parents=True, exist_ok=True)
     resolved_config_path = output / "resolved_config.json"
     write_canonical_json(resolved_config_path, config)
@@ -1211,20 +1274,51 @@ def generate_dataset(config: BenchmarkConfig, episodes: int, output: Path) -> Da
         Modality.PRIVILEGED_GENERATION_RECORDS,
         "application/json",
     )
+    appearance_registry_path = output / "appearance_registry_snapshot.json"
+    write_canonical_json(appearance_registry_path, appearance_registry)
+    appearance_registry_artifact = _json_artifact(
+        appearance_registry_path,
+        output,
+        appearance_registry,
+        Modality.APPEARANCE_CONTROL,
+        "application/json",
+    )
+    evaluation_seed_registry_path = output / "evaluation_seed_registry_snapshot.json"
+    write_canonical_json(evaluation_seed_registry_path, seed_registry)
+    evaluation_seed_registry_artifact = _json_artifact(
+        evaluation_seed_registry_path,
+        output,
+        seed_registry,
+        Modality.APPEARANCE_CONTROL,
+        "application/json",
+    )
     episode_manifests = tuple(
-        _generate_episode(output, config, episode_index) for episode_index in range(episodes)
+        _generate_episode(
+            output,
+            config,
+            episode_index,
+            appearance_registry,
+            seed_registry,
+        )
+        for episode_index in range(episodes)
     )
     renderer_provenance = _renderer_provenance()
     renderer_execution_provenance_sha256 = compute_renderer_execution_provenance_hash(
         renderer_provenance
     )
     manifest = DatasetManifest(
-        schema_version="0.1.0-dev.4",
+        schema_version="0.1.0-dev.7",
         generator_version="0.1.0",
         scene_family=config.scene_family,
         root_seed=config.seed,
         config_logical_sha256=sha256_bytes(canonical_json_bytes(config)),
-        appearance_variant=config.appearance.variant,
+        appearance_registry_sha256=registry_sha256,
+        appearance_profile_id=selected_profile.profile_id,
+        appearance_profile_sha256=profile_sha256,
+        appearance_registry_snapshot=appearance_registry_artifact,
+        evaluation_seed_registry_sha256=evaluation_seed_registry_sha256,
+        evaluation_seed_registry_snapshot=evaluation_seed_registry_artifact,
+        appearance_assignment_schedule_source=ASSIGNMENT_SCHEDULE_SOURCE,
         resolved_config=resolved_config_artifact,
         renderer_provenance=renderer_provenance,
         renderer_execution_provenance_sha256=renderer_execution_provenance_sha256,

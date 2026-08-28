@@ -20,6 +20,8 @@ from pydantic import (
     model_validator,
 )
 
+from epsbench.appearance import AppearanceInstanceRecord
+
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 GitCommit = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 SurfaceId = Annotated[str, StringConstraints(pattern=r"^surface-[0-9a-f]{16}$")]
@@ -102,6 +104,7 @@ class Modality(StrEnum):
     RAW_SIMULATOR_COORDINATES = "raw_simulator_coordinates"
     SAMPLED_SCENE_GEOMETRY = "sampled_scene_geometry"
     PRIVILEGED_GENERATION_RECORDS = "privileged_generation_records"
+    APPEARANCE_CONTROL = "appearance_control"
     TRANSITION_RECORD = "transition_record"
     SCENE_FAMILY = "scene_family"
 
@@ -456,7 +459,13 @@ class ArtifactRecord(StrictModel):
         if _WINDOWS_DRIVE_PREFIX.match(value):
             raise ValueError("artifact paths must not be Windows drive-qualified or drive-relative")
         path = PurePosixPath(value)
-        if path.is_absolute() or ".." in path.parts or value in {"", "."}:
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or value in {"", "."}
+            or "\x00" in value
+            or path.as_posix() != value
+        ):
             raise ValueError("artifact path must be a safe dataset-relative path")
         return value
 
@@ -863,6 +872,7 @@ class EpisodeManifest(StrictModel):
     analytic_transport_sha256: Sha256
     oriented_boundary_sha256: Sha256
     visibility_event_sha256: Sha256
+    appearance_instance_sha256: Sha256
     rgb_logical_sha256: tuple[Sha256, Sha256]
 
     @model_validator(mode="after")
@@ -1192,10 +1202,10 @@ class BoundaryVisibilityDiagnostics(StrictModel):
 
 
 class SingleOccluderInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.9"]
+    schema_version: Literal["0.1.0-dev.12"]
     scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
-    appearance_variant: Literal["base", "alternate"]
+    appearance: AppearanceInstanceRecord
     raw_geom_ids: dict[str, int]
     raw_to_opaque_surface_ids: dict[str, SurfaceId]
     raw_geom_world_positions: dict[str, tuple[float, float, float]]
@@ -1243,10 +1253,10 @@ class SingleOccluderInstrumentation(StrictModel):
 
 
 class CorridorInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.9"]
+    schema_version: Literal["0.1.0-dev.12"]
     scene_family: Literal[SceneFamily.CORRIDOR]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
-    appearance_variant: Literal["base", "alternate"]
+    appearance: AppearanceInstanceRecord
     apparatus_surface_names: tuple[str, ...]
     raw_geom_ids: dict[str, int]
     raw_to_opaque_surface_ids: dict[str, SurfaceId]
@@ -1263,7 +1273,7 @@ class CorridorInstrumentation(StrictModel):
         RawSegmentationFrameEvidence,
     ]
     geometry_sampling_rule: Literal["uniform_width_length_v1"]
-    appearance_rule: Literal["solid_colour_variant_v1"]
+    appearance_rule: Literal["procedural_profile_instance_v1"]
     analytic_transport_diagnostics: AnalyticTransportDiagnostics
     attachment_contract: PrivilegedAttachmentContractEvidence
     boundary_visibility_diagnostics: BoundaryVisibilityDiagnostics
@@ -1398,12 +1408,18 @@ class RendererProvenance(StrictModel):
 
 
 class DatasetManifest(StrictModel):
-    schema_version: Literal["0.1.0-dev.4"]
+    schema_version: Literal["0.1.0-dev.7"]
     generator_version: Literal["0.1.0"]
     scene_family: SceneFamily
     root_seed: int = Field(ge=0)
     config_logical_sha256: Sha256
-    appearance_variant: Literal["base", "alternate"]
+    appearance_registry_sha256: Sha256
+    appearance_profile_id: str = Field(pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*_v[0-9]+$")
+    appearance_profile_sha256: Sha256
+    appearance_registry_snapshot: ArtifactRecord
+    evaluation_seed_registry_sha256: Sha256
+    evaluation_seed_registry_snapshot: ArtifactRecord
+    appearance_assignment_schedule_source: Literal["snapshotted_evaluation_seed_registry_v1"]
     resolved_config: ArtifactRecord
     renderer_provenance: RendererProvenance
     renderer_execution_provenance_sha256: Sha256
@@ -1417,6 +1433,12 @@ class DatasetManifest(StrictModel):
     def episodes_are_unique_and_ordered(self) -> DatasetManifest:
         if self.resolved_config.modality != Modality.PRIVILEGED_GENERATION_RECORDS:
             raise ValueError("resolved configuration must be privileged generation data")
+        if self.appearance_registry_snapshot.modality != Modality.APPEARANCE_CONTROL:
+            raise ValueError("appearance registry snapshot must be protected appearance control")
+        if self.evaluation_seed_registry_snapshot.modality != Modality.APPEARANCE_CONTROL:
+            raise ValueError(
+                "evaluation seed registry snapshot must be protected appearance control"
+            )
         ids = [episode.episode_id for episode in self.episodes]
         indices = [episode.episode_index for episode in self.episodes]
         if len(ids) != len(set(ids)) or len(indices) != len(set(indices)):

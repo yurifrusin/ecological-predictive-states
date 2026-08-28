@@ -51,3 +51,77 @@ jobs:
           uv run epsbench generate --config configs/corridor_v0.yaml --episodes 2 --output data/ci-corridor
           uv run epsbench validate data/ci-corridor
           uv run epsbench inspect data/ci-corridor --episode 0 --output artifacts/ci-corridor-episode-0.png
+
+      - name: Audit the complete appearance candidate matrix
+        run: |
+          uv run epsbench appearance-audit \
+            --registry configs/appearance_candidates_v0.yaml \
+            --seeds configs/evaluation_seed_candidates_v0.yaml \
+            --single-config configs/benchmark_v0.yaml \
+            --corridor-config configs/corridor_v0.yaml \
+            --output artifacts/gate-0b-slice-5-candidates
+          uv run python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          output = Path("artifacts/gate-0b-slice-5-candidates")
+          packet = json.loads((output / "candidate_packet.json").read_text())
+          roots = packet["roots"]
+          cells = json.loads((output / "seed_matrix.json").read_text())["cells"]
+          profiles = json.loads((output / "profile_summary.json").read_text())["profiles"]
+          successful_cells = [cell for cell in cells if cell["generation_status"] == "success"]
+          assert packet["schema_version"] == "appearance_candidate_audit_v2"
+          assert packet["root_schema_version"] == "appearance_candidate_root_domains_v2"
+          assert len(successful_cells) == 10 * 8 * 2, "every matrix cell must generate and validate"
+          assert packet["matrix_counts"] == {"admitted": 44, "rejected": 116}
+          assert all(profile["profile_admission_status"] == "rejected" for profile in profiles)
+          assert packet["final_split"] is None
+          assert packet["final_evaluation_seeds"] is None
+          assert packet["contact_sheet_manifest"]["schema_version"] == (
+              "appearance_contact_sheet_manifest_v1"
+          )
+          assert len(packet["contact_sheet_manifest"]["sheets"]) == 2
+          for field in (
+              "scene_content_sha256",
+              "analytic_transport_sha256",
+              "oriented_boundary_sha256",
+              "visibility_event_sha256",
+              "occlusion_sha256",
+              "action_sha256",
+              "ecological_label_sha256",
+              "camera_trajectory_sha256",
+              "geometry_sha256",
+              "opaque_remapping_sha256",
+          ):
+              domain = [[cell["cell_id"], cell[field]] for cell in successful_cells]
+              digest = hashlib.sha256(
+                  json.dumps(domain, sort_keys=True, separators=(",", ":")).encode()
+              ).hexdigest()
+              print(f"{field} component root: {digest}")
+          expected = {
+              "appearance_registry_sha256": "f90feb3cf9d798ab61c3adbb8d2b276c5d2cb131b95c5a9187df151f9b801d60",
+              "seed_registry_sha256": "6c6816ae1f6657a710631f08a435cca4c623e81efc71ac4e6330a44338313482",
+              "procedural_asset_root_sha256": "6eb582b0c636e79349a11edab50394c26b15f07d55327cdd081ef999131b5724",
+              "appearance_assignment_root_sha256": "10a24a068c80cd2b85ff00a55b4d0c5a02ba64617f97ac808a9417197bcea90d",
+              "portable_analytic_identity_root_sha256": "2cb8b42739418faae9666dcb518de3e6655b9ee7f42c63c3acd337debcd224d5",
+              "appearance_invariance_outcome_root_sha256": "2bc8edfe05b0401c48a8bc3d897e965c1925ec53dbdf4273d0ee60cc034b3cde",
+          }
+          assert all(roots[key] == value for key, value in expected.items()), (roots, expected)
+          required_local_checks = (
+              "structural_invariance",
+              "portable_analytic_identity_equality",
+              "ecological_label_equality",
+              "depth_segmentation_invariance",
+              "determinism",
+          )
+          assert all(
+              all(cell["admission_checks"][check] for check in required_local_checks)
+              for cell in successful_cells
+          ), "a renderer-local appearance intervention changed matched-control structure"
+          print("Exact cross-platform portable roots:", expected)
+          print(
+              "Renderer-local ecological-label root (reported, not compared):",
+              roots["renderer_local_ecological_label_root_sha256"],
+          )
+          PY

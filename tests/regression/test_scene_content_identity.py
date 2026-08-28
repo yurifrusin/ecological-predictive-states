@@ -55,7 +55,10 @@ def test_single_occluder_content_is_seed_and_appearance_independent_and_complete
     alternate = _single_with(
         benchmark_config,
         seed=benchmark_config.seed + 1,
-        appearance=AppearanceConfig(variant="alternate").model_dump(mode="python"),
+        appearance=AppearanceConfig(
+            registry_version="appearance_candidate_registry_v1",
+            profile_id="legacy_solid_alternate_v1",
+        ).model_dump(mode="python"),
     )
     assert compute_single_occluder_scene_content_hash(benchmark_config) == (
         EXPECTED_SINGLE_OCCLUDER_SCENE_CONTENT_HASH
@@ -109,7 +112,10 @@ def test_corridor_content_is_seed_history_appearance_and_remapping_independent(
     alternate = _corridor_with(
         corridor_config,
         seed=corridor_config.seed + 1,
-        appearance=AppearanceConfig(variant="alternate").model_dump(mode="python"),
+        appearance=AppearanceConfig(
+            registry_version="appearance_candidate_registry_v1",
+            profile_id="legacy_solid_alternate_v1",
+        ).model_dump(mode="python"),
     )
     assert compute_corridor_scene_content_hash(corridor_config, geometry) == (
         compute_corridor_scene_content_hash(alternate, geometry)

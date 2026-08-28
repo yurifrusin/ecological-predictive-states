@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from epsbench.data import DatasetLoader, DatasetValidationError, validate_dataset
-from epsbench.schema import ArtifactRecord, ModalityPermissionSet
-from epsbench.utils.canonical import canonical_json_bytes
+from epsbench.data.paths import open_owned_regular_file, sha256_open_file
+from epsbench.schema import ArtifactRecord, ModalityPermissionSet, TransitionRecord
+from epsbench.utils.canonical import canonical_json_bytes, sha256_file
 from tests.dataset_mutations import (
     commit_episode_payloads,
     commit_resolved_config_payload,
@@ -19,11 +24,158 @@ from tests.dataset_mutations import (
     rewrite_array_artifact,
 )
 
+loader_module = importlib.import_module("epsbench.data.loader")
+validate_module = importlib.import_module("epsbench.data.validate")
+
 
 def _copy_dataset(source: Path, tmp_path: Path, name: str) -> Path:
     target = tmp_path / name
     shutil.copytree(source, target)
     return target
+
+
+def _replace_with_external_hardlink(path: Path, external: Path) -> None:
+    external.write_bytes(path.read_bytes())
+    path.unlink()
+    os.link(external, path)
+
+
+def _overwrite_same_inode_same_size(path: Path) -> None:
+    with path.open("r+b") as stream:
+        payload = bytearray(stream.read())
+        index = next(index for index, value in enumerate(payload) if value not in {0, 255})
+        payload[index] ^= 1
+        stream.seek(0)
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows denies replacement of an open file")
+def test_dataset_replacement_between_ownership_check_and_hash_is_rejected(
+    smoke_dataset: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # EPS-ER11-0011
+    broken = _copy_dataset(smoke_dataset, tmp_path, "check-to-hash-replacement")
+    target_relative = load_manifest(broken).appearance_registry_snapshot.path
+    original_open = open_owned_regular_file
+    replaced = False
+
+    @contextmanager
+    def replace_after_check(root: Path, relative_path: str) -> Any:
+        nonlocal replaced
+        with original_open(root, relative_path) as owned:
+            if relative_path == target_relative and not replaced:
+                replaced = True
+                _replace_with_external_hardlink(
+                    owned.path,
+                    tmp_path / "external-dataset-artifact.json",
+                )
+            yield owned
+
+    monkeypatch.setattr(validate_module, "open_owned_regular_file", replace_after_check)
+    with pytest.raises(DatasetValidationError, match="changed while being consumed"):
+        validate_dataset(broken)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows denies replacement of an open file")
+def test_loader_replacement_between_hash_and_decode_is_rejected(
+    smoke_dataset: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # EPS-ER11-0011
+    broken = _copy_dataset(smoke_dataset, tmp_path, "loader-hash-to-decode-replacement")
+    manifest = load_manifest(broken)
+    transition = TransitionRecord.model_validate_json(
+        (broken / manifest.episodes[0].transition.path).read_bytes()
+    )
+    target = (broken / transition.before.rgb.path).resolve()
+    loader = DatasetLoader(broken, ModalityPermissionSet.all_modalities())
+    original_hash = sha256_open_file
+    replaced = False
+
+    def replace_after_hash(owned: Any) -> str:
+        nonlocal replaced
+        digest = original_hash(owned)
+        if owned.path == target and not replaced:
+            replaced = True
+            _replace_with_external_hardlink(
+                owned.path,
+                tmp_path / "external-loader-rgb.png",
+            )
+        return digest
+
+    monkeypatch.setattr(loader_module, "sha256_open_file", replace_after_hash)
+    with pytest.raises(ValueError, match="changed while being consumed"):
+        loader.read_rgb(0, 0)
+
+
+def test_loader_same_inode_overwrite_between_hash_and_decode_is_rejected(
+    smoke_dataset: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # EPS-ER11-0011
+    broken = _copy_dataset(smoke_dataset, tmp_path, "loader-same-inode-overwrite")
+    manifest = load_manifest(broken)
+    transition = TransitionRecord.model_validate_json(
+        (broken / manifest.episodes[0].transition.path).read_bytes()
+    )
+    target = (broken / transition.before.rgb.path).resolve()
+    loader = DatasetLoader(broken, ModalityPermissionSet.all_modalities())
+    original_hash = sha256_open_file
+    overwritten = False
+
+    def overwrite_after_hash(owned: Any) -> str:
+        nonlocal overwritten
+        digest = original_hash(owned)
+        if owned.path == target and not overwritten:
+            overwritten = True
+            _overwrite_same_inode_same_size(owned.path)
+        return digest
+
+    monkeypatch.setattr(loader_module, "sha256_open_file", overwrite_after_hash)
+    with pytest.raises(ValueError, match="bytes changed while being consumed"):
+        loader.read_rgb(0, 0)
+
+
+@pytest.mark.parametrize(
+    ("corruption", "expected"),
+    (
+        ("logical_hash", "array logical hash mismatch"),
+        ("media_type", "array media type mismatch"),
+    ),
+)
+def test_loader_rejects_fully_rehashed_rgb_logical_metadata_corruption(
+    smoke_dataset: Path,
+    tmp_path: Path,
+    corruption: str,
+    expected: str,
+) -> None:
+    # EPS-ER11-0013
+    broken = _copy_dataset(smoke_dataset, tmp_path, f"loader-{corruption}-corruption")
+    transition, instrumentation = load_episode_payloads(broken, 0)
+    record = transition["before"]["rgb"]
+    if corruption == "logical_hash":
+        path = broken / record["path"]
+        with Image.open(path) as image:
+            rgb = np.asarray(image, dtype=np.uint8).copy()
+        rgb[0, 0, 0] ^= np.uint8(1)
+        Image.fromarray(rgb, mode="RGB").save(path, compress_level=9, optimize=False)
+        record["file_sha256"] = sha256_file(path)
+        record["byte_count"] = path.stat().st_size
+    else:
+        record["media_type"] = "image/jpeg"
+    commit_episode_payloads(broken, 0, transition, instrumentation)
+
+    loader = DatasetLoader(broken, ModalityPermissionSet.all_modalities())
+    with pytest.raises(ValueError, match=expected):
+        loader.read_rgb(0, 0)
+    with pytest.raises(DatasetValidationError, match=expected):
+        validate_dataset(broken)
 
 
 @pytest.mark.parametrize("fixture_name", ["smoke_dataset", "corridor_dataset"])
@@ -129,9 +281,9 @@ def test_external_manifest_symlink_is_rejected_by_validation_and_loading(
     manifest_path.unlink()
     manifest_path.symlink_to(external)
 
-    with pytest.raises(DatasetValidationError, match="outside the dataset root"):
+    with pytest.raises(DatasetValidationError, match="symbolic-link alias"):
         validate_dataset(broken)
-    with pytest.raises(ValueError, match="outside the dataset root"):
+    with pytest.raises(ValueError, match="symbolic-link alias"):
         DatasetLoader(broken, ModalityPermissionSet.all_modalities())
 
 
