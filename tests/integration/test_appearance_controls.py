@@ -112,10 +112,10 @@ def test_seed_registry_snapshot_denial_happens_before_artifact_is_opened(
 ) -> None:
     loader = DatasetLoader(smoke_dataset, ModalityPermissionSet.ecological_only())
 
-    def opened(_: str) -> Path:
+    def opened(*_: object) -> None:
         raise AssertionError("protected seed-registry snapshot was opened")
 
-    monkeypatch.setattr(loader, "_path", opened)
+    monkeypatch.setattr(loader, "_decode_owned", opened)
     with pytest.raises(PermissionDeniedError, match="appearance_control"):
         loader.read_evaluation_seed_registry_snapshot()
 

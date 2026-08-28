@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
@@ -67,10 +69,12 @@ from epsbench.data.identity import (
     compute_visibility_event_hash,
 )
 from epsbench.data.paths import (
+    OwnedRegularFile,
     UnsafeDatasetManifestError,
     UnsafeOwnedFileError,
-    resolve_dataset_manifest,
-    resolve_owned_regular_file,
+    open_dataset_manifest,
+    open_owned_regular_file,
+    sha256_open_file,
 )
 from epsbench.schema import (
     Action,
@@ -119,7 +123,6 @@ from epsbench.utils.canonical import (
     canonical_json_bytes,
     logical_array_hash,
     sha256_bytes,
-    sha256_file,
 )
 from epsbench.utils.seeding import derive_seed
 
@@ -137,26 +140,32 @@ class _ArtifactRegistry:
         self.resolved_paths: set[Path] = set()
         self.file_identities: set[tuple[int, int]] = set()
 
-    def claim(self, record: ArtifactRecord) -> Path:
+    @contextmanager
+    def claim(self, record: ArtifactRecord) -> Iterator[OwnedRegularFile]:
         if record.path in self.paths:
             raise DatasetValidationError(f"duplicate artifact path: {record.path}")
         try:
-            owned = resolve_owned_regular_file(self.root, record.path)
+            owned_context = open_owned_regular_file(self.root, record.path)
+            with owned_context as owned:
+                if owned.path in self.resolved_paths:
+                    raise DatasetValidationError(
+                        f"artifact path aliases another role: {record.path}"
+                    )
+                identity = (owned.device, owned.inode)
+                if identity in self.file_identities:
+                    raise DatasetValidationError(
+                        f"artifact path aliases another role: {record.path}"
+                    )
+                if owned.byte_count != record.byte_count:
+                    raise DatasetValidationError(f"artifact byte count mismatch: {record.path}")
+                if sha256_open_file(owned) != record.file_sha256:
+                    raise DatasetValidationError(f"artifact file hash mismatch: {record.path}")
+                self.paths.add(record.path)
+                self.resolved_paths.add(owned.path)
+                self.file_identities.add(identity)
+                yield owned
         except UnsafeOwnedFileError as error:
             raise DatasetValidationError(str(error)) from error
-        if owned.path in self.resolved_paths:
-            raise DatasetValidationError(f"artifact path aliases another role: {record.path}")
-        identity = (owned.device, owned.inode)
-        if identity in self.file_identities:
-            raise DatasetValidationError(f"artifact path aliases another role: {record.path}")
-        if owned.byte_count != record.byte_count:
-            raise DatasetValidationError(f"artifact byte count mismatch: {record.path}")
-        if sha256_file(owned.path) != record.file_sha256:
-            raise DatasetValidationError(f"artifact file hash mismatch: {record.path}")
-        self.paths.add(record.path)
-        self.resolved_paths.add(owned.path)
-        self.file_identities.add(identity)
-        return owned.path
 
 
 def _verify_json(
@@ -165,19 +174,19 @@ def _verify_json(
     registry: _ArtifactRegistry,
 ) -> dict[str, Any]:
     del root
-    path = registry.claim(record)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise DatasetValidationError(f"invalid JSON artifact: {record.path}") from error
-    if not isinstance(payload, dict):
-        raise DatasetValidationError(f"JSON artifact must contain an object: {record.path}")
-    logical_bytes = canonical_json_bytes(payload)
-    if sha256_bytes(logical_bytes) != record.logical_sha256:
-        raise DatasetValidationError(f"artifact logical hash mismatch: {record.path}")
-    if record.dtype != "json" or record.shape != (len(logical_bytes),):
-        raise DatasetValidationError(f"JSON artifact metadata mismatch: {record.path}")
-    return payload
+    with registry.claim(record) as owned:
+        try:
+            payload = json.loads(owned.handle.read().decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise DatasetValidationError(f"invalid JSON artifact: {record.path}") from error
+        if not isinstance(payload, dict):
+            raise DatasetValidationError(f"JSON artifact must contain an object: {record.path}")
+        logical_bytes = canonical_json_bytes(payload)
+        if sha256_bytes(logical_bytes) != record.logical_sha256:
+            raise DatasetValidationError(f"artifact logical hash mismatch: {record.path}")
+        if record.dtype != "json" or record.shape != (len(logical_bytes),):
+            raise DatasetValidationError(f"JSON artifact metadata mismatch: {record.path}")
+        return payload
 
 
 def _verify_array(
@@ -196,16 +205,16 @@ def _load_rgb(
     registry: _ArtifactRegistry,
 ) -> np.ndarray[Any, Any]:
     del root
-    path = registry.claim(record)
-    try:
-        with Image.open(path) as image:
-            if image.mode != "RGB":
-                raise DatasetValidationError(f"RGB artifact must use RGB mode: {record.path}")
-            rgb = np.asarray(image, dtype=np.uint8).copy()
-    except OSError as error:
-        raise DatasetValidationError(f"unreadable RGB artifact: {record.path}") from error
-    _verify_array(record, rgb)
-    return rgb
+    with registry.claim(record) as owned:
+        try:
+            with Image.open(owned.handle) as image:
+                if image.mode != "RGB":
+                    raise DatasetValidationError(f"RGB artifact must use RGB mode: {record.path}")
+                rgb = np.asarray(image, dtype=np.uint8).copy()
+        except OSError as error:
+            raise DatasetValidationError(f"unreadable RGB artifact: {record.path}") from error
+        _verify_array(record, rgb)
+        return rgb
 
 
 def _load_npy(
@@ -214,13 +223,13 @@ def _load_npy(
     registry: _ArtifactRegistry,
 ) -> np.ndarray[Any, Any]:
     del root
-    path = registry.claim(record)
-    try:
-        array = cast(np.ndarray[Any, Any], np.load(path, allow_pickle=False))
-    except (OSError, ValueError) as error:
-        raise DatasetValidationError(f"unreadable NumPy artifact: {record.path}") from error
-    _verify_array(record, array)
-    return array
+    with registry.claim(record) as owned:
+        try:
+            array = cast(np.ndarray[Any, Any], np.load(owned.handle, allow_pickle=False))
+        except (OSError, ValueError) as error:
+            raise DatasetValidationError(f"unreadable NumPy artifact: {record.path}") from error
+        _verify_array(record, array)
+        return array
 
 
 def _load_transport_direction(
@@ -1112,11 +1121,11 @@ def validate_dataset(root: Path) -> DatasetManifest:
     """Validate every declared artifact and cross-record invariant."""
 
     try:
-        resolved_root, manifest_path = resolve_dataset_manifest(root)
+        manifest_context = open_dataset_manifest(root)
+        with manifest_context as (resolved_root, owned_manifest):
+            manifest = DatasetManifest.model_validate_json(owned_manifest.handle.read())
     except UnsafeDatasetManifestError as error:
         raise DatasetValidationError(str(error)) from error
-    try:
-        manifest = DatasetManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
     except Exception as error:
         raise DatasetValidationError("dataset manifest failed schema validation") from error
     if compute_dataset_logical_hash(manifest) != manifest.dataset_logical_sha256:

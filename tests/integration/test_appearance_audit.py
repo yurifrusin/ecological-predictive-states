@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from epsbench.appearance import (
     resolve_appearance,
     seed_registry_hash,
 )
+from epsbench.data.paths import open_owned_regular_file, sha256_open_file
 from epsbench.utils.canonical import (
     logical_array_hash,
     sha256_file,
@@ -151,7 +153,13 @@ def _tiny_success_cell(
         "appearance_instance": appearance.model_dump(mode="json"),
         "evaluation_seed_registry_sha256": seed_registry_hash(seeds),
         "appearance_assignment_schedule_source": ("snapshotted_evaluation_seed_registry_v1"),
-        "renderer_provenance": {"backend": "synthetic-test-renderer"},
+        "renderer_provenance": {
+            "mujoco_version": "synthetic",
+            "numpy_version": np.__version__,
+            "renderer": "mujoco.Renderer",
+            "backend": "synthetic-test-renderer",
+            "operating_system": "synthetic",
+        },
         "rgb_logical_sha256": [logical_array_hash(rgb), logical_array_hash(rgb)],
         "scene_content_sha256": structural,
         "analytic_transport_sha256": structural,
@@ -169,7 +177,9 @@ def _tiny_success_cell(
             logical_array_hash(segmentation),
         ],
         "determinism_pass": True,
-        "semantic_surface_labels": {surface_names[0]: 1},
+        "semantic_surface_labels": {
+            surface_name: index + 1 for index, surface_name in enumerate(surface_names)
+        },
         "source_texture_diagnostics": audit._source_texture_diagnostics(profile, scene, appearance),
         "evidence": evidence,
     }
@@ -407,6 +417,127 @@ def test_corrupt_contact_sheet_is_rejected(synthetic_packet: Path) -> None:
 def _matrix_payload(packet_root: Path) -> tuple[Path, dict[str, Any]]:
     path = packet_root / "seed_matrix.json"
     return path, json.loads(path.read_text(encoding="utf-8"))
+
+
+def _fully_reseal_matrix(packet_root: Path) -> None:
+    matrix = json.loads((packet_root / "seed_matrix.json").read_text(encoding="utf-8"))
+    cells = matrix["cells"]
+    registry = load_appearance_registry(packet_root / "appearance_registry_snapshot.json")
+    seeds = load_evaluation_seed_registry(packet_root / "seed_registry_snapshot.json")
+    negative = {
+        "schema_version": audit.AUDIT_SCHEMA_VERSION,
+        "retention_rule": "all_rejected_candidates_and_failing_seeds_retained_v1",
+        "rejected_cells": [
+            {
+                "cell_id": cell["cell_id"],
+                "profile_id": cell["profile_id"],
+                "scene_family": cell["scene_family"],
+                "seed_index": cell["seed_index"],
+                "rejection_reasons": cell["rejection_reasons"],
+                "failure_type": cell.get("failure_type"),
+                "failure_message": cell.get("failure_message"),
+                "matched_control_failure_type": cell.get("matched_control_failure_type"),
+                "matched_control_failure_message": cell.get("matched_control_failure_message"),
+            }
+            for cell in cells
+            if cell["admission_status"] == "rejected"
+        ],
+    }
+    write_canonical_json(packet_root / "negative_evidence.json", negative)
+    packet_path = packet_root / "candidate_packet.json"
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    packet["roots"] = audit._roots(registry, seeds, cells)
+    _write_rehashed_packet(packet_root, packet)
+
+
+def test_fully_resealed_boolean_seed_index_is_rejected(
+    synthetic_packet: Path,
+) -> None:
+    # EPS-ER11-0010
+    matrix_path, matrix = _matrix_payload(synthetic_packet)
+    matrix["cells"][0]["seed_index"] = False
+    write_canonical_json(matrix_path, matrix)
+    _fully_reseal_matrix(synthetic_packet)
+    with pytest.raises(audit.AppearanceAuditError, match="noncanonical type: seed_index"):
+        audit.validate_appearance_audit(synthetic_packet)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_fully_resealed_unknown_audit_cell_field_is_rejected(
+    synthetic_packet: Path,
+    nested: bool,
+) -> None:
+    # EPS-ER11-0010
+    matrix_path, matrix = _matrix_payload(synthetic_packet)
+    if nested:
+        matrix["cells"][0]["admission_checks"]["benchmark_frozen"] = True
+        expected = "admission-check schema is not strict"
+    else:
+        matrix["cells"][0]["unauthorised_extension"] = {"benchmark_frozen": True}
+        expected = "cell schema is not strict"
+    write_canonical_json(matrix_path, matrix)
+    _fully_reseal_matrix(synthetic_packet)
+    with pytest.raises(audit.AppearanceAuditError, match=expected):
+        audit.validate_appearance_audit(synthetic_packet)
+
+
+def _replace_with_external_hardlink(path: Path, external: Path) -> None:
+    external.write_bytes(path.read_bytes())
+    path.unlink()
+    os.link(external, path)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows denies replacement of an open file")
+def test_packet_replacement_between_ownership_check_and_hash_is_rejected(
+    synthetic_packet: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # EPS-ER11-0011
+    original_open = open_owned_regular_file
+    replaced = False
+
+    @contextmanager
+    def replace_after_check(root: Path, relative_path: str) -> Any:
+        nonlocal replaced
+        with original_open(root, relative_path) as owned:
+            if relative_path == "seed_matrix.json" and not replaced:
+                replaced = True
+                _replace_with_external_hardlink(
+                    owned.path,
+                    tmp_path / "external-check-to-hash.json",
+                )
+            yield owned
+
+    monkeypatch.setattr(audit, "open_owned_regular_file", replace_after_check)
+    with pytest.raises(audit.AppearanceAuditError, match="changed while being consumed"):
+        audit.validate_appearance_audit(synthetic_packet)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows denies replacement of an open file")
+def test_packet_replacement_between_hash_and_decode_is_rejected(
+    synthetic_packet: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # EPS-ER11-0011
+    original_hash = sha256_open_file
+    replaced = False
+
+    def replace_after_hash(owned: Any) -> str:
+        nonlocal replaced
+        digest = original_hash(owned)
+        if owned.path.name == "seed_matrix.json" and not replaced:
+            replaced = True
+            _replace_with_external_hardlink(
+                owned.path,
+                tmp_path / "external-hash-to-decode.json",
+            )
+        return digest
+
+    monkeypatch.setattr(audit, "sha256_open_file", replace_after_hash)
+    with pytest.raises(audit.AppearanceAuditError, match="changed while being consumed"):
+        audit.validate_appearance_audit(synthetic_packet)
 
 
 def test_tiny_success_packet_validates_all_retained_evidence(
