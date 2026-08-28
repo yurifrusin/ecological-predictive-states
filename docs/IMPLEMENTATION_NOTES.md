@@ -2,7 +2,7 @@
 
 ## Scope and architecture
 
-This implementation completes the repository foundation in Gate 0A and preserves the canonical single-occluder Gate 0B Slice 1, corridor Slice 2, analytic optical-transport Slice 3, and oriented-boundary and ecological visibility-event Slice 4. Slice 4 became canonical after exact-head dual independent review and owner approval at `24deb074d4ba0cf3e1044e466ecbbb6e0b2a4cc4`. Slice 5 procedural appearance-candidate work is implemented on the current branch pending independent review and owner approval. It does not satisfy the full Gate 0B deliverable list in `MILESTONE_0.md` and makes no scientific claim.
+This implementation completes the repository foundation in Gate 0A and preserves the canonical single-occluder Gate 0B Slice 1, corridor Slice 2, analytic optical-transport Slice 3, and oriented-boundary and ecological visibility-event Slice 4. Slice 4 became canonical after exact-head dual independent review and owner approval at `24deb074d4ba0cf3e1044e466ecbbb6e0b2a4cc4`. Slice 5 procedural appearance-candidate apparatus is also canonical after exact-head engineering and scientific review and owner approval at `2ea05867e7c8cb04ee4f9d0138394602b6c3e53a`; its empty admitted-profile set remains preserved negative evidence. This does not satisfy the full Gate 0B deliverable list in `MILESTONE_0.md` and makes no scientific claim.
 
 The path is intentionally short:
 
@@ -170,13 +170,13 @@ The final numerical contract requires an actual witness inside the closed compil
 
 The review evidence is bounded to the two canonical scene families, static planes and axis-aligned boxes, the declared half-pixel association band, and the locked Windows/WGL and Ubuntu/OSMesa environments. Component topology, continuous boundary-component tracing, broader scenes and appearance assets, final evaluation seeds, Gate 0C, and models remain outside scope. The review establishes apparatus and construct validity, not a comparative scientific result.
 
-## Slice 5 appearance-candidate implementation pending review
+## PR #11 Slice 5 appearance-candidate closeout evidence
 
 Slice 5 adds repository-generated `128 x 128 x 3` sRGB textures, exact byte palettes, explicit non-specular directional lighting, balanced private semantic-to-style permutations, a strict ten-profile registry, and an independently recomputed prospective eight-seed registry. No external appearance asset or licence is introduced. Full appearance control requires both the typed `appearance_control` and privileged-generation permissions before instrumentation is opened; ecological projections remain unchanged.
 
-The current Slice 5 schema matrix is:
+The final active Slice 5 schema matrix is:
 
-| Contract | Pending Slice 5 version |
+| Contract | Canonical Slice 5 version |
 | --- | --- |
 | Single-occluder and corridor configuration | `0.1.0-dev.4` |
 | Dataset and episode manifest | `0.1.0-dev.7` |
@@ -187,10 +187,11 @@ The current Slice 5 schema matrix is:
 | Appearance instance | `appearance_instance_v3` |
 | Candidate audit packet | `appearance_candidate_audit_v2` |
 | Candidate root domains | `appearance_candidate_root_domains_v2` |
+| Contact-sheet manifest | `appearance_contact_sheet_manifest_v1` |
 
 Every generated dataset snapshots the protected evaluation-seed candidate registry. Its version,
 hash, artifact, and assignment-schedule source enter dataset logical identity; appearance-instance
-v2 additionally binds the registry identity, root seed, candidate index or explicit non-candidate
+v3 additionally binds the registry identity, root seed, candidate index or explicit non-candidate
 posture, and semantic-to-style assignment. Whole-dataset validation uses only the dataset snapshot,
 never an ambient repository file. The snapshot and appearance instrumentation require typed
 `appearance_control` plus privileged-generation permission before opening.
@@ -205,6 +206,14 @@ inside each renderer; complete raster-derived ecological-label roots are reporte
 compared across WGL and OSMesa. Representative contact sheets remain outside datasets. See
 `docs/GATE_0B_SLICE_5_APPEARANCE_CANDIDATES.md` for the full contract and limitations.
 
+Audit v2 enforces exact packet, generation-status-specific cell, nested evidence, and contact-sheet
+manifest schemas, including strict JSON integer typing. Contained, single-link regular files are
+captured as immutable byte snapshots; ownership checks, hashes, and shared JSON/RGB/NumPy logical
+decoding operate on the same bytes and verify logical hash, media type, dtype, and shape before data
+is returned. Hardlinks, symlinks, aliases, nonregular files, noncanonical paths, path replacement,
+same-inode overwrite, containment escapes, and permission denial before open fail closed. Failed and
+mixed-failure evidence remains retained and identity-bound.
+
 The scientifically reviewed v0 head `e6449cdfcf8a64e5ffd8339a325f21d48a893122`
 remains historical negative apparatus evidence. Its clean Windows/WGL packet/root values were packet
 `f9ac102adac3f5e3b2434ddbc6bcb7504eb0800ac711bda853235364d01f218b`, renderer
@@ -214,24 +223,56 @@ run `33130502434` produced packet
 `cd99a9397e8f40b2d95007b8a6c1064d0ee472a169d86c0f29afb6779ae16e84`, renderer
 `ccc0c99a2fe6795119c573e14cbdb49d7655d3b7bd547b61bc3cd00d0854d05b`, and nominal ecological
 `e06d0139c59da07bb229bc26cb783642403e9ec43357bf329e33194792a63a22` before correctly failing the
-over-broad cross-platform assertion. Audit v1 versions the corrected root semantics rather than
-silently redefining v0.
+over-broad cross-platform assertion. Audit v1 first versioned the corrected root semantics rather
+than silently redefining v0; audit/root v2 is the final active contract.
+
+The initial scientific review of `e6449cdfcf8a64e5ffd8339a325f21d48a893122` returned
+`SCIENTIFIC_REQUEST_CHANGES` for `EPS-SR11-0001` and `EPS-SR11-0002`. The correction at
+`5ee07912e8712ce3f511312a32c94e03fccbc3ca` received a scientific pass; later engineering
+corrections invalidated each preceding exact-head pass and received renewed scientific passes at
+`93ebd95453b0a023a4c8b12fdd995990839aaf6d`,
+`febf122974fdca3b9e099744ad8d4f769e0e6ac2`, and the final head. Engineering review retained the
+ledger `EPS-ER11-0001` through `EPS-ER11-0013`; intermediate heads required further correction and
+did not receive a final engineering pass.
+
+Final exact head `2ea05867e7c8cb04ee4f9d0138394602b6c3e53a` received `ENGINEERING_PASS` and
+`SCIENTIFIC_PASS`. Local Windows/WGL evidence recorded 398 passed with 9 platform skips, both
+ordinary two-episode workflows, the complete 160-cell audit, independent packet validation, and
+coherent inspection composites. Exact-head Ubuntu/OSMesa CI run `33170997633` passed locked
+installation, lint, formatting, typing, all 407 tests, both ordinary workflows, the complete audit,
+and independent validation.
+
+All six portable roots matched exactly across the locked environments: appearance registry
+`f90feb3cf9d798ab61c3adbb8d2b276c5d2cb131b95c5a9187df151f9b801d60`, candidate-seed registry
+`6c6816ae1f6657a710631f08a435cca4c623e81efc71ac4e6330a44338313482`, procedural assets
+`6eb582b0c636e79349a11edab50394c26b15f07d55327cdd081ef999131b5724`, appearance assignment
+`10a24a068c80cd2b85ff00a55b4d0c5a02ba64617f97ac808a9417197bcea90d`, portable analytic identity
+`2cb8b42739418faae9666dcb518de3e6655b9ee7f42c63c3acd337debcd224d5`, and appearance-invariance
+outcome `2bc8edfe05b0401c48a8bc3d897e965c1925ec53dbdf4273d0ee60cc034b3cde`.
+
+Renderer-local evidence remained deliberately backend-specific. Windows/WGL ecological-label and
+renderer-specific audit roots were
+`8afb8c64e48fb809817ced42102fbbd634a958735bc17917c5a7195f677567a2` and
+`c77e091f19ec533b09faee86d960a259f2d16b1c0bab3f034a4977eb6d8dd84d`; Ubuntu/OSMesa roots were
+`020bb1bbc4b1f23649e33b3bf73d1e35dc59234cc69c724919d09a1187d3a8f3` and
+`0b48a51f5e53efce7fda63f9bd594ef21b11db86c951c87cea032cdd052f2ec2`. Complete packet roots remain
+source-provenance- and renderer-specific and create no scientific-result claim.
 
 This development-schema migration is not byte compatible with Slice 4 manifests or instrumentation. It does not modify the public transition wire contract or the established Slice 1–4 scene, transport, boundary, visibility-event, or ecological-label identity domains. Historical identities remain evidence for their exact historical heads only.
 
 Candidate admission is neither scientific evidence nor a benchmark freeze. The exact candidate
-result remains 44 admitted cells and 116 rejected cells, with every profile rejected at profile
-level. `freeze_eligible` means eligible to be audited prospectively, not admitted or freeze-ready;
-the admitted-profile set is empty. Final development/OOD role selection, final evaluation-seed
-selection, cross-platform exact-head review convergence, owner approval, and remaining Gate 0B exit
-criteria are still absent. Gate 0C and model work remain unauthorised.
+result is 160 successful cells, 44 admitted cells, and 116 retained rejected cells, with every
+profile rejected at profile level. `freeze_eligible` means eligible to be audited prospectively,
+not admitted or freeze-ready; the admitted-profile set is empty. Final development/OOD role
+selection, final evaluation-seed selection, benchmark freeze, and the remaining Gate 0B exit
+criteria remain absent. Gate 0C, Gate 0D, and model work remain unauthorised.
 
 ## Remaining Gate 0B work
 
 - Complete the remaining Gate 0B exit-criterion evidence and obtain separate owner authority before any full Gate 0B completion decision.
 - Decide whether later authorised work should define component topology, continuous boundary-component attribution, or broader scene geometry. Slice 4 deliberately leaves these unavailable.
 - Extend the reviewed cross-platform posture beyond the locked Windows/WGL and Ubuntu/OSMesa environments.
-- Independently review the Slice 5 candidate definitions and packet, then separately decide which admitted profile IDs and candidate seeds should enter an owner-authorised benchmark freeze.
+- Use a separately authorised, versioned candidate-revision work package and complete prospective audit to obtain at least one admitted profile before any separately authorised development/OOD role or final-seed freeze decision.
 
 Gate 0B completion is therefore not claimed. Gate 0C should not begin until these items and every Gate 0B exit criterion have owner-reviewed evidence.
 

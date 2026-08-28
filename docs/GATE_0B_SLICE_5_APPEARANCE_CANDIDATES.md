@@ -2,9 +2,11 @@
 
 ## Status and scientific purpose
 
-This document describes the implemented, review-pending Gate 0B Slice 5 candidate apparatus. It
-does not freeze EPS-Bench, select development or held-out Appearance-OOD profiles, freeze final
-evaluation seeds, complete Gate 0B, authorise Gate 0C or Gate 0D, or establish a scientific result.
+This document describes the canonical Gate 0B Slice 5 candidate apparatus after exact-head
+engineering and scientific review of implementation head
+`2ea05867e7c8cb04ee4f9d0138394602b6c3e53a`. It does not freeze EPS-Bench, select development or
+held-out Appearance-OOD profiles, freeze final evaluation seeds, complete Gate 0B, authorise Gate
+0C or Gate 0D, or establish a scientific result.
 
 The bounded purpose is to replace the two-colour smoke check with prospectively specified,
 procedural appearance interventions. Each intervention must materially affect controlled RGB while
@@ -165,6 +167,7 @@ The unreleased `appearance.variant` configuration shape is replaced directly by
 | Appearance instance | `appearance_instance_v3` |
 | Candidate audit and packet | `appearance_candidate_audit_v2` |
 | Packet root domains | `appearance_candidate_root_domains_v2` |
+| Contact-sheet manifest | `appearance_contact_sheet_manifest_v1` |
 
 The transition does not gain appearance-control data. Historical Slice 1–4 identities remain valid
 evidence for their exact historical wire contracts; regenerated Slice 5 manifests and RGB identities
@@ -243,6 +246,53 @@ rules/instances. Renderer-specific RGB and admission evidence retains its own ro
 cross-platform RGB or complete-packet hash is not claimed. Raw compiled camera, geometry, and
 remapping hashes remain private cell evidence.
 
+## Final exact-head review evidence
+
+Exact implementation head `2ea05867e7c8cb04ee4f9d0138394602b6c3e53a` received
+`ENGINEERING_PASS` and `SCIENTIFIC_PASS`. Exact-head Ubuntu/OSMesa CI run `33170997633` passed the
+locked installation, lint, formatting, typing, all 407 tests, both ordinary scene-family workflows,
+the complete appearance audit, and independent packet validation. Local Windows/WGL evidence
+recorded 398 passed with 9 platform skips, both visually coherent ordinary workflows, and a passing
+complete audit and independent validation.
+
+The final packet contains 160 successful cells: 44 admitted cells and 116 retained rejected cells.
+All ten profiles are rejected at profile level, so the admitted-profile set is empty. `final_split`
+and `final_evaluation_seeds` are null, and freeze status remains
+`candidate_packet_only_not_frozen`.
+
+The six portable roots matched exactly across the two locked environments:
+
+| Portable domain | SHA-256 |
+| --- | --- |
+| Appearance registry | `f90feb3cf9d798ab61c3adbb8d2b276c5d2cb131b95c5a9187df151f9b801d60` |
+| Candidate-seed registry | `6c6816ae1f6657a710631f08a435cca4c623e81efc71ac4e6330a44338313482` |
+| Procedural assets | `6eb582b0c636e79349a11edab50394c26b15f07d55327cdd081ef999131b5724` |
+| Appearance assignment | `10a24a068c80cd2b85ff00a55b4d0c5a02ba64617f97ac808a9417197bcea90d` |
+| Portable analytic identity | `2cb8b42739418faae9666dcb518de3e6655b9ee7f42c63c3acd337debcd224d5` |
+| Appearance-invariance outcome | `2bc8edfe05b0401c48a8bc3d897e965c1925ec53dbdf4273d0ee60cc034b3cde` |
+
+Renderer-local evidence was reported rather than asserted equal across backends. Windows/WGL used
+ecological-label root `8afb8c64e48fb809817ced42102fbbd634a958735bc17917c5a7195f677567a2`
+and renderer-specific audit root
+`c77e091f19ec533b09faee86d960a259f2d16b1c0bab3f034a4977eb6d8dd84d`. Ubuntu/OSMesa used
+ecological-label root `020bb1bbc4b1f23649e33b3bf73d1e35dc59234cc69c724919d09a1187d3a8f3`
+and renderer-specific audit root
+`0b48a51f5e53efce7fda63f9bd594ef21b11db86c951c87cea032cdd052f2ec2`.
+The complete Windows/WGL packet root
+`56cb80ce0ecafc32298477e52d69640087c4b93c01cda6543ef07c181478d6d1` and Ubuntu/OSMesa packet
+root `f36208b1b8e2030ab5462d55e8434fda9e9b4a806ea8ca059b1822785e7a44d5` are deliberately
+source-provenance- and renderer-specific; their difference does not establish or alter a scientific
+result, and no scientific result exists.
+
+Audit v2 uses strict packet and generation-status-specific cell schemas with exact JSON field and
+type checks. The contact-sheet manifest is independently strict and identity-bound. Owned regular
+files are captured as immutable byte snapshots after fail-closed containment and alias checks;
+hashing and shared JSON/RGB/NumPy logical decoding consume that same snapshot and verify canonical
+logical hash, media type, dtype, and shape. Ordinary datasets remain self-contained through their
+identity-bound evaluation-seed-registry snapshots. Failed cells, rejected evidence, and mixed
+generation/validation failures remain retained rather than being dropped or converted into
+admission evidence.
+
 ## Cross-platform evidence and limits
 
 The required evidence environments are local Windows/WGL and exact-head Ubuntu/OSMesa CI. Registry,
@@ -253,14 +303,16 @@ ecological label and depth/segmentation while meeting renderer-local RGB, exposu
 criteria. Complete raster ecological-label roots and RGB bytes are not required to match across
 renderers.
 
-Exact-head cross-platform roots and any renderer-specific rejection evidence belong in the external
-review handoff, PR body, and PR comments for this implementation head. CI success is infrastructure
-evidence only. Broader platforms and future renderer/dependency versions remain unresolved.
+The exact-head roots and renderer-specific rejection evidence above are review evidence for the
+canonical apparatus. CI success remains infrastructure evidence only. Broader platforms and future
+renderer/dependency versions remain unresolved.
 
 Current limitations include only two scene families, fixed procedural families, renderer-local RGB
 criteria, no final split, no final seed freeze, no external asset licence resolution, no component
-topology, no model, and no empirical comparison. Remaining Gate 0B work includes independent review
-of this exact head and later owner-authorised candidate revision: at this exact candidate version all
-ten profiles have at least one rejected cell, so the admitted-profile set is empty and this packet
-cannot supply a benchmark freeze. Final seed selection and all other exit-criterion evidence also
-remain absent. Gate 0C is not authorised.
+topology, no model, and no empirical comparison. At this exact candidate version all ten profiles
+have at least one rejected cell, so the admitted-profile set is empty and this packet cannot supply
+a benchmark freeze. The next appearance step requires a separately authorised, versioned
+candidate-revision work package and a new complete audit without post-hoc seed or threshold tuning.
+Only after an admitted candidate set exists could separately authorised profile-role and final-seed
+freeze decisions occur. Full Gate 0B completion remains unclaimed; Gate 0C and Gate 0D are not
+authorised, and no scientific result exists.
