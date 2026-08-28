@@ -30,12 +30,12 @@ Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 RgbBytes = tuple[int, int, int]
 TextureArray = npt.NDArray[np.uint8]
 
-APPEARANCE_REGISTRY_VERSION = "appearance_candidate_registry_v0"
+APPEARANCE_REGISTRY_VERSION = "appearance_candidate_registry_v1"
 EVALUATION_SEED_REGISTRY_VERSION = "evaluation_seed_candidate_registry_v0"
 APPEARANCE_GENERATOR_VERSION = "repository_procedural_texture_v1"
 APPEARANCE_ASSIGNMENT_VERSION = "balanced_cyclic_permutation_v1"
 LEGACY_ASSIGNMENT_VERSION = "fixed_semantic_regression_v1"
-APPEARANCE_INSTANCE_VERSION: Literal["appearance_instance_v2"] = "appearance_instance_v2"
+APPEARANCE_INSTANCE_VERSION: Literal["appearance_instance_v3"] = "appearance_instance_v3"
 ASSIGNMENT_SCHEDULE_SOURCE: Literal["snapshotted_evaluation_seed_registry_v1"] = (
     "snapshotted_evaluation_seed_registry_v1"
 )
@@ -125,7 +125,7 @@ class TextureDefinition(StrictAppearanceModel):
     phase_rule: Literal["namespaced_integer_phase_v1"]
     contrast_rule: Literal["exact_palette_slot_bytes_v1"]
     surface_repeat_uv_rule: Literal["mujoco_geom_local_uv_repeat_v1"]
-    filtering: Literal["mujoco_linear_mipmap_nearest_v1"]
+    filtering: Literal["mujoco_linear_mipmap_linear_v1"]
 
     @model_validator(mode="after")
     def frequency_matches_family(self) -> TextureDefinition:
@@ -193,7 +193,7 @@ class AdmissionThresholds(StrictAppearanceModel):
 
 class AppearanceProfile(StrictAppearanceModel):
     profile_id: str = Field(pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*_v[0-9]+$")
-    profile_version: Literal["appearance_profile_v1"]
+    profile_version: Literal["appearance_profile_v2"]
     candidate_class: CandidateClass
     freeze_eligible: bool
     axis_tags: tuple[AxisTag, ...] = Field(min_length=1)
@@ -232,7 +232,7 @@ class AppearanceProfile(StrictAppearanceModel):
 
 
 class AppearanceRegistry(StrictAppearanceModel):
-    registry_version: Literal["appearance_candidate_registry_v0"]
+    registry_version: Literal["appearance_candidate_registry_v1"]
     profiles: tuple[AppearanceProfile, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -302,8 +302,8 @@ class ProceduralTextureRecord(StrictAppearanceModel):
 
 
 class AppearanceInstanceRecord(StrictAppearanceModel):
-    appearance_instance_version: Literal["appearance_instance_v2"]
-    registry_version: Literal["appearance_candidate_registry_v0"]
+    appearance_instance_version: Literal["appearance_instance_v3"]
+    registry_version: Literal["appearance_candidate_registry_v1"]
     profile: AppearanceProfile
     appearance_registry_sha256: Sha256
     appearance_profile_sha256: Sha256
@@ -656,72 +656,103 @@ def validate_appearance_instance(
 
 
 def validate_axis_isolation(registry: AppearanceRegistry) -> None:
-    """Enforce the prospectively declared paired profile-domain comparisons."""
+    """Require declared scientific axes to equal independently observed profile changes."""
 
     by_id = {profile.profile_id: profile for profile in registry.profiles}
-
-    def equal_except(first: AppearanceProfile, second: AppearanceProfile, fields: set[str]) -> bool:
-        left = first.model_dump(mode="json")
-        right = second.model_dump(mode="json")
-        ignored = {
-            "profile_id",
-            "candidate_class",
-            "freeze_eligible",
-            "axis_tags",
-            "matched_control_profile_id",
-        } | fields
-        return all(left[key] == right[key] for key in left if key not in ignored)
-
+    for profile in registry.profiles:
+        AppearanceProfile.model_validate(profile.model_dump(mode="python"))
     solid = by_id["balanced_solid_palette_v1"]
-    legacy = by_id["legacy_solid_base_v1"]
-    if not equal_except(solid, legacy, {"palette", "style_assignment_rule"}):
-        raise ValueError("colour-only candidate changes texture, material, or illumination")
+    spatial_introduction_baseline = by_id["balanced_checker_low_v1"].texture
+
+    def observed_axes(
+        profile: AppearanceProfile,
+        reference: AppearanceProfile,
+    ) -> set[AxisTag]:
+        if profile.material != reference.material:
+            raise ValueError("appearance candidates cannot change the undeclared material domain")
+        if profile.non_degeneracy_thresholds != reference.non_degeneracy_thresholds:
+            raise ValueError("appearance candidates cannot change admission thresholds")
+        texture = profile.texture.model_dump(mode="json")
+        reference_texture = reference.texture.model_dump(mode="json")
+        for key in (
+            "family",
+            "cycles_per_tile",
+            "orientation",
+        ):
+            texture.pop(key)
+            reference_texture.pop(key)
+        if texture != reference_texture:
+            raise ValueError("appearance candidates cannot change undeclared texture controls")
+        assignment_changed = profile.style_assignment_rule != reference.style_assignment_rule
+        permitted_assignment_transition = (
+            reference.candidate_class == CandidateClass.LEGACY_REGRESSION_CONTROL
+            and profile.candidate_class != CandidateClass.LEGACY_REGRESSION_CONTROL
+            and reference.style_assignment_rule == StyleAssignmentRule.FIXED_SEMANTIC_REGRESSION
+            and profile.style_assignment_rule == StyleAssignmentRule.BALANCED_CYCLIC_PERMUTATION
+        )
+        if assignment_changed and not permitted_assignment_transition:
+            raise ValueError("appearance candidate changes the assignment domain unexpectedly")
+
+        changed: set[AxisTag] = set()
+        if profile.palette != reference.palette:
+            changed.add(AxisTag.COLOUR)
+        if profile.texture.family != reference.texture.family:
+            changed.add(AxisTag.TEXTURE_FAMILY)
+        both_spatial = (
+            profile.texture.family != TextureFamily.SOLID
+            and reference.texture.family != TextureFamily.SOLID
+        )
+        if both_spatial and profile.texture.cycles_per_tile != reference.texture.cycles_per_tile:
+            changed.add(AxisTag.TEXTURE_FREQUENCY)
+        elif (
+            profile.texture.family != TextureFamily.SOLID
+            and reference.texture.family == TextureFamily.SOLID
+            and profile.texture.cycles_per_tile != spatial_introduction_baseline.cycles_per_tile
+        ):
+            changed.add(AxisTag.TEXTURE_FREQUENCY)
+        either_spatial = (
+            profile.texture.family != TextureFamily.SOLID
+            or reference.texture.family != TextureFamily.SOLID
+        )
+        if either_spatial and profile.texture.orientation != reference.texture.orientation:
+            changed.add(AxisTag.TEXTURE_ORIENTATION)
+        elif (
+            profile.texture.family != TextureFamily.SOLID
+            and reference.texture.family == TextureFamily.SOLID
+            and profile.texture.orientation != spatial_introduction_baseline.orientation
+        ):
+            changed.add(AxisTag.TEXTURE_ORIENTATION)
+        if profile.illumination != reference.illumination:
+            changed.add(AxisTag.ILLUMINATION)
+        return changed
+
+    scientific_tags = set(AxisTag) - {AxisTag.CONTROL, AxisTag.COMBINED}
+    for profile in registry.profiles:
+        if profile.candidate_class == CandidateClass.LEGACY_REGRESSION_CONTROL:
+            if profile.matched_control_profile_id != profile.profile_id:
+                raise ValueError("legacy controls must match themselves")
+            continue
+        reference = (
+            solid
+            if profile.candidate_class == CandidateClass.COMBINED_STRESS_CANDIDATE
+            else by_id[profile.matched_control_profile_id]
+        )
+        actual = observed_axes(profile, reference)
+        declared = set(profile.axis_tags) & scientific_tags
+        if profile.candidate_class == CandidateClass.SINGLE_AXIS_CANDIDATE:
+            if len(declared) != 1 or declared != actual:
+                raise ValueError(
+                    f"single-axis declaration differs from actual changes: {profile.profile_id}"
+                )
+        elif AxisTag.COMBINED not in profile.axis_tags or len(actual) < 2 or declared != actual:
+            raise ValueError(
+                f"combined declaration differs from actual changes: {profile.profile_id}"
+            )
+
     low = by_id["balanced_checker_low_v1"]
     high = by_id["balanced_checker_high_v1"]
-    if not equal_except(high, low, {"texture"}):
-        raise ValueError("frequency-only checker pair changes another appearance domain")
-    if (
-        high.texture.family != low.texture.family
-        or high.texture.orientation != low.texture.orientation
-    ):
-        raise ValueError("frequency-only checker pair changes family or orientation")
     if high.texture.cycles_per_tile < 4 * low.texture.cycles_per_tile:
         raise ValueError("high-frequency checker is less than four times its low partner")
-    for profile_id in (
-        "balanced_illumination_left_v1",
-        "balanced_illumination_right_dim_v1",
-    ):
-        profile = by_id[profile_id]
-        if not equal_except(profile, solid, {"illumination"}):
-            raise ValueError("illumination-only candidate changes another appearance domain")
-    stripes_low = by_id["balanced_stripes_low_v1"]
-    if not equal_except(stripes_low, low, {"texture"}):
-        raise ValueError("texture-family-only candidate changes another appearance domain")
-    if (
-        stripes_low.texture.cycles_per_tile != low.texture.cycles_per_tile
-        or stripes_low.texture.orientation != low.texture.orientation
-    ):
-        raise ValueError("texture-family-only candidate changes frequency or orientation")
-    stripes_high = by_id["balanced_stripes_high_oblique_v1"]
-    if not equal_except(stripes_high, stripes_low, {"texture"}):
-        raise ValueError("oblique high-frequency candidate changes another appearance domain")
-    if (
-        stripes_high.texture.family != stripes_low.texture.family
-        or stripes_high.texture.cycles_per_tile < 4 * stripes_low.texture.cycles_per_tile
-        or stripes_high.texture.orientation == stripes_low.texture.orientation
-    ):
-        raise ValueError("oblique high-frequency candidate does not declare its changed axes")
-    combined = by_id["balanced_combined_stress_v1"]
-    expected_combined_axes = {
-        AxisTag.COLOUR,
-        AxisTag.TEXTURE_FAMILY,
-        AxisTag.TEXTURE_FREQUENCY,
-        AxisTag.TEXTURE_ORIENTATION,
-        AxisTag.ILLUMINATION,
-        AxisTag.COMBINED,
-    }
-    if set(combined.axis_tags) != expected_combined_axes:
-        raise ValueError("combined appearance candidate must declare every changed axis")
 
 
 def assignment_balance(

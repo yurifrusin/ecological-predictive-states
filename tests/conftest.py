@@ -53,7 +53,7 @@ def appearance_datasets(
         {
             **benchmark_config.model_dump(mode="python"),
             "appearance": AppearanceConfig(
-                registry_version="appearance_candidate_registry_v0",
+                registry_version="appearance_candidate_registry_v1",
                 profile_id="legacy_solid_alternate_v1",
             ).model_dump(mode="python"),
         }
@@ -93,7 +93,7 @@ def corridor_appearance_datasets(
         {
             **corridor_config.model_dump(mode="python"),
             "appearance": AppearanceConfig(
-                registry_version="appearance_candidate_registry_v0",
+                registry_version="appearance_candidate_registry_v1",
                 profile_id="legacy_solid_alternate_v1",
             ).model_dump(mode="python"),
         }

@@ -1,7 +1,7 @@
-registry_version: appearance_candidate_registry_v0
+registry_version: appearance_candidate_registry_v1
 profiles:
   - profile_id: balanced_checker_high_v1
-    profile_version: appearance_profile_v1
+    profile_version: appearance_profile_v2
     candidate_class: single_axis_candidate
     freeze_eligible: true
     axis_tags: [texture_frequency]
@@ -39,7 +39,7 @@ profiles:
       phase_rule: namespaced_integer_phase_v1
       contrast_rule: exact_palette_slot_bytes_v1
       surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
-      filtering: mujoco_linear_mipmap_nearest_v1
+      filtering: mujoco_linear_mipmap_linear_v1
     material:
       specular: 0.0
       shininess: 0.0
@@ -67,7 +67,7 @@ profiles:
       textured_surface_luminance_std_minimum: 0.025
       frequency_partner_minimum_ratio: 4.0
   - profile_id: balanced_checker_low_v1
-    profile_version: appearance_profile_v1
+    profile_version: appearance_profile_v2
     candidate_class: single_axis_candidate
     freeze_eligible: true
     axis_tags: [texture_family]
@@ -105,7 +105,7 @@ profiles:
       phase_rule: namespaced_integer_phase_v1
       contrast_rule: exact_palette_slot_bytes_v1
       surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
-      filtering: mujoco_linear_mipmap_nearest_v1
+      filtering: mujoco_linear_mipmap_linear_v1
     material:
       specular: 0.0
       shininess: 0.0
@@ -133,7 +133,7 @@ profiles:
       textured_surface_luminance_std_minimum: 0.025
       frequency_partner_minimum_ratio: 4.0
   - profile_id: balanced_combined_stress_v1
-    profile_version: appearance_profile_v1
+    profile_version: appearance_profile_v2
     candidate_class: combined_stress_candidate
     freeze_eligible: true
     axis_tags: [colour, texture_family, texture_frequency, texture_orientation, illumination, combined]
@@ -171,7 +171,7 @@ profiles:
       phase_rule: namespaced_integer_phase_v1
       contrast_rule: exact_palette_slot_bytes_v1
       surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
-      filtering: mujoco_linear_mipmap_nearest_v1
+      filtering: mujoco_linear_mipmap_linear_v1
     material:
       specular: 0.0
       shininess: 0.0
@@ -199,7 +199,7 @@ profiles:
       textured_surface_luminance_std_minimum: 0.025
       frequency_partner_minimum_ratio: 4.0
   - profile_id: balanced_illumination_left_v1
-    profile_version: appearance_profile_v1
+    profile_version: appearance_profile_v2
     candidate_class: single_axis_candidate
     freeze_eligible: true
     axis_tags: [illumination]
@@ -237,7 +237,7 @@ profiles:
       phase_rule: namespaced_integer_phase_v1
       contrast_rule: exact_palette_slot_bytes_v1
       surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
-      filtering: mujoco_linear_mipmap_nearest_v1
+      filtering: mujoco_linear_mipmap_linear_v1
     material:
       specular: 0.0
       shininess: 0.0
@@ -265,7 +265,7 @@ profiles:
       textured_surface_luminance_std_minimum: 0.025
       frequency_partner_minimum_ratio: 4.0
   - profile_id: balanced_illumination_right_dim_v1
-    profile_version: appearance_profile_v1
+    profile_version: appearance_profile_v2
     candidate_class: single_axis_candidate
     freeze_eligible: true
     axis_tags: [illumination]
@@ -303,7 +303,7 @@ profiles:
       phase_rule: namespaced_integer_phase_v1
       contrast_rule: exact_palette_slot_bytes_v1
       surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
-      filtering: mujoco_linear_mipmap_nearest_v1
+      filtering: mujoco_linear_mipmap_linear_v1
     material:
       specular: 0.0
       shininess: 0.0
@@ -331,7 +331,7 @@ profiles:
       textured_surface_luminance_std_minimum: 0.025
       frequency_partner_minimum_ratio: 4.0
   - profile_id: balanced_solid_palette_v1
-    profile_version: appearance_profile_v1
+    profile_version: appearance_profile_v2
     candidate_class: single_axis_candidate
     freeze_eligible: true
     axis_tags: [colour]
@@ -369,7 +369,7 @@ profiles:
       phase_rule: namespaced_integer_phase_v1
       contrast_rule: exact_palette_slot_bytes_v1
       surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
-      filtering: mujoco_linear_mipmap_nearest_v1
+      filtering: mujoco_linear_mipmap_linear_v1
     material:
       specular: 0.0
       shininess: 0.0
@@ -397,7 +397,7 @@ profiles:
       textured_surface_luminance_std_minimum: 0.025
       frequency_partner_minimum_ratio: 4.0
   - profile_id: balanced_stripes_high_oblique_v1
-    profile_version: appearance_profile_v1
+    profile_version: appearance_profile_v2
     candidate_class: combined_stress_candidate
     freeze_eligible: true
     axis_tags: [texture_family, texture_frequency, texture_orientation, combined]
@@ -435,7 +435,7 @@ profiles:
       phase_rule: namespaced_integer_phase_v1
       contrast_rule: exact_palette_slot_bytes_v1
       surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
-      filtering: mujoco_linear_mipmap_nearest_v1
+      filtering: mujoco_linear_mipmap_linear_v1
     material:
       specular: 0.0
       shininess: 0.0
@@ -463,7 +463,7 @@ profiles:
       textured_surface_luminance_std_minimum: 0.025
       frequency_partner_minimum_ratio: 4.0
   - profile_id: balanced_stripes_low_v1
-    profile_version: appearance_profile_v1
+    profile_version: appearance_profile_v2
     candidate_class: single_axis_candidate
     freeze_eligible: true
     axis_tags: [texture_family]
@@ -501,7 +501,7 @@ profiles:
       phase_rule: namespaced_integer_phase_v1
       contrast_rule: exact_palette_slot_bytes_v1
       surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
-      filtering: mujoco_linear_mipmap_nearest_v1
+      filtering: mujoco_linear_mipmap_linear_v1
     material:
       specular: 0.0
       shininess: 0.0
@@ -529,7 +529,7 @@ profiles:
       textured_surface_luminance_std_minimum: 0.025
       frequency_partner_minimum_ratio: 4.0
   - profile_id: legacy_solid_alternate_v1
-    profile_version: appearance_profile_v1
+    profile_version: appearance_profile_v2
     candidate_class: legacy_regression_control
     freeze_eligible: false
     axis_tags: [control]
@@ -567,7 +567,7 @@ profiles:
       phase_rule: namespaced_integer_phase_v1
       contrast_rule: exact_palette_slot_bytes_v1
       surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
-      filtering: mujoco_linear_mipmap_nearest_v1
+      filtering: mujoco_linear_mipmap_linear_v1
     material:
       specular: 0.0
       shininess: 0.0
@@ -595,7 +595,7 @@ profiles:
       textured_surface_luminance_std_minimum: 0.025
       frequency_partner_minimum_ratio: 4.0
   - profile_id: legacy_solid_base_v1
-    profile_version: appearance_profile_v1
+    profile_version: appearance_profile_v2
     candidate_class: legacy_regression_control
     freeze_eligible: false
     axis_tags: [control]
@@ -633,7 +633,7 @@ profiles:
       phase_rule: namespaced_integer_phase_v1
       contrast_rule: exact_palette_slot_bytes_v1
       surface_repeat_uv_rule: mujoco_geom_local_uv_repeat_v1
-      filtering: mujoco_linear_mipmap_nearest_v1
+      filtering: mujoco_linear_mipmap_linear_v1
     material:
       specular: 0.0
       shininess: 0.0

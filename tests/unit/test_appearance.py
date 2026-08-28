@@ -9,9 +9,12 @@ import pytest
 from pydantic import ValidationError
 
 from epsbench.appearance import (
+    APPEARANCE_INSTANCE_VERSION,
+    APPEARANCE_REGISTRY_VERSION,
     CANONICAL_PROFILE_IDS,
     AppearanceInstanceRecord,
     AppearanceRegistry,
+    AxisTag,
     EvaluationSeedRegistry,
     TextureFamily,
     appearance_instance_hash,
@@ -45,6 +48,19 @@ def test_registry_contains_the_exact_unique_canonical_profile_set(
     ids = tuple(profile.profile_id for profile in registry.profiles)
     assert ids == tuple(sorted(CANONICAL_PROFILE_IDS))
     assert len(ids) == len(set(ids)) == 10
+
+
+def test_renderer_filter_and_versioned_identity_contracts_are_truthful(
+    registry: AppearanceRegistry,
+) -> None:
+    # EPS-ER11-0001
+    assert registry.registry_version == APPEARANCE_REGISTRY_VERSION
+    assert APPEARANCE_REGISTRY_VERSION == "appearance_candidate_registry_v1"
+    assert APPEARANCE_INSTANCE_VERSION == "appearance_instance_v3"
+    assert {profile.profile_version for profile in registry.profiles} == {"appearance_profile_v2"}
+    assert {profile.texture.filtering for profile in registry.profiles} == {
+        "mujoco_linear_mipmap_linear_v1"
+    }
 
 
 @pytest.mark.parametrize(
@@ -263,7 +279,45 @@ def test_axis_isolation_is_validated_as_exact_profile_domains(
         malformed if item.profile_id == profile.profile_id else item for item in registry.profiles
     )
     altered = registry.model_copy(update={"profiles": profiles})
-    with pytest.raises(ValueError, match="illumination-only"):
+    with pytest.raises(ValueError, match="solid textures"):
+        validate_axis_isolation(altered)
+
+
+def test_axis_isolation_rejects_a_false_extra_axis(
+    registry: AppearanceRegistry,
+) -> None:
+    # EPS-ER11-0008
+    profile = profile_by_id(registry, "balanced_illumination_left_v1")
+    malformed = profile.model_copy(
+        update={"axis_tags": (AxisTag.ILLUMINATION, AxisTag.TEXTURE_FAMILY)}
+    )
+    altered = registry.model_copy(
+        update={
+            "profiles": tuple(
+                malformed if item.profile_id == profile.profile_id else item
+                for item in registry.profiles
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="single-axis declaration"):
+        validate_axis_isolation(altered)
+
+
+def test_axis_isolation_rejects_an_undeclared_illumination_change(
+    registry: AppearanceRegistry,
+) -> None:
+    profile = profile_by_id(registry, "balanced_checker_low_v1")
+    illumination = profile_by_id(registry, "balanced_illumination_left_v1").illumination
+    malformed = profile.model_copy(update={"illumination": illumination})
+    altered = registry.model_copy(
+        update={
+            "profiles": tuple(
+                malformed if item.profile_id == profile.profile_id else item
+                for item in registry.profiles
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="single-axis declaration"):
         validate_axis_isolation(altered)
 
 

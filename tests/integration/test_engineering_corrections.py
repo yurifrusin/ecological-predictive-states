@@ -129,9 +129,9 @@ def test_external_manifest_symlink_is_rejected_by_validation_and_loading(
     manifest_path.unlink()
     manifest_path.symlink_to(external)
 
-    with pytest.raises(DatasetValidationError, match="outside the dataset root"):
+    with pytest.raises(DatasetValidationError, match="symbolic-link alias"):
         validate_dataset(broken)
-    with pytest.raises(ValueError, match="outside the dataset root"):
+    with pytest.raises(ValueError, match="symbolic-link alias"):
         DatasetLoader(broken, ModalityPermissionSet.all_modalities())
 
 

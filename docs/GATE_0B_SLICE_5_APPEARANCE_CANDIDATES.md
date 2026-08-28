@@ -24,7 +24,8 @@ that licence question and does not authorise adding a licence.
 ## Candidate registry
 
 `configs/appearance_candidates_v0.yaml` has the strict wire identity
-`appearance_candidate_registry_v0` and contains exactly these ten canonical profiles:
+`appearance_candidate_registry_v1`; every entry has profile identity `appearance_profile_v2` and
+the file contains exactly these ten canonical profiles:
 
 | Profile | Class | Declared axes | Freeze eligible? | Matched control |
 | --- | --- | --- | --- | --- |
@@ -60,6 +61,11 @@ is installed in the source tree. Materials bind local UV repetition, disable uni
 specular, shininess, and reflectance, and declare the MuJoCo mipmap/filtering posture. Shadows are
 disabled. The procedural source-array logical hash, not PNG container bytes or rendered RGB, enters
 the texture record.
+
+The locked MuJoCo 3.12.0 classic renderer sets texture magnification to `GL_LINEAR` and texture
+minification to `GL_LINEAR_MIPMAP_LINEAR`. The versioned registry declaration
+`mujoco_linear_mipmap_linear_v1` names that actual posture; it does not claim nearest-mipmap
+sampling or enforce a backend override that MuJoCo does not expose here.
 
 Solid profiles intentionally have no spatial source texture. Their exact palette bytes are converted
 to renderer RGBA values. The legacy colours are therefore represented through the new byte-valued
@@ -121,7 +127,7 @@ an explicit null-index, non-candidate-derived posture.
 binds the selected resolved definition, including its class, axes, eligibility, palettes, texture,
 material, lighting, assignment, and thresholds. It excludes paths and timestamps.
 
-`appearance_instance_sha256` v2 binds the profile hash, independently derived appearance seeds,
+`appearance_instance_sha256` v3 binds the profile hash, independently derived appearance seeds,
 seed-registry version and hash, schedule source, assignment root seed, candidate index or explicit
 non-candidate posture, private semantic-to-slot assignment, exact surface/material records, texture
 phases/frequencies/orientations and source-array hashes, and light parameters. It excludes geometry,
@@ -151,13 +157,14 @@ The unreleased `appearance.variant` configuration shape is replaced directly by
 
 | Wire contract | Slice 5 version |
 | --- | --- |
-| Both configurations | `0.1.0-dev.3` |
-| Dataset and episode manifest | `0.1.0-dev.6` |
+| Both configurations | `0.1.0-dev.4` |
+| Dataset and episode manifest | `0.1.0-dev.7` |
 | Public transition | `0.1.0-dev.9` unchanged |
-| Both privileged instrumentation records | `0.1.0-dev.11` |
-| Appearance instance | `appearance_instance_v2` |
-| Candidate audit and packet | `appearance_candidate_audit_v1` |
-| Packet root domains | `appearance_candidate_root_domains_v1` |
+| Both privileged instrumentation records | `0.1.0-dev.12` |
+| Appearance registry/profile | `appearance_candidate_registry_v1` / `appearance_profile_v2` |
+| Appearance instance | `appearance_instance_v3` |
+| Candidate audit and packet | `appearance_candidate_audit_v2` |
+| Packet root domains | `appearance_candidate_root_domains_v2` |
 
 The transition does not gain appearance-control data. Historical Slice 1–4 identities remain valid
 evidence for their exact historical wire contracts; regenerated Slice 5 manifests and RGB identities
@@ -209,15 +216,18 @@ The packet contains `candidate_packet.json`, both registry snapshots, `profile_s
 contact sheets. Contact sheets show scene, profile, before/after RGB, opaque controlled segmentation,
 declared status, non-degeneracy metrics, and explicit renderer-local ecological-label equality. They do
 not add semantic surface names or private slot assignments to learner data and do not modify a
-dataset.
+dataset. A deterministic `appearance_contact_sheet_manifest_v1` domain binds each exact canonical
+filename, PNG hash, logical pixel hash, dimensions, shape, type, and byte count into the packet root.
 
-The independent packet validator recomputes registry and seed validity, matrix completeness,
-admission metrics, structural comparisons, axis isolation, assignment balance, negative-evidence
-retention, report hashes, and packet roots. `run.json` alone holds timestamp, host, platform string,
-and duration and is excluded from logical identity.
+The independent packet validator recomputes registry and seed validity, canonical cell identities,
+retained RGB/depth/segmentation identities, matrix completeness and counts, admission metrics,
+structural comparisons, axis isolation, assignment balance, negative-evidence retention, contact
+sheets, report hashes, and packet roots. It rejects linked, aliased, escaping, missing, additional,
+or corrupt retained artifacts before opening them. `run.json` alone holds timestamp, host, platform
+string, and duration and is excluded from logical identity.
 
 The packet records `freeze_status: candidate_packet_only_not_frozen` and contains no owner-selected
-split or final seed list. Audit v1 defines three evidence domains:
+split or final seed list. Audit v2 defines three evidence domains:
 
 1. `renderer_local_ecological_label_root_sha256` binds every exact raw complete ecological label.
    It may differ by renderer and is reported, never backend-dispatched as a portable expectation.

@@ -1,4 +1,4 @@
-schema_version: "0.1.0-dev.3"
+schema_version: "0.1.0-dev.4"
 scene_family: corridor
 seed: 1729
 render:
@@ -23,5 +23,5 @@ action:
   delta_lateral: 0.0
   delta_yaw: 0.0
 appearance:
-  registry_version: appearance_candidate_registry_v0
+  registry_version: appearance_candidate_registry_v1
   profile_id: legacy_solid_base_v1

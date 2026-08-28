@@ -941,7 +941,7 @@ def _generate_single_occluder_episode(
     write_canonical_json(transition_path, transition)
 
     instrumentation = SingleOccluderInstrumentation(
-        schema_version="0.1.0-dev.11",
+        schema_version="0.1.0-dev.12",
         scene_family=SceneFamily.SINGLE_OCCLUDER,
         episode_id=episode_id,
         appearance=appearance.record,
@@ -1146,7 +1146,7 @@ def _generate_corridor_episode(
             )
         )
     instrumentation = CorridorInstrumentation(
-        schema_version="0.1.0-dev.11",
+        schema_version="0.1.0-dev.12",
         scene_family=SceneFamily.CORRIDOR,
         episode_id=episode_id,
         appearance=appearance.record,
@@ -1307,7 +1307,7 @@ def generate_dataset(
         renderer_provenance
     )
     manifest = DatasetManifest(
-        schema_version="0.1.0-dev.6",
+        schema_version="0.1.0-dev.7",
         generator_version="0.1.0",
         scene_family=config.scene_family,
         root_seed=config.seed,

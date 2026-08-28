@@ -10,7 +10,11 @@ import numpy.typing as npt
 from PIL import Image
 
 from epsbench.appearance import AppearanceInstanceRecord, EvaluationSeedRegistry
-from epsbench.data.paths import resolve_dataset_manifest
+from epsbench.data.paths import (
+    UnsafeOwnedFileError,
+    resolve_dataset_manifest,
+    resolve_owned_regular_file,
+)
 from epsbench.schema import (
     Action,
     AnalyticBoundaryAmbiguityRule,
@@ -96,10 +100,10 @@ class DatasetLoader:
             raise PermissionDeniedError(f"modality permission denied: {names}")
 
     def _path(self, relative_path: str) -> Path:
-        candidate = (self.root / relative_path).resolve()
-        if not candidate.is_relative_to(self.root):
-            raise ValueError("artifact path escapes the dataset root")
-        return candidate
+        try:
+            return resolve_owned_regular_file(self.root, relative_path).path
+        except UnsafeOwnedFileError as error:
+            raise ValueError(str(error)) from error
 
     def _episode(self, episode_index: int) -> EpisodeManifest:
         try:

@@ -459,7 +459,13 @@ class ArtifactRecord(StrictModel):
         if _WINDOWS_DRIVE_PREFIX.match(value):
             raise ValueError("artifact paths must not be Windows drive-qualified or drive-relative")
         path = PurePosixPath(value)
-        if path.is_absolute() or ".." in path.parts or value in {"", "."}:
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or value in {"", "."}
+            or "\x00" in value
+            or path.as_posix() != value
+        ):
             raise ValueError("artifact path must be a safe dataset-relative path")
         return value
 
@@ -1196,7 +1202,7 @@ class BoundaryVisibilityDiagnostics(StrictModel):
 
 
 class SingleOccluderInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.11"]
+    schema_version: Literal["0.1.0-dev.12"]
     scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance: AppearanceInstanceRecord
@@ -1247,7 +1253,7 @@ class SingleOccluderInstrumentation(StrictModel):
 
 
 class CorridorInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.11"]
+    schema_version: Literal["0.1.0-dev.12"]
     scene_family: Literal[SceneFamily.CORRIDOR]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance: AppearanceInstanceRecord
@@ -1402,7 +1408,7 @@ class RendererProvenance(StrictModel):
 
 
 class DatasetManifest(StrictModel):
-    schema_version: Literal["0.1.0-dev.6"]
+    schema_version: Literal["0.1.0-dev.7"]
     generator_version: Literal["0.1.0"]
     scene_family: SceneFamily
     root_seed: int = Field(ge=0)

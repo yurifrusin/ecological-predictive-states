@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from epsbench.appearance import (
 from epsbench.config import load_config
 from epsbench.data import DatasetValidationError, generate_dataset, validate_dataset
 from epsbench.schema import parse_privileged_instrumentation_json
+from epsbench.utils.canonical import write_canonical_json
 from tests.dataset_mutations import _write_manifest, load_manifest, rewrite_json_artifact
 
 
@@ -99,4 +101,83 @@ def test_fully_rehashed_declared_seed_registry_hash_mutation_fails(
     changed = manifest.model_copy(update={"evaluation_seed_registry_sha256": "0" * 64})
     _write_manifest(broken, changed, list(changed.episodes))
     with pytest.raises(DatasetValidationError, match="seed registry hash mismatch"):
+        validate_dataset(broken)
+
+
+def test_seed_registry_snapshot_symlink_is_rejected_before_open(
+    smoke_dataset: Path,
+    tmp_path: Path,
+) -> None:
+    # EPS-ER11-0002
+    broken = tmp_path / "seed-snapshot-symlink"
+    shutil.copytree(smoke_dataset, broken)
+    manifest = load_manifest(broken)
+    snapshot = broken / manifest.evaluation_seed_registry_snapshot.path
+    external = tmp_path / "external-seed-snapshot.json"
+    external.write_bytes(snapshot.read_bytes())
+    snapshot.unlink()
+    try:
+        snapshot.symlink_to(external)
+    except OSError as error:
+        pytest.skip(f"symbolic links are unavailable: {error}")
+    with pytest.raises(DatasetValidationError, match="symbolic-link alias"):
+        validate_dataset(broken)
+
+
+def test_seed_registry_snapshot_external_hardlink_is_rejected_before_open(
+    smoke_dataset: Path,
+    tmp_path: Path,
+) -> None:
+    broken = tmp_path / "seed-snapshot-hardlink"
+    shutil.copytree(smoke_dataset, broken)
+    manifest = load_manifest(broken)
+    snapshot = broken / manifest.evaluation_seed_registry_snapshot.path
+    external = tmp_path / "external-seed-hardlink.json"
+    external.write_bytes(snapshot.read_bytes())
+    snapshot.unlink()
+    os.link(external, snapshot)
+    with pytest.raises(DatasetValidationError, match="hard-link alias"):
+        validate_dataset(broken)
+
+
+def test_seed_registry_snapshot_special_file_is_rejected_before_open(
+    smoke_dataset: Path,
+    tmp_path: Path,
+) -> None:
+    broken = tmp_path / "seed-snapshot-special"
+    shutil.copytree(smoke_dataset, broken)
+    manifest = load_manifest(broken)
+    snapshot = broken / manifest.evaluation_seed_registry_snapshot.path
+    snapshot.unlink()
+    snapshot.mkdir()
+    with pytest.raises(DatasetValidationError, match="regular file"):
+        validate_dataset(broken)
+
+
+def test_seed_registry_snapshot_duplicate_path_is_rejected(
+    smoke_dataset: Path,
+    tmp_path: Path,
+) -> None:
+    broken = tmp_path / "seed-snapshot-duplicate"
+    shutil.copytree(smoke_dataset, broken)
+    manifest = load_manifest(broken)
+    changed = manifest.model_copy(
+        update={"evaluation_seed_registry_snapshot": manifest.appearance_registry_snapshot}
+    )
+    _write_manifest(broken, changed, list(changed.episodes))
+    with pytest.raises(DatasetValidationError, match="duplicate artifact path"):
+        validate_dataset(broken)
+
+
+def test_seed_registry_snapshot_root_escape_is_rejected_by_schema(
+    smoke_dataset: Path,
+    tmp_path: Path,
+) -> None:
+    broken = tmp_path / "seed-snapshot-root-escape"
+    shutil.copytree(smoke_dataset, broken)
+    manifest_path = broken / "manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["evaluation_seed_registry_snapshot"]["path"] = "../external-seeds.json"
+    write_canonical_json(manifest_path, payload)
+    with pytest.raises(DatasetValidationError, match="manifest failed schema validation"):
         validate_dataset(broken)

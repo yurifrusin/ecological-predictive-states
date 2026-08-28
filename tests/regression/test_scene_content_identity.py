@@ -56,7 +56,7 @@ def test_single_occluder_content_is_seed_and_appearance_independent_and_complete
         benchmark_config,
         seed=benchmark_config.seed + 1,
         appearance=AppearanceConfig(
-            registry_version="appearance_candidate_registry_v0",
+            registry_version="appearance_candidate_registry_v1",
             profile_id="legacy_solid_alternate_v1",
         ).model_dump(mode="python"),
     )
@@ -113,7 +113,7 @@ def test_corridor_content_is_seed_history_appearance_and_remapping_independent(
         corridor_config,
         seed=corridor_config.seed + 1,
         appearance=AppearanceConfig(
-            registry_version="appearance_candidate_registry_v0",
+            registry_version="appearance_candidate_registry_v1",
             profile_id="legacy_solid_alternate_v1",
         ).model_dump(mode="python"),
     )

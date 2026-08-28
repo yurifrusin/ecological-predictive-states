@@ -9,6 +9,7 @@ import os
 import platform
 import shutil
 import socket
+import stat
 import tempfile
 import time
 from collections import Counter
@@ -37,6 +38,7 @@ from epsbench.appearance import (
 )
 from epsbench.config import BenchmarkConfig, load_config
 from epsbench.data.generate import generate_dataset
+from epsbench.data.paths import UnsafeOwnedFileError, resolve_owned_regular_file
 from epsbench.data.provenance import collect_source_provenance
 from epsbench.data.validate import validate_dataset
 from epsbench.schema import (
@@ -53,9 +55,10 @@ from epsbench.utils.canonical import (
 )
 from epsbench.utils.seeding import derive_seed
 
-AUDIT_SCHEMA_VERSION = "appearance_candidate_audit_v1"
-ROOT_SCHEMA_VERSION = "appearance_candidate_root_domains_v1"
+AUDIT_SCHEMA_VERSION = "appearance_candidate_audit_v2"
+ROOT_SCHEMA_VERSION = "appearance_candidate_root_domains_v2"
 PACKET_FREEZE_STATUS = "candidate_packet_only_not_frozen"
+CONTACT_SHEET_MANIFEST_VERSION = "appearance_contact_sheet_manifest_v1"
 SCENE_FAMILIES = ("single_occluder", "corridor")
 GOVERNING_DOCUMENTS = (
     "docs/RESEARCH_CHARTER.md",
@@ -67,6 +70,87 @@ GOVERNING_DOCUMENTS = (
 
 class AppearanceAuditError(ValueError):
     """Raised when an audit packet or publication operation is invalid."""
+
+
+PACKET_LOGICAL_FIELDS = (
+    "schema_version",
+    "root_schema_version",
+    "freeze_status",
+    "source_provenance",
+    "governing_document_hashes",
+    "roots",
+    "report_file_sha256",
+    "contact_sheet_manifest",
+    "matrix_counts",
+    "profile_count",
+    "candidate_seed_count",
+    "scene_families",
+    "final_split",
+    "final_evaluation_seeds",
+)
+
+
+class _PacketArtifactRegistry:
+    """Require every declared packet artifact to be one uniquely owned regular file."""
+
+    def __init__(self, root: Path) -> None:
+        try:
+            root_stat = root.lstat()
+            self.root = root.resolve(strict=True)
+        except OSError as error:
+            raise AppearanceAuditError("candidate packet root does not exist") from error
+        if root.is_symlink() or not stat.S_ISDIR(root_stat.st_mode):
+            raise AppearanceAuditError("candidate packet root must be a non-link directory")
+        self.roles: set[str] = set()
+        self.paths: set[str] = set()
+        self.resolved_paths: set[Path] = set()
+        self.file_identities: set[tuple[int, int]] = set()
+        self.by_path: dict[str, Path] = {}
+
+    def claim(
+        self,
+        relative_path: str,
+        role: str,
+        *,
+        expected_file_sha256: str | None = None,
+        expected_byte_count: int | None = None,
+    ) -> Path:
+        if role in self.roles:
+            raise AppearanceAuditError(f"duplicate packet artifact role: {role}")
+        if relative_path in self.paths:
+            raise AppearanceAuditError(f"duplicate packet artifact path: {relative_path}")
+        try:
+            owned = resolve_owned_regular_file(self.root, relative_path)
+        except UnsafeOwnedFileError as error:
+            raise AppearanceAuditError(str(error)) from error
+        identity = (owned.device, owned.inode)
+        if owned.path in self.resolved_paths or identity in self.file_identities:
+            raise AppearanceAuditError(f"packet artifact aliases another role: {relative_path}")
+        if expected_byte_count is not None and owned.byte_count != expected_byte_count:
+            raise AppearanceAuditError(f"packet artifact byte count mismatch: {relative_path}")
+        if expected_file_sha256 is not None and sha256_file(owned.path) != expected_file_sha256:
+            raise AppearanceAuditError(f"packet artifact hash mismatch: {relative_path}")
+        self.roles.add(role)
+        self.paths.add(relative_path)
+        self.resolved_paths.add(owned.path)
+        self.file_identities.add(identity)
+        self.by_path[relative_path] = owned.path
+        return owned.path
+
+    def path_for(self, relative_path: str) -> Path:
+        try:
+            return self.by_path[relative_path]
+        except KeyError as error:
+            raise AppearanceAuditError(
+                f"packet artifact was not independently claimed: {relative_path}"
+            ) from error
+
+
+def _packet_logical_domain(packet: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return {field: packet[field] for field in PACKET_LOGICAL_FIELDS}
+    except KeyError as error:
+        raise AppearanceAuditError(f"candidate packet field is missing: {error.args[0]}") from error
 
 
 def _atomic_no_replace_directory(source: Path, destination: Path) -> None:
@@ -131,7 +215,7 @@ def _profile_config(
             **config.model_dump(mode="python"),
             "seed": candidate_seed,
             "appearance": {
-                "registry_version": "appearance_candidate_registry_v0",
+                "registry_version": "appearance_candidate_registry_v1",
                 "profile_id": profile.profile_id,
             },
         }
@@ -160,30 +244,112 @@ def _copy_evidence(
             shutil.copy2(dataset / artifact.path, target)
             frame_evidence[role] = {
                 "path": target.as_posix(),
+                "media_type": artifact.media_type,
+                "dtype": artifact.dtype,
+                "shape": list(artifact.shape),
                 "file_sha256": sha256_file(target),
                 "logical_sha256": artifact.logical_sha256,
+                "byte_count": target.stat().st_size,
             }
         evidence[frame_name] = frame_evidence
     return evidence
 
 
-def _load_frame(packet_root: Path, cell: dict[str, Any], frame: str) -> tuple[Any, Any, Any]:
-    evidence = cell["evidence"][frame]
-    rgb_path = packet_root / evidence["rgb"]["path"]
-    depth_path = packet_root / evidence["depth"]["path"]
-    segmentation_path = packet_root / evidence["segmentation"]["path"]
-    for role, path in (
-        ("rgb", rgb_path),
-        ("depth", depth_path),
-        ("segmentation", segmentation_path),
+def _evidence_record(cell: dict[str, Any], frame: str, role: str) -> dict[str, Any]:
+    try:
+        record = cell["evidence"][frame][role]
+    except (KeyError, TypeError) as error:
+        raise AppearanceAuditError(
+            f"audit evidence declaration is incomplete: {cell.get('cell_id')}:{frame}:{role}"
+        ) from error
+    expected_fields = {
+        "path",
+        "media_type",
+        "dtype",
+        "shape",
+        "file_sha256",
+        "logical_sha256",
+        "byte_count",
+    }
+    if not isinstance(record, dict) or set(record) != expected_fields:
+        raise AppearanceAuditError(
+            f"audit evidence declaration is not strict: {cell.get('cell_id')}:{frame}:{role}"
+        )
+    return record
+
+
+def _claim_cell_evidence(
+    artifact_registry: _PacketArtifactRegistry,
+    cell: dict[str, Any],
+) -> None:
+    evidence = cell.get("evidence")
+    if not isinstance(evidence, dict) or set(evidence) != {"before", "after"}:
+        raise AppearanceAuditError(f"audit evidence frames are not strict: {cell.get('cell_id')}")
+    if any(
+        not isinstance(evidence[frame], dict)
+        or set(evidence[frame]) != {"rgb", "depth", "segmentation"}
+        for frame in ("before", "after")
     ):
-        if not path.is_file() or sha256_file(path) != evidence[role]["file_sha256"]:
-            raise AppearanceAuditError(f"audit evidence is missing or corrupt: {path}")
-    with Image.open(rgb_path) as image:
-        rgb = np.asarray(image.convert("RGB"), dtype=np.uint8).copy()
-    depth = np.load(depth_path, allow_pickle=False)
-    segmentation = np.load(segmentation_path, allow_pickle=False)
+        raise AppearanceAuditError(f"audit evidence roles are not strict: {cell.get('cell_id')}")
+    for frame in ("before", "after"):
+        for role in ("rgb", "depth", "segmentation"):
+            record = _evidence_record(cell, frame, role)
+            path = record["path"]
+            file_sha256 = record["file_sha256"]
+            byte_count = record["byte_count"]
+            if (
+                not isinstance(path, str)
+                or not isinstance(file_sha256, str)
+                or not isinstance(byte_count, int)
+            ):
+                raise AppearanceAuditError("audit evidence path/hash/size metadata is invalid")
+            artifact_registry.claim(
+                path,
+                f"evidence:{cell['cell_id']}:{frame}:{role}",
+                expected_file_sha256=file_sha256,
+                expected_byte_count=byte_count,
+            )
+
+
+def _load_frame(
+    packet_root: Path,
+    cell: dict[str, Any],
+    frame: str,
+    artifact_registry: _PacketArtifactRegistry | None = None,
+) -> tuple[Any, Any, Any]:
+    evidence = cell["evidence"][frame]
+    paths: dict[str, Path] = {}
+    for role in ("rgb", "depth", "segmentation"):
+        record = _evidence_record(cell, frame, role)
+        expected_media_type = "image/png" if role == "rgb" else "application/x-npy"
+        if record["media_type"] != expected_media_type:
+            raise AppearanceAuditError(f"audit evidence media type mismatch: {role}")
+        if artifact_registry is None:
+            try:
+                owned = resolve_owned_regular_file(packet_root, record["path"])
+            except UnsafeOwnedFileError as error:
+                raise AppearanceAuditError(str(error)) from error
+            path = owned.path
+            if owned.byte_count != record["byte_count"]:
+                raise AppearanceAuditError(f"audit evidence byte count mismatch: {record['path']}")
+        else:
+            path = artifact_registry.path_for(record["path"])
+        if sha256_file(path) != record["file_sha256"]:
+            raise AppearanceAuditError(f"audit evidence is missing or corrupt: {record['path']}")
+        paths[role] = path
+    try:
+        with Image.open(paths["rgb"]) as image:
+            if image.mode != "RGB":
+                raise AppearanceAuditError("audit RGB evidence must use RGB mode")
+            rgb = np.asarray(image, dtype=np.uint8).copy()
+        depth = np.load(paths["depth"], allow_pickle=False)
+        segmentation = np.load(paths["segmentation"], allow_pickle=False)
+    except (OSError, ValueError) as error:
+        raise AppearanceAuditError("audit evidence cannot be decoded") from error
     for role, array in (("rgb", rgb), ("depth", depth), ("segmentation", segmentation)):
+        record = evidence[role]
+        if str(array.dtype) != record["dtype"] or list(array.shape) != record["shape"]:
+            raise AppearanceAuditError(f"audit evidence shape or dtype mismatch: {role}")
         if logical_array_hash(array) != evidence[role]["logical_sha256"]:
             raise AppearanceAuditError(f"audit evidence logical hash mismatch: {role}")
     return rgb, depth, segmentation
@@ -362,15 +528,55 @@ def _portable_analytic_identity_domain(cell: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _admission_evidence_domain(cell: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "frame_metrics": cell.get("frame_metrics"),
+        "admission_checks": cell.get("admission_checks"),
+        "admission_status": cell.get("admission_status"),
+        "rejection_reasons": cell.get("rejection_reasons"),
+        "matched_control_failure_type": cell.get("matched_control_failure_type"),
+        "matched_control_failure_message": cell.get("matched_control_failure_message"),
+    }
+
+
 def _evaluate_cell(
     packet_root: Path,
     cell: dict[str, Any],
     control: dict[str, Any],
     profile: AppearanceProfile,
+    artifact_registry: _PacketArtifactRegistry | None = None,
 ) -> None:
-    if cell["generation_status"] != "success" or control["generation_status"] != "success":
+    if cell["generation_status"] != "success":
+        cell["frame_metrics"] = {}
+        cell["admission_checks"] = {
+            "structural_invariance": False,
+            "portable_analytic_identity_equality": False,
+            "ecological_label_equality": False,
+            "depth_segmentation_invariance": False,
+            "determinism": False,
+            "material_rgb_change": False,
+            "controlled_surface_exposure": False,
+            "textured_surface_variation": False,
+        }
         cell["admission_status"] = "rejected"
         cell["rejection_reasons"] = ["generation_or_validation_failed"]
+        return
+    if control["generation_status"] != "success":
+        cell["frame_metrics"] = {}
+        cell["admission_checks"] = {
+            "structural_invariance": False,
+            "portable_analytic_identity_equality": False,
+            "ecological_label_equality": False,
+            "depth_segmentation_invariance": False,
+            "determinism": bool(cell["determinism_pass"]),
+            "material_rgb_change": False,
+            "controlled_surface_exposure": False,
+            "textured_surface_variation": False,
+        }
+        cell["admission_status"] = "rejected"
+        cell["rejection_reasons"] = ["matched_control_generation_or_validation_failed"]
+        cell["matched_control_failure_type"] = control.get("failure_type")
+        cell["matched_control_failure_message"] = control.get("failure_message")
         return
     structural_pass = _structural_domain(cell) == _structural_domain(control)
     portable_analytic_pass = _portable_analytic_identity_domain(
@@ -380,9 +586,9 @@ def _evaluate_cell(
     depth_segmentation_pass = True
     frames: dict[str, Any] = {}
     for frame_name in ("before", "after"):
-        rgb, depth, segmentation = _load_frame(packet_root, cell, frame_name)
+        rgb, depth, segmentation = _load_frame(packet_root, cell, frame_name, artifact_registry)
         control_rgb, control_depth, control_segmentation = _load_frame(
-            packet_root, control, frame_name
+            packet_root, control, frame_name, artifact_registry
         )
         depth_segmentation_pass &= np.array_equal(depth, control_depth) and np.array_equal(
             segmentation, control_segmentation
@@ -576,66 +782,175 @@ def _dataset_cell(
     return cell
 
 
-def _contact_sheets(packet_root: Path, cells: list[dict[str, Any]]) -> None:
+def _contact_sheet_image(
+    packet_root: Path,
+    cells: list[dict[str, Any]],
+    scene: str,
+    artifact_registry: _PacketArtifactRegistry | None = None,
+) -> Image.Image:
+    representatives = [
+        cell
+        for cell in cells
+        if cell["scene_family"] == scene
+        and cell["seed_index"] == 0
+        and cell["generation_status"] == "success"
+    ]
+    tile_size = 256
+    row_height = 304
+    sheet = Image.new("RGB", (3 * tile_size, max(1, len(representatives)) * row_height), "white")
+    draw = ImageDraw.Draw(sheet)
+    for row, cell in enumerate(representatives):
+        y = row * row_height
+        before, _, segmentation = _load_frame(packet_root, cell, "before", artifact_registry)
+        after, _, _ = _load_frame(packet_root, cell, "after", artifact_registry)
+        labels = segmentation.astype(np.int64)
+        reference = np.stack(
+            ((labels * 67) % 255, (labels * 131) % 255, (labels * 197) % 255), axis=2
+        ).astype(np.uint8)
+        before_image = Image.fromarray(before).resize(
+            (tile_size, tile_size), Image.Resampling.NEAREST
+        )
+        after_image = Image.fromarray(after).resize(
+            (tile_size, tile_size), Image.Resampling.NEAREST
+        )
+        reference_image = Image.fromarray(reference).resize(
+            (tile_size, tile_size), Image.Resampling.NEAREST
+        )
+        sheet.paste(before_image, (0, y + 48))
+        sheet.paste(after_image, (tile_size, y + 48))
+        sheet.paste(reference_image, (2 * tile_size, y + 48))
+        metrics = cell.get("frame_metrics", {}).get("before", {})
+        axes = ",".join(cell["appearance_instance"]["profile"]["axis_tags"])
+        draw.text(
+            (2, y + 2),
+            f"{scene} | {cell['profile_id']} | {cell['admission_status']} | axes={axes}",
+            fill="black",
+        )
+        draw.text(
+            (2, y + 18),
+            f"changed={metrics.get('changed_controlled_pixel_fraction', 0.0):.3f} "
+            f"mad={metrics.get('normalized_controlled_rgb_mad', 0.0):.3f} | "
+            "before RGB | after RGB | controlled segmentation",
+            fill="black",
+        )
+        ecological_equal = cell.get("admission_checks", {}).get("ecological_label_equality", False)
+        draw.text(
+            (2, y + 34),
+            f"renderer-local ecological label equal={str(bool(ecological_equal)).lower()}",
+            fill="black",
+        )
+    return sheet
+
+
+def _contact_sheets(
+    packet_root: Path,
+    cells: list[dict[str, Any]],
+) -> dict[str, Any]:
     output = packet_root / "representative_contact_sheets"
     output.mkdir(exist_ok=True)
+    records: list[dict[str, Any]] = []
     for scene in SCENE_FAMILIES:
-        representatives = [
-            cell
-            for cell in cells
-            if cell["scene_family"] == scene
-            and cell["seed_index"] == 0
-            and cell["generation_status"] == "success"
-        ]
-        tile_size = 256
-        row_height = 304
-        sheet = Image.new(
-            "RGB", (3 * tile_size, max(1, len(representatives)) * row_height), "white"
+        sheet = _contact_sheet_image(packet_root, cells, scene)
+        relative_path = f"representative_contact_sheets/{scene}_representative_seed_0.png"
+        path = packet_root / relative_path
+        sheet.save(path, format="PNG")
+        pixels = np.asarray(sheet, dtype=np.uint8)
+        records.append(
+            {
+                "scene_family": scene,
+                "seed_index": 0,
+                "path": relative_path,
+                "media_type": "image/png",
+                "mode": "RGB",
+                "dimensions": list(sheet.size),
+                "dtype": str(pixels.dtype),
+                "shape": list(pixels.shape),
+                "logical_sha256": logical_array_hash(pixels),
+                "file_sha256": sha256_file(path),
+                "byte_count": path.stat().st_size,
+            }
         )
-        draw = ImageDraw.Draw(sheet)
-        for row, cell in enumerate(representatives):
-            y = row * row_height
-            before, _, segmentation = _load_frame(packet_root, cell, "before")
-            after, _, _ = _load_frame(packet_root, cell, "after")
-            labels = segmentation.astype(np.int64)
-            reference = np.stack(
-                ((labels * 67) % 255, (labels * 131) % 255, (labels * 197) % 255), axis=2
-            ).astype(np.uint8)
-            before_image = Image.fromarray(before).resize(
-                (tile_size, tile_size), Image.Resampling.NEAREST
-            )
-            after_image = Image.fromarray(after).resize(
-                (tile_size, tile_size), Image.Resampling.NEAREST
-            )
-            reference_image = Image.fromarray(reference).resize(
-                (tile_size, tile_size), Image.Resampling.NEAREST
-            )
-            sheet.paste(before_image, (0, y + 48))
-            sheet.paste(after_image, (tile_size, y + 48))
-            sheet.paste(reference_image, (2 * tile_size, y + 48))
-            metrics = cell.get("frame_metrics", {}).get("before", {})
-            axes = ",".join(cell["appearance_instance"]["profile"]["axis_tags"])
-            draw.text(
-                (2, y + 2),
-                f"{scene} | {cell['profile_id']} | {cell['admission_status']} | axes={axes}",
-                fill="black",
-            )
-            draw.text(
-                (2, y + 18),
-                f"changed={metrics.get('changed_controlled_pixel_fraction', 0.0):.3f} "
-                f"mad={metrics.get('normalized_controlled_rgb_mad', 0.0):.3f} | "
-                "before RGB | after RGB | controlled segmentation",
-                fill="black",
-            )
-            ecological_equal = cell.get("admission_checks", {}).get(
-                "ecological_label_equality", False
-            )
-            draw.text(
-                (2, y + 34),
-                f"renderer-local ecological label equal={str(bool(ecological_equal)).lower()}",
-                fill="black",
-            )
-        sheet.save(output / f"{scene}_representative_seed_0.png", format="PNG")
+    return {
+        "schema_version": CONTACT_SHEET_MANIFEST_VERSION,
+        "sheets": records,
+    }
+
+
+def _validate_contact_sheet_manifest(
+    packet_root: Path,
+    cells: list[dict[str, Any]],
+    manifest: Any,
+    artifact_registry: _PacketArtifactRegistry,
+) -> None:
+    if not isinstance(manifest, dict) or set(manifest) != {"schema_version", "sheets"}:
+        raise AppearanceAuditError("contact-sheet manifest is not strict")
+    if manifest["schema_version"] != CONTACT_SHEET_MANIFEST_VERSION:
+        raise AppearanceAuditError("contact-sheet manifest version is unsupported")
+    sheets = manifest["sheets"]
+    if not isinstance(sheets, list) or len(sheets) != len(SCENE_FAMILIES):
+        raise AppearanceAuditError("contact-sheet manifest is incomplete")
+    directory = artifact_registry.root / "representative_contact_sheets"
+    try:
+        directory_stat = directory.lstat()
+    except OSError as error:
+        raise AppearanceAuditError("representative contact-sheet directory is missing") from error
+    if directory.is_symlink() or not stat.S_ISDIR(directory_stat.st_mode):
+        raise AppearanceAuditError("contact-sheet directory must be a non-link directory")
+    expected_names = {f"{scene}_representative_seed_0.png" for scene in SCENE_FAMILIES}
+    if {entry.name for entry in directory.iterdir()} != expected_names:
+        raise AppearanceAuditError("contact-sheet directory contains missing or additional entries")
+
+    expected_fields = {
+        "scene_family",
+        "seed_index",
+        "path",
+        "media_type",
+        "mode",
+        "dimensions",
+        "dtype",
+        "shape",
+        "logical_sha256",
+        "file_sha256",
+        "byte_count",
+    }
+    for scene, record in zip(SCENE_FAMILIES, sheets, strict=True):
+        if not isinstance(record, dict) or set(record) != expected_fields:
+            raise AppearanceAuditError("contact-sheet record is not strict")
+        expected_path = f"representative_contact_sheets/{scene}_representative_seed_0.png"
+        if (
+            record["scene_family"] != scene
+            or record["seed_index"] != 0
+            or record["path"] != expected_path
+            or record["media_type"] != "image/png"
+            or record["mode"] != "RGB"
+        ):
+            raise AppearanceAuditError("contact-sheet canonical metadata is inconsistent")
+        path = artifact_registry.claim(
+            expected_path,
+            f"contact-sheet:{scene}",
+            expected_file_sha256=record["file_sha256"],
+            expected_byte_count=record["byte_count"],
+        )
+        try:
+            with Image.open(path) as image:
+                if image.mode != "RGB":
+                    raise AppearanceAuditError("contact sheet must use RGB mode")
+                actual = np.asarray(image, dtype=np.uint8).copy()
+                dimensions = list(image.size)
+        except OSError as error:
+            raise AppearanceAuditError("contact sheet cannot be decoded") from error
+        expected = np.asarray(
+            _contact_sheet_image(packet_root, cells, scene, artifact_registry),
+            dtype=np.uint8,
+        )
+        if (
+            dimensions != record["dimensions"]
+            or str(actual.dtype) != record["dtype"]
+            or list(actual.shape) != record["shape"]
+            or logical_array_hash(actual) != record["logical_sha256"]
+            or not np.array_equal(actual, expected)
+        ):
+            raise AppearanceAuditError("contact sheet differs from independent reconstruction")
 
 
 def _roots(
@@ -695,7 +1010,15 @@ def _roots(
     renderer = [
         {
             "cell_id": cell["cell_id"],
-            "rgb": cell["rgb_logical_sha256"],
+            "scene_family": cell["scene_family"],
+            "profile_id": cell["profile_id"],
+            "seed_index": cell["seed_index"],
+            "candidate_seed": cell["candidate_seed"],
+            "renderer_provenance": cell["renderer_provenance"],
+            "rgb_logical_sha256": cell["rgb_logical_sha256"],
+            "depth_logical_sha256": cell["depth_logical_sha256"],
+            "segmentation_logical_sha256": cell["segmentation_logical_sha256"],
+            "retained_evidence": cell["evidence"],
             "metrics": cell.get("frame_metrics"),
             "determinism_pass": cell["determinism_pass"],
             "admission_status": cell["admission_status"],
@@ -719,6 +1042,7 @@ def _write_packet_reports(
     registry: AppearanceRegistry,
     seeds: EvaluationSeedRegistry,
     cells: list[dict[str, Any]],
+    contact_sheet_manifest: dict[str, Any],
 ) -> dict[str, Any]:
     counts = Counter(cell["admission_status"] for cell in cells)
     summaries = []
@@ -748,6 +1072,8 @@ def _write_packet_reports(
             "rejection_reasons": cell["rejection_reasons"],
             "failure_type": cell.get("failure_type"),
             "failure_message": cell.get("failure_message"),
+            "matched_control_failure_type": cell.get("matched_control_failure_type"),
+            "matched_control_failure_message": cell.get("matched_control_failure_message"),
         }
         for cell in cells
         if cell["admission_status"] == "rejected"
@@ -777,16 +1103,17 @@ def _write_packet_reports(
         "governing_document_hashes": governing_hashes,
         "roots": roots,
         "report_file_sha256": report_hashes,
-    }
-    packet = {
-        **logical_domain,
-        "packet_logical_root_sha256": _hash_json(logical_domain),
+        "contact_sheet_manifest": contact_sheet_manifest,
         "matrix_counts": dict(counts),
         "profile_count": len(registry.profiles),
         "candidate_seed_count": len(seeds.candidate_episode_seeds),
         "scene_families": list(SCENE_FAMILIES),
         "final_split": None,
         "final_evaluation_seeds": None,
+    }
+    packet = {
+        **logical_domain,
+        "packet_logical_root_sha256": _hash_json(logical_domain),
     }
     write_canonical_json(packet_root / "candidate_packet.json", packet)
     return packet
@@ -795,44 +1122,99 @@ def _write_packet_reports(
 def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
     """Independently recompute matrix, metrics, balance, and packet roots."""
 
-    packet = _read_json(packet_root / "candidate_packet.json")
-    if packet.get("schema_version") != AUDIT_SCHEMA_VERSION:
+    artifact_registry = _PacketArtifactRegistry(packet_root)
+    packet_path = artifact_registry.claim("candidate_packet.json", "candidate-packet")
+    packet = _read_json(packet_path)
+    expected_packet_fields = set(PACKET_LOGICAL_FIELDS) | {"packet_logical_root_sha256"}
+    if not isinstance(packet, dict) or set(packet) != expected_packet_fields:
+        raise AppearanceAuditError("candidate packet schema is not strict")
+    if packet["schema_version"] != AUDIT_SCHEMA_VERSION:
         raise AppearanceAuditError("candidate packet audit schema version is unsupported")
-    if packet.get("root_schema_version") != ROOT_SCHEMA_VERSION:
+    if packet["root_schema_version"] != ROOT_SCHEMA_VERSION:
         raise AppearanceAuditError("candidate packet root schema version is unsupported")
+    if packet["freeze_status"] != PACKET_FREEZE_STATUS:
+        raise AppearanceAuditError("candidate packet must not claim a benchmark freeze")
+    if packet["final_split"] is not None or packet["final_evaluation_seeds"] is not None:
+        raise AppearanceAuditError("candidate packet must not select final split or seeds")
+
+    report_names = ("profile_summary.json", "seed_matrix.json", "negative_evidence.json")
+    report_hashes = packet["report_file_sha256"]
+    if (
+        not isinstance(report_hashes, dict)
+        or set(report_hashes) != set(report_names)
+        or any(not isinstance(value, str) for value in report_hashes.values())
+    ):
+        raise AppearanceAuditError("candidate packet report-hash schema is not strict")
+    snapshot_paths = {
+        "appearance": artifact_registry.claim(
+            "appearance_registry_snapshot.json", "appearance-registry-snapshot"
+        ),
+        "seeds": artifact_registry.claim("seed_registry_snapshot.json", "seed-registry-snapshot"),
+    }
+    claimed_reports = {
+        name: artifact_registry.claim(
+            name,
+            f"report:{name}",
+            expected_file_sha256=report_hashes[name],
+        )
+        for name in report_names
+    }
     try:
-        registry = AppearanceRegistry.model_validate_json(
-            (packet_root / "appearance_registry_snapshot.json").read_bytes()
-        )
-        seeds = EvaluationSeedRegistry.model_validate_json(
-            (packet_root / "seed_registry_snapshot.json").read_bytes()
-        )
+        registry = AppearanceRegistry.model_validate_json(snapshot_paths["appearance"].read_bytes())
+        seeds = EvaluationSeedRegistry.model_validate_json(snapshot_paths["seeds"].read_bytes())
     except Exception as error:
         raise AppearanceAuditError("candidate packet registry snapshot is invalid") from error
     validate_axis_isolation(registry)
-    matrix = _read_json(packet_root / "seed_matrix.json")
-    if matrix.get("schema_version") != AUDIT_SCHEMA_VERSION:
+    matrix = _read_json(claimed_reports["seed_matrix.json"])
+    if (
+        not isinstance(matrix, dict)
+        or set(matrix) != {"schema_version", "cells"}
+        or matrix["schema_version"] != AUDIT_SCHEMA_VERSION
+    ):
         raise AppearanceAuditError("seed matrix audit schema version is unsupported")
-    cells = matrix.get("cells")
+    cells = matrix["cells"]
     if not isinstance(cells, list):
         raise AppearanceAuditError("seed matrix cells must be a list")
-    expected = {
-        _cell_id(scene, profile.profile_id, seed_index)
+    expected_cells = [
+        (scene, profile, seed_index, candidate_seed)
         for scene in SCENE_FAMILIES
         for profile in registry.profiles
-        for seed_index in seeds.indices
-    }
-    observed = [cell.get("cell_id") for cell in cells]
-    if len(observed) != len(set(observed)) or set(observed) != expected:
-        raise AppearanceAuditError("candidate audit matrix is incomplete or duplicated")
+        for seed_index, candidate_seed in zip(
+            seeds.indices, seeds.candidate_episode_seeds, strict=True
+        )
+    ]
+    if len(cells) != len(expected_cells):
+        raise AppearanceAuditError("candidate audit matrix has the wrong cell count")
+    for cell, (scene, profile, seed_index, candidate_seed) in zip(
+        cells, expected_cells, strict=True
+    ):
+        if not isinstance(cell, dict):
+            raise AppearanceAuditError("candidate audit cell must be an object")
+        expected_identity = {
+            "cell_id": _cell_id(scene, profile.profile_id, seed_index),
+            "scene_family": scene,
+            "profile_id": profile.profile_id,
+            "matched_control_profile_id": profile.matched_control_profile_id,
+            "seed_index": seed_index,
+            "candidate_seed": candidate_seed,
+        }
+        if any(cell.get(key) != value for key, value in expected_identity.items()):
+            raise AppearanceAuditError("candidate audit cell identity is not canonical")
+        if cell.get("generation_status") not in {"success", "failed"}:
+            raise AppearanceAuditError("candidate audit generation status is invalid")
+        if cell["generation_status"] == "failed" and "evidence" in cell:
+            raise AppearanceAuditError("failed candidate cell contains unclaimed evidence")
+
     by_key = {
         (cell["scene_family"], cell["profile_id"], cell["seed_index"]): cell for cell in cells
     }
     profiles = {profile.profile_id: profile for profile in registry.profiles}
     for cell in cells:
+        if cell["generation_status"] == "success":
+            _claim_cell_evidence(artifact_registry, cell)
+
+    for cell in cells:
         profile = profiles[cell["profile_id"]]
-        if cell["candidate_seed"] != seeds.candidate_episode_seeds[cell["seed_index"]]:
-            raise AppearanceAuditError("candidate seed differs from its registry index")
         if cell["generation_status"] == "success":
             if cell["episode_seed"] != derive_seed(cell["candidate_seed"], "episode:0"):
                 raise AppearanceAuditError("episode seed differs from ordinary derivation")
@@ -874,28 +1256,44 @@ def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
                 profile, cell["scene_family"], expected_appearance.record
             ):
                 raise AppearanceAuditError("source-texture diagnostics failed recomputation")
+            declared_logical_hashes = {
+                "rgb": cell.get("rgb_logical_sha256"),
+                "depth": cell.get("depth_logical_sha256"),
+                "segmentation": cell.get("segmentation_logical_sha256"),
+            }
+            if any(
+                not isinstance(values, list)
+                or len(values) != 2
+                or any(not isinstance(value, str) for value in values)
+                for values in declared_logical_hashes.values()
+            ):
+                raise AppearanceAuditError("cell logical evidence identities are malformed")
+            for frame_index, frame_name in enumerate(("before", "after")):
+                arrays = _load_frame(packet_root, cell, frame_name, artifact_registry)
+                for role, array in zip(("rgb", "depth", "segmentation"), arrays, strict=True):
+                    if logical_array_hash(array) != declared_logical_hashes[role][frame_index]:
+                        raise AppearanceAuditError(
+                            f"retained evidence differs from declared {role} identity: "
+                            f"{cell['cell_id']}:{frame_name}"
+                        )
         control = by_key[
             (cell["scene_family"], profile.matched_control_profile_id, cell["seed_index"])
         ]
-        stored = _hash_json(
-            {
-                "frame_metrics": cell.get("frame_metrics"),
-                "admission_checks": cell.get("admission_checks"),
-                "admission_status": cell["admission_status"],
-                "rejection_reasons": cell["rejection_reasons"],
-            }
-        )
+        stored = _admission_evidence_domain(cell)
         recomputed = json.loads(json.dumps(cell))
-        _evaluate_cell(packet_root, recomputed, control, profile)
-        actual = _hash_json(
-            {
-                "frame_metrics": recomputed.get("frame_metrics"),
-                "admission_checks": recomputed.get("admission_checks"),
-                "admission_status": recomputed["admission_status"],
-                "rejection_reasons": recomputed["rejection_reasons"],
-            }
-        )
-        if stored != actual:
+        for field in (
+            "frame_metrics",
+            "admission_checks",
+            "admission_status",
+            "rejection_reasons",
+            "matched_control_failure_type",
+            "matched_control_failure_message",
+        ):
+            recomputed.pop(field, None)
+        _evaluate_cell(packet_root, recomputed, control, profile, artifact_registry)
+        if canonical_json_bytes(stored) != canonical_json_bytes(
+            _admission_evidence_domain(recomputed)
+        ):
             raise AppearanceAuditError(f"altered admission evidence: {cell['cell_id']}")
     for profile in registry.profiles:
         if profile.freeze_eligible:
@@ -947,7 +1345,7 @@ def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
         "profiles": expected_summaries,
     }
     if canonical_json_bytes(expected_profile_summary) != canonical_json_bytes(
-        _read_json(packet_root / "profile_summary.json")
+        _read_json(claimed_reports["profile_summary.json"])
     ):
         raise AppearanceAuditError("profile summary differs from the seed matrix")
     expected_negative = {
@@ -962,47 +1360,44 @@ def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
                 "rejection_reasons": cell["rejection_reasons"],
                 "failure_type": cell.get("failure_type"),
                 "failure_message": cell.get("failure_message"),
+                "matched_control_failure_type": cell.get("matched_control_failure_type"),
+                "matched_control_failure_message": cell.get("matched_control_failure_message"),
             }
             for cell in cells
             if cell["admission_status"] == "rejected"
         ],
     }
     if canonical_json_bytes(expected_negative) != canonical_json_bytes(
-        _read_json(packet_root / "negative_evidence.json")
+        _read_json(claimed_reports["negative_evidence.json"])
     ):
         raise AppearanceAuditError("negative evidence does not retain every rejected cell")
+
+    expected_counts = dict(Counter(cell["admission_status"] for cell in cells))
+    if packet["matrix_counts"] != expected_counts:
+        raise AppearanceAuditError("candidate packet matrix counts are inconsistent")
+    if packet["profile_count"] != len(registry.profiles):
+        raise AppearanceAuditError("candidate packet profile count is inconsistent")
+    if packet["candidate_seed_count"] != len(seeds.candidate_episode_seeds):
+        raise AppearanceAuditError("candidate packet seed count is inconsistent")
+    if packet["scene_families"] != list(SCENE_FAMILIES):
+        raise AppearanceAuditError("candidate packet scene-family domain is inconsistent")
+
     roots = _roots(registry, seeds, cells)
-    if roots != packet.get("roots"):
+    if roots != packet["roots"]:
         raise AppearanceAuditError("audit shared or renderer-specific root mismatch")
-    report_hashes = {
-        name: sha256_file(packet_root / name)
-        for name in ("profile_summary.json", "seed_matrix.json", "negative_evidence.json")
-    }
-    if report_hashes != packet.get("report_file_sha256"):
-        raise AppearanceAuditError("audit report file root mismatch")
-    logical_domain = {
-        key: packet[key]
-        for key in (
-            "schema_version",
-            "root_schema_version",
-            "freeze_status",
-            "source_provenance",
-            "governing_document_hashes",
-            "roots",
-            "report_file_sha256",
-        )
-    }
-    if _hash_json(logical_domain) != packet.get("packet_logical_root_sha256"):
+    _validate_contact_sheet_manifest(
+        packet_root,
+        cells,
+        packet["contact_sheet_manifest"],
+        artifact_registry,
+    )
+    if _hash_json(_packet_logical_domain(packet)) != packet["packet_logical_root_sha256"]:
         raise AppearanceAuditError("candidate packet logical root mismatch")
     current_governing_hashes = {path: sha256_file(Path(path)) for path in GOVERNING_DOCUMENTS}
-    if current_governing_hashes != packet.get("governing_document_hashes"):
+    if current_governing_hashes != packet["governing_document_hashes"]:
         raise AppearanceAuditError("governing-document hash mismatch")
-    if collect_source_provenance(Path.cwd()).model_dump(mode="json") != packet.get(
-        "source_provenance"
-    ):
+    if collect_source_provenance(Path.cwd()).model_dump(mode="json") != packet["source_provenance"]:
         raise AppearanceAuditError("packet source provenance is not truthful for this source tree")
-    if packet.get("freeze_status") != PACKET_FREEZE_STATUS:
-        raise AppearanceAuditError("candidate packet must not claim a benchmark freeze")
     return packet
 
 
@@ -1067,8 +1462,14 @@ def create_appearance_audit(
             ]
             _evaluate_cell(staging, cell, control, profile)
         shutil.rmtree(work)
-        _write_packet_reports(staging, registry, seeds, cells)
-        _contact_sheets(staging, cells)
+        contact_sheet_manifest = _contact_sheets(staging, cells)
+        _write_packet_reports(
+            staging,
+            registry,
+            seeds,
+            cells,
+            contact_sheet_manifest,
+        )
         volatile = {
             "generated_at_utc": datetime.now(UTC).isoformat(),
             "hostname": socket.gethostname(),

@@ -178,15 +178,15 @@ The current Slice 5 schema matrix is:
 
 | Contract | Pending Slice 5 version |
 | --- | --- |
-| Single-occluder and corridor configuration | `0.1.0-dev.3` |
-| Dataset and episode manifest | `0.1.0-dev.6` |
+| Single-occluder and corridor configuration | `0.1.0-dev.4` |
+| Dataset and episode manifest | `0.1.0-dev.7` |
 | Transition | `0.1.0-dev.9` unchanged |
-| Privileged instrumentation | `0.1.0-dev.11` |
-| Appearance registry | `appearance_candidate_registry_v0` |
+| Privileged instrumentation | `0.1.0-dev.12` |
+| Appearance registry/profile | `appearance_candidate_registry_v1` / `appearance_profile_v2` |
 | Procedural texture generator | `repository_procedural_texture_v1` |
-| Appearance instance | `appearance_instance_v2` |
-| Candidate audit packet | `appearance_candidate_audit_v1` |
-| Candidate root domains | `appearance_candidate_root_domains_v1` |
+| Appearance instance | `appearance_instance_v3` |
+| Candidate audit packet | `appearance_candidate_audit_v2` |
+| Candidate root domains | `appearance_candidate_root_domains_v2` |
 
 Every generated dataset snapshots the protected evaluation-seed candidate registry. Its version,
 hash, artifact, and assignment-schedule source enter dataset logical identity; appearance-instance
@@ -198,7 +198,7 @@ never an ambient repository file. The snapshot and appearance instrumentation re
 The audit runs every profile over all eight candidate roots and both scene families through ordinary
 generation and whole-dataset validation, repeats each cell for same-renderer determinism, retains
 rejected cells, and publishes a deterministic candidate packet plus separate volatile run metadata.
-Audit v1 separates portable registry/seed/procedural/assignment and analytic identities, a portable
+Audit v2 separates portable registry/seed/procedural/assignment and analytic identities, a portable
 within-renderer appearance-invariance outcome root, a renderer-local complete ecological-label root,
 and renderer-local RGB diagnostics. Appearance invariance is tested against the matched control
 inside each renderer; complete raster-derived ecological-label roots are reported rather than
