@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
-from PIL import Image
 
 from epsbench.annotations import (
     ANALYTIC_TRANSPORT_METHOD,
@@ -56,6 +54,12 @@ from epsbench.config import (
     CorridorConfig,
     SingleOccluderConfig,
     parse_config,
+)
+from epsbench.data.decoding import (
+    ArtifactDecodeError,
+    decode_json_artifact,
+    decode_npy_artifact,
+    decode_rgb_artifact,
 )
 from epsbench.data.identity import (
     compute_analytic_transport_hash,
@@ -176,27 +180,9 @@ def _verify_json(
     del root
     with registry.claim(record) as owned:
         try:
-            payload = json.loads(owned.handle.read().decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as error:
-            raise DatasetValidationError(f"invalid JSON artifact: {record.path}") from error
-        if not isinstance(payload, dict):
-            raise DatasetValidationError(f"JSON artifact must contain an object: {record.path}")
-        logical_bytes = canonical_json_bytes(payload)
-        if sha256_bytes(logical_bytes) != record.logical_sha256:
-            raise DatasetValidationError(f"artifact logical hash mismatch: {record.path}")
-        if record.dtype != "json" or record.shape != (len(logical_bytes),):
-            raise DatasetValidationError(f"JSON artifact metadata mismatch: {record.path}")
-        return payload
-
-
-def _verify_array(
-    record: ArtifactRecord,
-    array: np.ndarray[Any, Any],
-) -> None:
-    if tuple(array.shape) != record.shape or str(array.dtype) != record.dtype:
-        raise DatasetValidationError(f"array metadata mismatch: {record.path}")
-    if logical_array_hash(array) != record.logical_sha256:
-        raise DatasetValidationError(f"array logical hash mismatch: {record.path}")
+            return decode_json_artifact(owned.payload, record)
+        except ArtifactDecodeError as error:
+            raise DatasetValidationError(str(error)) from error
 
 
 def _load_rgb(
@@ -207,14 +193,9 @@ def _load_rgb(
     del root
     with registry.claim(record) as owned:
         try:
-            with Image.open(owned.handle) as image:
-                if image.mode != "RGB":
-                    raise DatasetValidationError(f"RGB artifact must use RGB mode: {record.path}")
-                rgb = np.asarray(image, dtype=np.uint8).copy()
-        except OSError as error:
-            raise DatasetValidationError(f"unreadable RGB artifact: {record.path}") from error
-        _verify_array(record, rgb)
-        return rgb
+            return decode_rgb_artifact(owned.payload, record)
+        except ArtifactDecodeError as error:
+            raise DatasetValidationError(str(error)) from error
 
 
 def _load_npy(
@@ -225,11 +206,9 @@ def _load_npy(
     del root
     with registry.claim(record) as owned:
         try:
-            array = cast(np.ndarray[Any, Any], np.load(owned.handle, allow_pickle=False))
-        except (OSError, ValueError) as error:
-            raise DatasetValidationError(f"unreadable NumPy artifact: {record.path}") from error
-        _verify_array(record, array)
-        return array
+            return decode_npy_artifact(owned.payload, record)
+        except ArtifactDecodeError as error:
+            raise DatasetValidationError(str(error)) from error
 
 
 def _load_transport_direction(
@@ -1123,7 +1102,7 @@ def validate_dataset(root: Path) -> DatasetManifest:
     try:
         manifest_context = open_dataset_manifest(root)
         with manifest_context as (resolved_root, owned_manifest):
-            manifest = DatasetManifest.model_validate_json(owned_manifest.handle.read())
+            manifest = DatasetManifest.model_validate_json(owned_manifest.payload)
     except UnsafeDatasetManifestError as error:
         raise DatasetValidationError(str(error)) from error
     except Exception as error:

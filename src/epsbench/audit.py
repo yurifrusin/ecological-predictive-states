@@ -16,6 +16,7 @@ from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -684,12 +685,12 @@ def _load_frame(
         ) as owned:
             try:
                 if role == "rgb":
-                    with Image.open(owned.handle) as image:
+                    with Image.open(BytesIO(owned.payload)) as image:
                         if image.mode != "RGB":
                             raise AppearanceAuditError("audit RGB evidence must use RGB mode")
                         array = np.asarray(image, dtype=np.uint8).copy()
                 else:
-                    array = np.load(owned.handle, allow_pickle=False)
+                    array = np.load(BytesIO(owned.payload), allow_pickle=False)
             except (OSError, ValueError) as error:
                 raise AppearanceAuditError("audit evidence cannot be decoded") from error
             if str(array.dtype) != record["dtype"] or list(array.shape) != record["shape"]:
@@ -1255,12 +1256,15 @@ def _validate_contact_sheet_manifest(
     artifact_registry: _PacketArtifactRegistry,
     frame_cache: dict[tuple[str, str], tuple[Any, Any, Any]],
 ) -> None:
-    if not isinstance(manifest, dict) or set(manifest) != {"schema_version", "sheets"}:
+    if type(manifest) is not dict or set(manifest) != {"schema_version", "sheets"}:
         raise AppearanceAuditError("contact-sheet manifest is not strict")
-    if manifest["schema_version"] != CONTACT_SHEET_MANIFEST_VERSION:
+    if (
+        type(manifest["schema_version"]) is not str
+        or manifest["schema_version"] != CONTACT_SHEET_MANIFEST_VERSION
+    ):
         raise AppearanceAuditError("contact-sheet manifest version is unsupported")
     sheets = manifest["sheets"]
-    if not isinstance(sheets, list) or len(sheets) != len(SCENE_FAMILIES):
+    if type(sheets) is not list or len(sheets) != len(SCENE_FAMILIES):
         raise AppearanceAuditError("contact-sheet manifest is incomplete")
     directory = artifact_registry.root / "representative_contact_sheets"
     try:
@@ -1287,8 +1291,32 @@ def _validate_contact_sheet_manifest(
         "byte_count",
     }
     for scene, record in zip(SCENE_FAMILIES, sheets, strict=True):
-        if not isinstance(record, dict) or set(record) != expected_fields:
+        if type(record) is not dict or set(record) != expected_fields:
             raise AppearanceAuditError("contact-sheet record is not strict")
+        string_fields = (
+            "scene_family",
+            "path",
+            "media_type",
+            "mode",
+            "dtype",
+            "logical_sha256",
+            "file_sha256",
+        )
+        dimensions = record["dimensions"]
+        shape = record["shape"]
+        if (
+            any(type(record[field]) is not str for field in string_fields)
+            or type(record["seed_index"]) is not int
+            or type(record["byte_count"]) is not int
+            or record["byte_count"] <= 0
+            or type(dimensions) is not list
+            or len(dimensions) != 2
+            or any(type(value) is not int or value <= 0 for value in dimensions)
+            or type(shape) is not list
+            or len(shape) != 3
+            or any(type(value) is not int or value <= 0 for value in shape)
+        ):
+            raise AppearanceAuditError("contact-sheet record types are not canonical")
         expected_path = f"representative_contact_sheets/{scene}_representative_seed_0.png"
         if (
             record["scene_family"] != scene
@@ -1305,7 +1333,7 @@ def _validate_contact_sheet_manifest(
             expected_byte_count=record["byte_count"],
         ) as owned:
             try:
-                with Image.open(owned.handle) as image:
+                with Image.open(BytesIO(owned.payload)) as image:
                     if image.mode != "RGB":
                         raise AppearanceAuditError("contact sheet must use RGB mode")
                     actual = np.asarray(image, dtype=np.uint8).copy()
@@ -1504,7 +1532,7 @@ def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
     artifact_registry = _PacketArtifactRegistry(packet_root)
     with artifact_registry.claim("candidate_packet.json", "candidate-packet") as owned:
         try:
-            packet = json.loads(owned.handle.read().decode("utf-8"))
+            packet = json.loads(owned.payload.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as error:
             raise AppearanceAuditError("candidate packet JSON is invalid") from error
     expected_packet_fields = set(PACKET_LOGICAL_FIELDS) | {"packet_logical_root_sha256"}
@@ -1532,12 +1560,12 @@ def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
             "appearance_registry_snapshot.json",
             "appearance-registry-snapshot",
         ) as owned:
-            registry = AppearanceRegistry.model_validate_json(owned.handle.read())
+            registry = AppearanceRegistry.model_validate_json(owned.payload)
         with artifact_registry.claim(
             "seed_registry_snapshot.json",
             "seed-registry-snapshot",
         ) as owned:
-            seeds = EvaluationSeedRegistry.model_validate_json(owned.handle.read())
+            seeds = EvaluationSeedRegistry.model_validate_json(owned.payload)
     except Exception as error:
         raise AppearanceAuditError("candidate packet registry snapshot is invalid") from error
     report_payloads: dict[str, dict[str, Any]] = {}
@@ -1548,7 +1576,7 @@ def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
             expected_file_sha256=report_hashes[name],
         ) as owned:
             try:
-                payload = json.loads(owned.handle.read().decode("utf-8"))
+                payload = json.loads(owned.payload.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError) as error:
                 raise AppearanceAuditError(f"candidate packet report is invalid: {name}") from error
             if not isinstance(payload, dict):

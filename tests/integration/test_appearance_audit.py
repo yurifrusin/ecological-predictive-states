@@ -407,6 +407,33 @@ def test_fully_rehashed_malformed_contact_manifest_is_rejected(
         audit.validate_appearance_audit(synthetic_packet)
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    ("boolean_seed", "float_seed", "float_dimension", "float_shape", "float_byte_count"),
+)
+def test_fully_resealed_contact_sheet_noncanonical_types_are_rejected(
+    synthetic_packet: Path,
+    mutation: str,
+) -> None:
+    # EPS-ER11-0012
+    packet_path = synthetic_packet / "candidate_packet.json"
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    record = packet["contact_sheet_manifest"]["sheets"][0]
+    if mutation == "boolean_seed":
+        record["seed_index"] = False
+    elif mutation == "float_seed":
+        record["seed_index"] = 0.0
+    elif mutation == "float_dimension":
+        record["dimensions"][0] = float(record["dimensions"][0])
+    elif mutation == "float_shape":
+        record["shape"][0] = float(record["shape"][0])
+    else:
+        record["byte_count"] = float(record["byte_count"])
+    _write_rehashed_packet(synthetic_packet, packet)
+    with pytest.raises(audit.AppearanceAuditError, match="types are not canonical"):
+        audit.validate_appearance_audit(synthetic_packet)
+
+
 def test_corrupt_contact_sheet_is_rejected(synthetic_packet: Path) -> None:
     _, sheet = _first_contact_sheet(synthetic_packet)
     sheet.write_bytes(b"corrupt")
@@ -487,6 +514,17 @@ def _replace_with_external_hardlink(path: Path, external: Path) -> None:
     os.link(external, path)
 
 
+def _overwrite_same_inode_same_size(path: Path) -> None:
+    with path.open("r+b") as stream:
+        payload = bytearray(stream.read())
+        index = next(index for index, value in enumerate(payload) if value not in {0, 255})
+        payload[index] ^= 1
+        stream.seek(0)
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Windows denies replacement of an open file")
 def test_packet_replacement_between_ownership_check_and_hash_is_rejected(
     synthetic_packet: Path,
@@ -537,6 +575,27 @@ def test_packet_replacement_between_hash_and_decode_is_rejected(
 
     monkeypatch.setattr(audit, "sha256_open_file", replace_after_hash)
     with pytest.raises(audit.AppearanceAuditError, match="changed while being consumed"):
+        audit.validate_appearance_audit(synthetic_packet)
+
+
+def test_packet_same_inode_overwrite_between_hash_and_decode_is_rejected(
+    synthetic_packet: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # EPS-ER11-0011
+    original_hash = sha256_open_file
+    overwritten = False
+
+    def overwrite_after_hash(owned: Any) -> str:
+        nonlocal overwritten
+        digest = original_hash(owned)
+        if owned.path.name == "seed_matrix.json" and not overwritten:
+            overwritten = True
+            _overwrite_same_inode_same_size(owned.path)
+        return digest
+
+    monkeypatch.setattr(audit, "sha256_open_file", overwrite_after_hash)
+    with pytest.raises(audit.AppearanceAuditError, match="bytes changed while being consumed"):
         audit.validate_appearance_audit(synthetic_packet)
 
 

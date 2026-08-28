@@ -5,13 +5,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO, TypeVar, cast
+from typing import Any, TypeVar
 
 import numpy as np
 import numpy.typing as npt
-from PIL import Image
 
 from epsbench.appearance import AppearanceInstanceRecord, EvaluationSeedRegistry
+from epsbench.data.decoding import (
+    decode_json_artifact,
+    decode_npy_artifact,
+    decode_rgb_artifact,
+)
 from epsbench.data.paths import (
     UnsafeOwnedFileError,
     open_dataset_manifest,
@@ -94,7 +98,7 @@ class DatasetLoader:
 
     def __init__(self, root: Path, permissions: ModalityPermissionSet) -> None:
         with open_dataset_manifest(root) as (resolved_root, owned_manifest):
-            manifest = DatasetManifest.model_validate_json(owned_manifest.handle.read())
+            manifest = DatasetManifest.model_validate_json(owned_manifest.payload)
         self.root = resolved_root
         self.permissions = permissions
         self._manifest = manifest
@@ -108,7 +112,7 @@ class DatasetLoader:
     def _decode_owned(
         self,
         record: ArtifactRecord,
-        decoder: Callable[[BinaryIO], _Decoded],
+        decoder: Callable[[bytes], _Decoded],
     ) -> _Decoded:
         try:
             with open_owned_regular_file(self.root, record.path) as owned:
@@ -116,18 +120,23 @@ class DatasetLoader:
                     raise ValueError(f"artifact byte count mismatch: {record.path}")
                 if sha256_open_file(owned) != record.file_sha256:
                     raise ValueError(f"artifact file hash mismatch: {record.path}")
-                return decoder(owned.handle)
+                return decoder(owned.payload)
         except UnsafeOwnedFileError as error:
             raise ValueError(str(error)) from error
 
     def _load_npy(self, record: ArtifactRecord) -> np.ndarray[Any, Any]:
-        return self._decode_owned(
-            record,
-            lambda handle: cast(
-                np.ndarray[Any, Any],
-                np.load(handle, allow_pickle=False),
-            ),
-        )
+        return self._decode_owned(record, lambda snapshot: decode_npy_artifact(snapshot, record))
+
+    def _load_json(
+        self,
+        record: ArtifactRecord,
+        decoder: Callable[[bytes], _Decoded],
+    ) -> _Decoded:
+        def verify_and_decode(snapshot: bytes) -> _Decoded:
+            decode_json_artifact(snapshot, record)
+            return decoder(snapshot)
+
+        return self._decode_owned(record, verify_and_decode)
 
     def _episode(self, episode_index: int) -> EpisodeManifest:
         try:
@@ -141,9 +150,9 @@ class DatasetLoader:
 
     def _transition(self, episode_index: int) -> TransitionRecord:
         episode = self._episode(episode_index)
-        return self._decode_owned(
+        return self._load_json(
             episode.transition,
-            lambda handle: TransitionRecord.model_validate_json(handle.read()),
+            TransitionRecord.model_validate_json,
         )
 
     @staticmethod
@@ -283,11 +292,10 @@ class DatasetLoader:
         transition = self._transition(episode_index)
         frame = self._frame(transition, frame_index)
 
-        def decode(handle: BinaryIO) -> npt.NDArray[np.uint8]:
-            with Image.open(handle) as image:
-                return np.asarray(image.convert("RGB"), dtype=np.uint8).copy()
-
-        return self._decode_owned(frame.rgb, decode)
+        return self._decode_owned(
+            frame.rgb,
+            lambda snapshot: decode_rgb_artifact(snapshot, frame.rgb),
+        )
 
     def read_depth(self, episode_index: int, frame_index: int) -> npt.NDArray[np.float32]:
         self._require(Modality.DEPTH)
@@ -307,16 +315,16 @@ class DatasetLoader:
         self._require(Modality.CAMERA_WORLD_TRANSFORM)
         transition = self._transition(episode_index)
         frame = self._frame(transition, frame_index)
-        return self._decode_owned(
+        return self._load_json(
             frame.camera_world_transform,
-            lambda handle: CameraInstrumentation.model_validate_json(handle.read()),
+            CameraInstrumentation.model_validate_json,
         )
 
     def _instrumentation(self, episode_index: int) -> PrivilegedInstrumentation:
         episode = self._episode(episode_index)
-        return self._decode_owned(
+        return self._load_json(
             episode.privileged_instrumentation,
-            lambda handle: parse_privileged_instrumentation_json(handle.read()),
+            parse_privileged_instrumentation_json,
         )
 
     def read_appearance_control(self, episode_index: int) -> AppearanceInstanceRecord:
@@ -330,9 +338,9 @@ class DatasetLoader:
 
         self._require(Modality.APPEARANCE_CONTROL, Modality.PRIVILEGED_GENERATION_RECORDS)
         artifact = self._manifest.evaluation_seed_registry_snapshot
-        return self._decode_owned(
+        return self._load_json(
             artifact,
-            lambda handle: EvaluationSeedRegistry.model_validate_json(handle.read()),
+            EvaluationSeedRegistry.model_validate_json,
         )
 
     def read_raw_mujoco_geom_ids(self, episode_index: int) -> dict[str, int]:

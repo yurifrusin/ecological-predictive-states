@@ -21,10 +21,11 @@ class UnsafeOwnedFileError(ValueError):
 
 @dataclass(frozen=True)
 class OwnedRegularFile:
-    """One verified regular-file identity and the handle bound to that identity."""
+    """One verified identity, open handle, and immutable byte snapshot."""
 
     path: Path
     handle: BinaryIO
+    payload: bytes
     device: int
     inode: int
     byte_count: int
@@ -134,6 +135,13 @@ def _verify_open_handle(
     )
     if current_stat.st_size != owned.byte_count:
         raise UnsafeOwnedFileError(f"artifact changed while being consumed: {relative_path}")
+    try:
+        owned.handle.seek(0)
+        current_payload = owned.handle.read()
+    except (OSError, ValueError) as error:
+        raise UnsafeOwnedFileError(f"artifact cannot be re-read: {relative_path}") from error
+    if current_payload != owned.payload:
+        raise UnsafeOwnedFileError(f"artifact bytes changed while being consumed: {relative_path}")
 
 
 @contextmanager
@@ -168,9 +176,19 @@ def open_owned_regular_file(root: Path, relative_path: str) -> Iterator[OwnedReg
         )
         if current_stat.st_size != opened_stat.st_size:
             raise UnsafeOwnedFileError(f"artifact changed while being opened: {relative_path}")
+        try:
+            handle.seek(0)
+            payload = handle.read()
+        except OSError as error:
+            raise UnsafeOwnedFileError(
+                f"artifact cannot be snapshotted: {relative_path}"
+            ) from error
+        if len(payload) != opened_stat.st_size:
+            raise UnsafeOwnedFileError(f"artifact changed while being snapshotted: {relative_path}")
         owned = OwnedRegularFile(
             path=current_path,
             handle=handle,
+            payload=payload,
             device=opened_stat.st_dev,
             inode=opened_stat.st_ino,
             byte_count=opened_stat.st_size,
@@ -184,14 +202,9 @@ def open_owned_regular_file(root: Path, relative_path: str) -> Iterator[OwnedReg
 
 
 def sha256_open_file(owned: OwnedRegularFile) -> str:
-    """Hash an owned file through its already-verified handle and rewind it."""
+    """Hash the immutable snapshot captured from an owned file handle."""
 
-    digest = hashlib.sha256()
-    owned.handle.seek(0)
-    while chunk := owned.handle.read(1024 * 1024):
-        digest.update(chunk)
-    owned.handle.seek(0)
-    return digest.hexdigest()
+    return hashlib.sha256(owned.payload).hexdigest()
 
 
 class UnsafeDatasetManifestError(ValueError):
