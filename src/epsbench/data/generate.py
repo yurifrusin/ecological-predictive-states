@@ -60,6 +60,7 @@ from epsbench.annotations import (
     derive_visibility,
 )
 from epsbench.appearance import (
+    ASSIGNMENT_SCHEDULE_SOURCE,
     AppearanceRegistry,
     EvaluationSeedRegistry,
     appearance_profile_hash,
@@ -68,6 +69,7 @@ from epsbench.appearance import (
     load_evaluation_seed_registry,
     profile_by_id,
     resolve_appearance,
+    seed_registry_hash,
     validate_axis_isolation,
 )
 from epsbench.config import BenchmarkConfig, CorridorConfig, SingleOccluderConfig
@@ -939,7 +941,7 @@ def _generate_single_occluder_episode(
     write_canonical_json(transition_path, transition)
 
     instrumentation = SingleOccluderInstrumentation(
-        schema_version="0.1.0-dev.10",
+        schema_version="0.1.0-dev.11",
         scene_family=SceneFamily.SINGLE_OCCLUDER,
         episode_id=episode_id,
         appearance=appearance.record,
@@ -1144,7 +1146,7 @@ def _generate_corridor_episode(
             )
         )
     instrumentation = CorridorInstrumentation(
-        schema_version="0.1.0-dev.10",
+        schema_version="0.1.0-dev.11",
         scene_family=SceneFamily.CORRIDOR,
         episode_id=episode_id,
         appearance=appearance.record,
@@ -1261,6 +1263,7 @@ def generate_dataset(
     selected_profile = profile_by_id(appearance_registry, config.appearance.profile_id)
     registry_sha256 = appearance_registry_hash(appearance_registry)
     profile_sha256 = appearance_profile_hash(selected_profile)
+    evaluation_seed_registry_sha256 = seed_registry_hash(seed_registry)
     output.mkdir(parents=True, exist_ok=True)
     resolved_config_path = output / "resolved_config.json"
     write_canonical_json(resolved_config_path, config)
@@ -1280,6 +1283,15 @@ def generate_dataset(
         Modality.APPEARANCE_CONTROL,
         "application/json",
     )
+    evaluation_seed_registry_path = output / "evaluation_seed_registry_snapshot.json"
+    write_canonical_json(evaluation_seed_registry_path, seed_registry)
+    evaluation_seed_registry_artifact = _json_artifact(
+        evaluation_seed_registry_path,
+        output,
+        seed_registry,
+        Modality.APPEARANCE_CONTROL,
+        "application/json",
+    )
     episode_manifests = tuple(
         _generate_episode(
             output,
@@ -1295,7 +1307,7 @@ def generate_dataset(
         renderer_provenance
     )
     manifest = DatasetManifest(
-        schema_version="0.1.0-dev.5",
+        schema_version="0.1.0-dev.6",
         generator_version="0.1.0",
         scene_family=config.scene_family,
         root_seed=config.seed,
@@ -1304,6 +1316,9 @@ def generate_dataset(
         appearance_profile_id=selected_profile.profile_id,
         appearance_profile_sha256=profile_sha256,
         appearance_registry_snapshot=appearance_registry_artifact,
+        evaluation_seed_registry_sha256=evaluation_seed_registry_sha256,
+        evaluation_seed_registry_snapshot=evaluation_seed_registry_artifact,
+        appearance_assignment_schedule_source=ASSIGNMENT_SCHEDULE_SOURCE,
         resolved_config=resolved_config_artifact,
         renderer_provenance=renderer_provenance,
         renderer_execution_provenance_sha256=renderer_execution_provenance_sha256,

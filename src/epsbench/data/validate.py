@@ -41,10 +41,11 @@ from epsbench.annotations import (
 )
 from epsbench.appearance import (
     AppearanceRegistry,
+    EvaluationSeedRegistry,
     appearance_profile_hash,
     appearance_registry_hash,
-    load_evaluation_seed_registry,
     profile_by_id,
+    seed_registry_hash,
     validate_appearance_instance,
     validate_axis_isolation,
 )
@@ -1162,12 +1163,24 @@ def validate_dataset(root: Path) -> DatasetManifest:
         raise DatasetValidationError("selected appearance profile is absent") from error
     if appearance_profile_hash(selected_profile) != manifest.appearance_profile_sha256:
         raise DatasetValidationError("appearance profile hash mismatch")
+    seed_registry_payload = _verify_json(
+        resolved_root,
+        manifest.evaluation_seed_registry_snapshot,
+        registry,
+    )
     try:
-        seed_registry = load_evaluation_seed_registry(
-            Path("configs/evaluation_seed_candidates_v0.yaml")
+        seed_registry = EvaluationSeedRegistry.model_validate_json(
+            canonical_json_bytes(seed_registry_payload)
         )
     except Exception as error:
-        raise DatasetValidationError("evaluation seed registry is unavailable") from error
+        raise DatasetValidationError("evaluation seed registry snapshot is invalid") from error
+    if seed_registry_hash(seed_registry) != manifest.evaluation_seed_registry_sha256:
+        raise DatasetValidationError("evaluation seed registry hash mismatch")
+    if (
+        manifest.evaluation_seed_registry_snapshot.logical_sha256
+        != manifest.evaluation_seed_registry_sha256
+    ):
+        raise DatasetValidationError("evaluation seed registry artifact identity mismatch")
 
     config_payload = _verify_json(resolved_root, manifest.resolved_config, registry)
     try:

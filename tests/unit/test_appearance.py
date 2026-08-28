@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -9,8 +10,11 @@ from pydantic import ValidationError
 
 from epsbench.appearance import (
     CANONICAL_PROFILE_IDS,
+    AppearanceInstanceRecord,
     AppearanceRegistry,
+    EvaluationSeedRegistry,
     TextureFamily,
+    appearance_instance_hash,
     appearance_profile_hash,
     appearance_seed_namespaces,
     assignment_balance,
@@ -19,6 +23,7 @@ from epsbench.appearance import (
     load_evaluation_seed_registry,
     profile_by_id,
     resolve_appearance,
+    seed_registry_hash,
     validate_axis_isolation,
 )
 from epsbench.sim import corridor_generation_seeds
@@ -145,6 +150,81 @@ def test_seed_registry_is_recomputed_and_order_is_immutable() -> None:
     payload["candidate_episode_seeds"] = list(reversed(expected))
     with pytest.raises(ValidationError):
         type(registry).model_validate_json(json.dumps(payload))
+
+
+def test_candidate_and_non_candidate_schedule_postures_reconstruct_exactly(
+    registry: AppearanceRegistry,
+) -> None:
+    seeds = load_evaluation_seed_registry(SEED_REGISTRY_PATH)
+    surface_names = ("support_surface", "occluding_surface", "background_surface")
+    candidate_root = seeds.candidate_episode_seeds[1]
+    candidate = resolve_appearance(
+        registry,
+        "balanced_solid_palette_v1",
+        "single_occluder",
+        surface_names,
+        derive_seed(candidate_root, "episode:0"),
+        candidate_root,
+        seeds,
+    ).record
+    assert candidate.seeds.candidate_schedule_index == 1
+    assert candidate.assignment_schedule_posture == "candidate_registry_index"
+    assert candidate.style_assignment == {
+        "support_surface": "style-slot-1",
+        "occluding_surface": "style-slot-2",
+        "background_surface": "style-slot-0",
+    }
+
+    non_candidate_root = 42
+    assert non_candidate_root not in seeds.candidate_episode_seeds
+    non_candidate = resolve_appearance(
+        registry,
+        "balanced_solid_palette_v1",
+        "single_occluder",
+        surface_names,
+        derive_seed(non_candidate_root, "episode:0"),
+        non_candidate_root,
+        seeds,
+    ).record
+    assert non_candidate.seeds.candidate_schedule_index is None
+    assert non_candidate.assignment_schedule_posture == "non_candidate_seed_derived"
+    assert non_candidate.assignment_root_seed == non_candidate_root
+
+
+def test_seed_registry_schedule_mutations_change_identity_and_appearance_instance(
+    registry: AppearanceRegistry,
+) -> None:
+    seeds = load_evaluation_seed_registry(SEED_REGISTRY_PATH)
+    root_seed = seeds.candidate_episode_seeds[0]
+    surface_names = ("support_surface", "occluding_surface", "background_surface")
+
+    def resolve(candidate_registry: EvaluationSeedRegistry) -> AppearanceInstanceRecord:
+        return resolve_appearance(
+            registry,
+            "balanced_solid_palette_v1",
+            "single_occluder",
+            surface_names,
+            derive_seed(root_seed, "episode:0"),
+            root_seed,
+            candidate_registry,
+        ).record
+
+    original = resolve(seeds)
+    variants = (
+        seeds.model_copy(update={"candidate_episode_seeds": seeds.candidate_episode_seeds[:-1]}),
+        seeds.model_copy(
+            update={"candidate_episode_seeds": tuple(reversed(seeds.candidate_episode_seeds))}
+        ),
+        seeds.model_copy(
+            update={"candidate_episode_seeds": (999, *seeds.candidate_episode_seeds[1:])}
+        ),
+    )
+    for changed in variants:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            changed_record = resolve(changed)
+            assert seed_registry_hash(changed) != seed_registry_hash(seeds)
+            assert appearance_instance_hash(changed_record) != appearance_instance_hash(original)
 
 
 def test_appearance_namespace_is_independent_of_geometry_and_remapping() -> None:

@@ -9,7 +9,9 @@ evaluation seeds, complete Gate 0B, authorise Gate 0C or Gate 0D, or establish a
 The bounded purpose is to replace the two-colour smoke check with prospectively specified,
 procedural appearance interventions. Each intervention must materially affect controlled RGB while
 leaving geometry, action, camera trajectory, opaque remapping, analytic transport, boundary
-ownership, visibility events, occlusion, and ecological labels invariant at a fixed candidate seed.
+ownership, visibility events, and occlusion invariant at a fixed candidate seed. Complete
+raster-derived ecological labels are required to match the declared control within each renderer;
+their raw identities are not claimed portable across WGL and OSMesa.
 
 ## Why the assets are procedural
 
@@ -40,7 +42,9 @@ that licence question and does not authorise adding a licence.
 The two legacy profiles preserve fixed role-to-colour regression coverage but are explicitly
 ineligible for a future freeze. Every new profile uses a deterministic balanced permutation rather
 than permanently tying an apparatus role to a colour or texture slot. Admission remains a technical
-candidate property; it is not final selection.
+candidate property; it is not final selection. `freeze_eligible: true` means only that a profile
+satisfies the prospective structural prerequisites to enter the audit. It does not mean that the
+profile passed admission, is freeze-ready, or may be selected without later owner authority.
 
 ## Procedural texture and material contract
 
@@ -104,28 +108,41 @@ root `1729`, `derive_seed_v1`, and namespace
 shortening, reordering, or replacing a difficult seed fails. These are candidate roots for the audit,
 not final evaluation seeds.
 
+Every ordinary dataset contains a canonical protected
+`evaluation_seed_registry_snapshot.json`. Manifest version, registry hash, snapshot artifact, and
+`snapshotted_evaluation_seed_registry_v1` schedule source bind the assignment input into dataset
+logical identity. Validation parses only this dataset snapshot and never reloads the ambient
+repository registry. A present root reconstructs its exact candidate index; an absent root records
+an explicit null-index, non-candidate-derived posture.
+
 ## Identities and private records
 
 `appearance_registry_sha256` binds the complete canonical registry. `appearance_profile_sha256`
 binds the selected resolved definition, including its class, axes, eligibility, palettes, texture,
 material, lighting, assignment, and thresholds. It excludes paths and timestamps.
 
-`appearance_instance_sha256` binds the profile hash, independently derived appearance seeds,
-candidate schedule index, private semantic-to-slot assignment, exact surface/material records,
-texture phases/frequencies/orientations and source-array hashes, and light parameters. It excludes
-geometry, action, camera pose, opaque IDs, segmentation labels, rendered RGB, renderer backend,
-source provenance, timestamps, and paths.
+`appearance_instance_sha256` v2 binds the profile hash, independently derived appearance seeds,
+seed-registry version and hash, schedule source, assignment root seed, candidate index or explicit
+non-candidate posture, private semantic-to-slot assignment, exact surface/material records, texture
+phases/frequencies/orientations and source-array hashes, and light parameters. It excludes geometry,
+action, camera pose, opaque IDs, segmentation labels, rendered RGB, renderer backend, source
+provenance, timestamps, and paths.
 
-The manifest stores registry, selected-profile, and per-episode instance identities. Full profile,
-assignment, texture, material, and light evidence is private instrumentation/control data with
+The manifest stores appearance-registry, evaluation-seed-registry, selected-profile, and
+per-episode instance identities. Both registry snapshots and full profile, assignment, texture,
+material, and light evidence are private instrumentation/control data with
 `asset_origin: repository_generated_procedural` and `freeze_status: candidate_not_frozen`.
 `DatasetLoader.read_appearance_control` requires both `appearance_control` and privileged-generation
-permissions before opening instrumentation. `EcologicalTransitionView` is unchanged.
+permissions before opening instrumentation;
+`DatasetLoader.read_evaluation_seed_registry_snapshot` requires the same permissions before opening
+the snapshot. `EcologicalTransitionView` is unchanged.
 
 Appearance-only changes preserve `scene_content_sha256`, `analytic_transport_sha256`,
-`oriented_boundary_sha256`, `visibility_event_sha256`, `ecological_label_sha256`, action, and public
-occlusion exactly. Within a renderer fingerprint, depth and raw/public segmentation must also remain
-identical. RGB, appearance, complete dataset, and file identities change as appropriate.
+`oriented_boundary_sha256`, `visibility_event_sha256`, action, and public occlusion exactly. Within
+one renderer fingerprint, the candidate's complete `ecological_label_sha256`, depth, and raw/public
+segmentation must equal its matched control. Across renderers, the complete raster label remains a
+reported renderer-local identity. RGB, appearance, complete dataset, and file identities change as
+appropriate.
 
 ## Schema migration
 
@@ -135,9 +152,12 @@ The unreleased `appearance.variant` configuration shape is replaced directly by
 | Wire contract | Slice 5 version |
 | --- | --- |
 | Both configurations | `0.1.0-dev.3` |
-| Dataset and episode manifest | `0.1.0-dev.5` |
+| Dataset and episode manifest | `0.1.0-dev.6` |
 | Public transition | `0.1.0-dev.9` unchanged |
-| Both privileged instrumentation records | `0.1.0-dev.10` |
+| Both privileged instrumentation records | `0.1.0-dev.11` |
+| Appearance instance | `appearance_instance_v2` |
+| Candidate audit and packet | `appearance_candidate_audit_v1` |
+| Packet root domains | `appearance_candidate_root_domains_v1` |
 
 The transition does not gain appearance-control data. Historical Slice 1–4 identities remain valid
 evidence for their exact historical wire contracts; regenerated Slice 5 manifests and RGB identities
@@ -145,9 +165,10 @@ are deliberately not byte compatible with those development schemas.
 
 ## Admission criteria
 
-Hard criteria are defined prospectively in the profile registry. Every matrix cell checks structural
-and ecological invariance, depth/segmentation invariance within the renderer, byte-identical repeat
-generation, controlled-surface exposure, and texture variation where applicable. Non-legacy
+Hard criteria are defined prospectively in the profile registry. Every matrix cell checks portable
+analytic identity equality, renderer-local structural and complete ecological-label equality,
+depth/segmentation invariance within the renderer, byte-identical repeat generation,
+controlled-surface exposure, and texture variation where applicable. Non-legacy
 profiles must change at least 20 percent of controlled pixels in both frames and have normalized
 controlled RGB mean absolute delta of at least 0.025 relative to the declared matched control.
 Visible controlled-surface mean luminance must be within `[0.05, 0.95]`. Textured surfaces with at
@@ -186,7 +207,7 @@ Temporary full datasets are removed; minimum RGB/depth/segmentation metric evide
 The packet contains `candidate_packet.json`, both registry snapshots, `profile_summary.json`,
 `seed_matrix.json`, `negative_evidence.json`, metric evidence, and scene-family representative
 contact sheets. Contact sheets show scene, profile, before/after RGB, opaque controlled segmentation,
-declared status, non-degeneracy metrics, and explicit ecological-identity equality status. They do
+declared status, non-degeneracy metrics, and explicit renderer-local ecological-label equality. They do
 not add semantic surface names or private slot assignments to learner data and do not modify a
 dataset.
 
@@ -196,20 +217,31 @@ retention, report hashes, and packet roots. `run.json` alone holds timestamp, ho
 and duration and is excluded from logical identity.
 
 The packet records `freeze_status: candidate_packet_only_not_frozen` and contains no owner-selected
-split or final seed list. Its shared backend-independent roots separately cover the registry, seed
-registry, procedural definitions/assets/assignments, and ecological invariance. Renderer-specific
-RGB and admission evidence has its own root. One cross-platform RGB or complete-packet hash is not
-claimed. The shared ecological root binds established public scene, transport, boundary, event, and
-label identities plus each cell's within-environment structural-invariance result. Raw compiled
-camera, geometry, and remapping hashes remain private cell evidence and are excluded from that
-cross-platform root.
+split or final seed list. Audit v1 defines three evidence domains:
+
+1. `renderer_local_ecological_label_root_sha256` binds every exact raw complete ecological label.
+   It may differ by renderer and is reported, never backend-dispatched as a portable expectation.
+2. `portable_analytic_identity_root_sha256` binds cell ID, scene content, analytic transport,
+   oriented boundary, visibility event, public occlusion, and executed action identities.
+3. `appearance_invariance_outcome_root_sha256` binds the same portable identities plus each cell's
+   within-renderer structural, ecological-label, depth/segmentation, and determinism booleans. It
+   excludes raw ecological labels, RGB, renderer provenance, paths, timestamps, and private compiled
+   geometry.
+
+Separate shared roots bind the registry, seed registry, procedural source records, and assignment
+rules/instances. Renderer-specific RGB and admission evidence retains its own root. One
+cross-platform RGB or complete-packet hash is not claimed. Raw compiled camera, geometry, and
+remapping hashes remain private cell evidence.
 
 ## Cross-platform evidence and limits
 
 The required evidence environments are local Windows/WGL and exact-head Ubuntu/OSMesa CI. Registry,
-seed, profile, procedural texture, assignment, scene-content, transport, boundary, event, and
-ecological-label identities must match exactly. Each renderer independently must pass RGB,
-exposure, and texture-variation criteria. RGB byte equality across renderers is not required.
+seed, profile, procedural texture, assignment, scene-content, transport, boundary, event, public
+occlusion, executed action, and the portable appearance-invariance outcome must match exactly. Each
+renderer independently requires every candidate cell to match its local control's complete
+ecological label and depth/segmentation while meeting renderer-local RGB, exposure, and texture
+criteria. Complete raster ecological-label roots and RGB bytes are not required to match across
+renderers.
 
 Exact-head cross-platform roots and any renderer-specific rejection evidence belong in the external
 review handoff, PR body, and PR comments for this implementation head. CI success is infrastructure
@@ -218,5 +250,7 @@ evidence only. Broader platforms and future renderer/dependency versions remain 
 Current limitations include only two scene families, fixed procedural families, renderer-local RGB
 criteria, no final split, no final seed freeze, no external asset licence resolution, no component
 topology, no model, and no empirical comparison. Remaining Gate 0B work includes independent review
-of this exact head, owner-authorised benchmark-freeze selection, final seed selection, and all other
-exit-criterion evidence. Gate 0C is not authorised.
+of this exact head and later owner-authorised candidate revision: at this exact candidate version all
+ten profiles have at least one rejected cell, so the admitted-profile set is empty and this packet
+cannot supply a benchmark freeze. Final seed selection and all other exit-criterion evidence also
+remain absent. Gate 0C is not authorised.

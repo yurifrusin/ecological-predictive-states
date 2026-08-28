@@ -305,6 +305,8 @@ def dataset_logical_domain(manifest: DatasetManifest) -> dict[str, Any]:
         "appearance_registry_sha256": manifest.appearance_registry_sha256,
         "appearance_profile_id": manifest.appearance_profile_id,
         "appearance_profile_sha256": manifest.appearance_profile_sha256,
+        "evaluation_seed_registry_sha256": manifest.evaluation_seed_registry_sha256,
+        "appearance_assignment_schedule_source": (manifest.appearance_assignment_schedule_source),
         "episodes": [
             {
                 "episode_id": episode.episode_id,

@@ -6,7 +6,13 @@ Ecological Predictive States is a research repository for testing whether an act
 
 Gate 0A is canonical. Gate 0B single-occluder Slice 1, corridor Slice 2, and analytic-transport Slice 3 are canonical. Gate 0B oriented-boundary and visibility-event Slice 4 is also canonical after exact-head engineering and scientific review. Its exact reviewed implementation head was `24deb074d4ba0cf3e1044e466ecbbb6e0b2a4cc4`, which received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`. Its final boundary method is `analytic_oriented_boundary_ownership_v4`, its final projected attachment method is `projected_compiled_contact_locus_v3`, and its final visibility-event method is `analytic_transport_boundary_causal_events_v2`. The method, review evidence, and bounded limits are documented in [the Slice 4 contract](docs/GATE_0B_SLICE_4_BOUNDARY_EVENTS.md).
 
-Gate 0B Slice 5 procedural appearance candidates are implemented on the current branch pending independent engineering and scientific review and owner approval. The strict ten-profile registry, eight-seed candidate pool, private appearance identities, complete audit command, and admission packet are described in [the Slice 5 candidate contract](docs/GATE_0B_SLICE_5_APPEARANCE_CANDIDATES.md). This is candidate apparatus, not a benchmark freeze.
+Gate 0B Slice 5 procedural appearance candidates and a bounded scientific-review correction are
+implemented on the current branch pending verification, engineering review, scientific re-review,
+and owner approval. The strict ten-profile registry, protected dataset-bound eight-seed candidate
+registry, private appearance identities, versioned portable-versus-renderer-local roots, complete
+audit command, and admission packet are described in
+[the Slice 5 candidate contract](docs/GATE_0B_SLICE_5_APPEARANCE_CANDIDATES.md). This is candidate
+apparatus, not a benchmark freeze; the current admitted-profile set is empty.
 
 **No scientific result exists yet.** Successful generation, validation, tests, and Slice 4 closeout establish infrastructure only. Full Gate 0B completion is not claimed: broader appearance and final-seed decisions remain open, and the remaining Gate 0B exit-criterion evidence has not received owner approval. Gate 0C and all model work remain unauthorised.
 
@@ -81,10 +87,10 @@ Use `uv run ruff format .` to apply formatting intentionally.
 | Sensory | RGB and executed action |
 | Ecological oracle | Opaque surface regions, boundary contacts, projected-image fractions, correspondence, neutral mask changes, typed analytic optical transport, sparse oriented boundary ownership, bounded ecological visibility-event maps/summaries, and typed occlusion availability/relations |
 | Metric baseline | Depth |
-| Instrumentation only | Camera world transforms, raw MuJoCo geom IDs, raw coordinates, sampled corridor geometry, generation records, and permission-gated appearance profile/slot/texture/light control evidence |
+| Instrumentation only | Camera world transforms, raw MuJoCo geom IDs, raw coordinates, sampled corridor geometry, generation records, and permission-gated appearance profile/slot/texture/light and evaluation-seed-registry control evidence |
 | Control metadata | Compound transition and scene-family records; never treated as learner inputs |
 
-`DatasetLoader` requires an explicit `ModalityPermissionSet`. Ecological-only access may read the complete image-plane analytic transport, oriented-boundary, and visibility-event bundles; access without the relevant modality fails before its transition or artifacts are opened. Ecological-only access still fails before depth, camera pose, raw IDs, world-coordinate geometry, attachment evidence, or counterfactual ray evidence is opened.
+`DatasetLoader` requires an explicit `ModalityPermissionSet`. Ecological-only access may read the complete image-plane analytic transport, oriented-boundary, and visibility-event bundles; access without the relevant modality fails before its transition or artifacts are opened. Ecological-only access still fails before depth, camera pose, raw IDs, world-coordinate geometry, attachment evidence, counterfactual ray evidence, appearance instrumentation, or the dataset-bound evaluation-seed-registry snapshot is opened.
 
 ## Repository map
 

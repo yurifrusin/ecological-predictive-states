@@ -63,3 +63,25 @@ These implementation decisions do not make any candidate final, complete Gate 0B
 A pre-correction local Windows/WGL diagnostic retained 86 rejected cells and 74 admitted cells, caused only by the prospectively fixed controlled-surface exposure and textured-surface luminance-variation thresholds. Visual inspection then exposed that the renderer's built-in headlight had not been explicitly disabled, contrary to the declared lighting contract. That packet is superseded and is not qualifying local evidence. The exact profile definitions remain in `appearance_candidate_registry_v0`; no failed profile or seed was removed, relabelled, or tuned after viewing the outputs. The corrected renderer contract explicitly disables ambient, specular, and built-in headlight contributions and requires a fresh complete audit. This is negative apparatus and implementation evidence for later independent review, not a failed EPS hypothesis and not authority to freeze any profile.
 
 Initial exact-head Ubuntu/OSMesa CI at `83a8f8d74ee21b8d13376e8c65e7c4db32b064b4` exposed that the nominally backend-independent ecological root improperly included raw compiled camera, geometry, and remapping hashes. The registry, seed-registry, and procedural roots matched Windows/WGL exactly; only that over-broad root differed. The correction narrows the cross-platform root to established public identities and each cell's structural-invariance result while retaining the raw hashes and their comparisons as private cell-level evidence. No candidate definition, seed, threshold, or result was removed or tuned.
+
+## 2026-08-28 — Renderer-local raster identity versus portable appearance invariance
+
+Scientific review of exact head `e6449cdfcf8a64e5ffd8339a325f21d48a893122` correctly
+identified that the Slice 5 v0 root still conflated a complete renderer-derived ecological-label
+identity with the portable outcome of an appearance intervention. Locked WGL and OSMesa preserve
+each candidate's complete label relative to its matched control within that renderer, while the
+canonical corridor raster labels differ slightly across renderers as already documented by Slice 4.
+The red exact-head CI run `33130502434` is retained as valid negative evidence about the over-broad
+v0 root domain, not as evidence that appearance altered ecological structure.
+
+Audit v1 therefore reports raw complete ecological-label identities through a renderer-local root,
+compares only established analytic/ecological identities across renderers, and gives the boolean
+within-renderer invariance outcomes their own portable root. No expected raw label is dispatched by
+renderer, and the canonical Slice 4 ecological-label definition is unchanged.
+
+The same review found that ordinary validation depended on the ambient repository candidate-seed
+registry even though style assignment used its index. Each dataset now snapshots that protected
+registry and binds its identity and schedule source into the manifest, dataset logical identity, and
+appearance-instance identity. Validation is self-contained. This does not promote candidate seeds to
+final evaluation seeds: the unchanged result remains 44 admitted cells, 116 rejected cells, and no
+profile admitted across every scene/seed cell. No freeze or scientific result follows.

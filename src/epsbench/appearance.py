@@ -35,6 +35,10 @@ EVALUATION_SEED_REGISTRY_VERSION = "evaluation_seed_candidate_registry_v0"
 APPEARANCE_GENERATOR_VERSION = "repository_procedural_texture_v1"
 APPEARANCE_ASSIGNMENT_VERSION = "balanced_cyclic_permutation_v1"
 LEGACY_ASSIGNMENT_VERSION = "fixed_semantic_regression_v1"
+APPEARANCE_INSTANCE_VERSION: Literal["appearance_instance_v2"] = "appearance_instance_v2"
+ASSIGNMENT_SCHEDULE_SOURCE: Literal["snapshotted_evaluation_seed_registry_v1"] = (
+    "snapshotted_evaluation_seed_registry_v1"
+)
 TEXTURE_RESOLUTION = 128
 
 CANONICAL_PROFILE_IDS = (
@@ -298,11 +302,20 @@ class ProceduralTextureRecord(StrictAppearanceModel):
 
 
 class AppearanceInstanceRecord(StrictAppearanceModel):
+    appearance_instance_version: Literal["appearance_instance_v2"]
     registry_version: Literal["appearance_candidate_registry_v0"]
     profile: AppearanceProfile
     appearance_registry_sha256: Sha256
     appearance_profile_sha256: Sha256
     appearance_instance_sha256: Sha256
+    evaluation_seed_registry_version: Literal["evaluation_seed_candidate_registry_v0"]
+    evaluation_seed_registry_sha256: Sha256
+    assignment_schedule_source: Literal["snapshotted_evaluation_seed_registry_v1"]
+    assignment_root_seed: int = Field(ge=0)
+    assignment_schedule_posture: Literal[
+        "candidate_registry_index",
+        "non_candidate_seed_derived",
+    ]
     seeds: AppearanceSeeds
     style_assignment: dict[str, str]
     textures: tuple[ProceduralTextureRecord, ...]
@@ -311,6 +324,13 @@ class AppearanceInstanceRecord(StrictAppearanceModel):
 
     @model_validator(mode="after")
     def assignment_and_textures_are_exact(self) -> AppearanceInstanceRecord:
+        expected_posture = (
+            "candidate_registry_index"
+            if self.seeds.candidate_schedule_index is not None
+            else "non_candidate_seed_derived"
+        )
+        if self.assignment_schedule_posture != expected_posture:
+            raise ValueError("appearance assignment schedule posture is inconsistent")
         if set(self.style_assignment) != {
             texture.semantic_surface_name for texture in self.textures
         }:
@@ -477,7 +497,13 @@ def _png_bytes(array: TextureArray) -> bytes:
 
 def _instance_domain(record: AppearanceInstanceRecord) -> dict[str, Any]:
     return {
+        "appearance_instance_version": record.appearance_instance_version,
         "appearance_profile_sha256": record.appearance_profile_sha256,
+        "evaluation_seed_registry_version": record.evaluation_seed_registry_version,
+        "evaluation_seed_registry_sha256": record.evaluation_seed_registry_sha256,
+        "assignment_schedule_source": record.assignment_schedule_source,
+        "assignment_root_seed": record.assignment_root_seed,
+        "assignment_schedule_posture": record.assignment_schedule_posture,
         "appearance_base_seed": record.seeds.appearance_base_seed,
         "style_assignment_seed": record.seeds.style_assignment_seed,
         "texture_phase_seed": record.seeds.texture_phase_seed,
@@ -505,13 +531,11 @@ def resolve_appearance(
     surface_names: tuple[str, ...],
     episode_seed: int,
     root_seed: int,
-    seed_registry: EvaluationSeedRegistry | None = None,
+    seed_registry: EvaluationSeedRegistry,
 ) -> AppearanceRenderPlan:
     profile = profile_by_id(registry, profile_id)
     seeds = appearance_seed_namespaces(episode_seed)
-    schedule_index = (
-        candidate_schedule_index(root_seed, seed_registry) if seed_registry is not None else None
-    )
+    schedule_index = candidate_schedule_index(root_seed, seed_registry)
     seeds = seeds.model_copy(update={"candidate_schedule_index": schedule_index})
     assignment = style_assignment(surface_names, profile.style_assignment_rule, seeds)
     slots = (
@@ -568,11 +592,21 @@ def resolve_appearance(
             )
         )
     provisional = AppearanceInstanceRecord(
+        appearance_instance_version=APPEARANCE_INSTANCE_VERSION,
         registry_version=registry.registry_version,
         profile=profile,
         appearance_registry_sha256=appearance_registry_hash(registry),
         appearance_profile_sha256=appearance_profile_hash(profile),
         appearance_instance_sha256="0" * 64,
+        evaluation_seed_registry_version=seed_registry.registry_version,
+        evaluation_seed_registry_sha256=seed_registry_hash(seed_registry),
+        assignment_schedule_source=ASSIGNMENT_SCHEDULE_SOURCE,
+        assignment_root_seed=root_seed,
+        assignment_schedule_posture=(
+            "candidate_registry_index"
+            if schedule_index is not None
+            else "non_candidate_seed_derived"
+        ),
         seeds=seeds,
         style_assignment=assignment,
         textures=tuple(texture_records),
@@ -605,7 +639,7 @@ def validate_appearance_instance(
     surface_names: tuple[str, ...],
     episode_seed: int,
     root_seed: int,
-    seed_registry: EvaluationSeedRegistry | None = None,
+    seed_registry: EvaluationSeedRegistry,
 ) -> AppearanceRenderPlan:
     expected = resolve_appearance(
         registry,

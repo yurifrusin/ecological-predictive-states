@@ -9,7 +9,7 @@ import numpy as np
 import numpy.typing as npt
 from PIL import Image
 
-from epsbench.appearance import AppearanceInstanceRecord
+from epsbench.appearance import AppearanceInstanceRecord, EvaluationSeedRegistry
 from epsbench.data.paths import resolve_dataset_manifest
 from epsbench.schema import (
     Action,
@@ -297,6 +297,15 @@ class DatasetLoader:
 
         self._require(Modality.APPEARANCE_CONTROL, Modality.PRIVILEGED_GENERATION_RECORDS)
         return self._instrumentation(episode_index).appearance.model_copy(deep=True)
+
+    def read_evaluation_seed_registry_snapshot(self) -> EvaluationSeedRegistry:
+        """Return the dataset-bound assignment registry only with private permissions."""
+
+        self._require(Modality.APPEARANCE_CONTROL, Modality.PRIVILEGED_GENERATION_RECORDS)
+        artifact = self._manifest.evaluation_seed_registry_snapshot
+        return EvaluationSeedRegistry.model_validate_json(
+            self._path(artifact.path).read_text(encoding="utf-8")
+        )
 
     def read_raw_mujoco_geom_ids(self, episode_index: int) -> dict[str, int]:
         self._require(Modality.MUJOCO_GEOM_IDS, Modality.PRIVILEGED_GENERATION_RECORDS)

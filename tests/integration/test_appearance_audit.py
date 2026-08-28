@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 
 import epsbench.audit as audit
@@ -129,49 +130,232 @@ def test_missing_matrix_cell_and_altered_admission_are_rejected(
         audit.validate_appearance_audit(synthetic_packet)
 
 
-def test_shared_ecological_root_excludes_private_compiled_metric_hashes() -> None:
-    registry = load_appearance_registry(Path("configs/appearance_candidates_v0.yaml"))
-    seeds = load_evaluation_seed_registry(Path("configs/evaluation_seed_candidates_v0.yaml"))
-    cell: dict[str, Any] = {
+def _successful_cell() -> dict[str, Any]:
+    return {
         "cell_id": "single_occluder--legacy_solid_base_v1--seed-0",
         "generation_status": "success",
         "appearance_profile_sha256": "profile",
         "appearance_instance_sha256": "instance",
-        "appearance_instance": {"style_assignment": {}, "textures": []},
+        "appearance_instance": {
+            "seeds": {"candidate_schedule_index": 0},
+            "assignment_schedule_posture": "candidate_registry_index",
+            "style_assignment": {},
+            "textures": [],
+        },
+        "evaluation_seed_registry_sha256": "seed-registry",
+        "appearance_assignment_schedule_source": ("snapshotted_evaluation_seed_registry_v1"),
         "scene_content_sha256": "scene",
         "analytic_transport_sha256": "transport",
         "oriented_boundary_sha256": "boundary",
         "visibility_event_sha256": "event",
-        "ecological_label_sha256": "label",
+        "ecological_label_sha256": "label-windows",
         "occlusion_sha256": "occlusion",
         "action_sha256": "action",
         "camera_trajectory_sha256": "camera-windows",
         "geometry_sha256": "geometry-windows",
         "opaque_remapping_sha256": "remapping-windows",
-        "admission_checks": {"structural_invariance": True},
-        "rgb_logical_sha256": "rgb",
+        "admission_checks": {
+            "structural_invariance": True,
+            "portable_analytic_identity_equality": True,
+            "ecological_label_equality": True,
+            "depth_segmentation_invariance": True,
+            "determinism": True,
+        },
+        "rgb_logical_sha256": "rgb-windows",
+        "renderer_provenance": {"backend": "wgl"},
         "frame_metrics": {},
         "determinism_pass": True,
         "admission_status": "admitted",
     }
-    windows_root = audit._roots(registry, seeds, [cell])["ecological_invariance_root_sha256"]
+
+
+def test_renderer_local_labels_can_differ_while_portable_outcome_matches() -> None:
+    registry = load_appearance_registry(Path("configs/appearance_candidates_v0.yaml"))
+    seeds = load_evaluation_seed_registry(Path("configs/evaluation_seed_candidates_v0.yaml"))
+    cell = _successful_cell()
+    windows = audit._roots(registry, seeds, [cell])
     ubuntu = deepcopy(cell)
     ubuntu.update(
         {
+            "ecological_label_sha256": "label-ubuntu",
             "camera_trajectory_sha256": "camera-ubuntu",
             "geometry_sha256": "geometry-ubuntu",
             "opaque_remapping_sha256": "remapping-ubuntu",
+            "rgb_logical_sha256": "rgb-ubuntu",
+            "renderer_provenance": {"backend": "osmesa"},
         }
     )
     assert audit._structural_domain(ubuntu) != audit._structural_domain(cell)
     assert ubuntu["admission_checks"]["structural_invariance"] is True
+    linux = audit._roots(registry, seeds, [ubuntu])
     assert (
-        audit._roots(registry, seeds, [ubuntu])["ecological_invariance_root_sha256"] == windows_root
+        linux["appearance_invariance_outcome_root_sha256"]
+        == windows["appearance_invariance_outcome_root_sha256"]
+    )
+    assert (
+        linux["portable_analytic_identity_root_sha256"]
+        == windows["portable_analytic_identity_root_sha256"]
+    )
+    assert (
+        linux["renderer_local_ecological_label_root_sha256"]
+        != windows["renderer_local_ecological_label_root_sha256"]
     )
 
-    changed_identity = deepcopy(cell)
-    changed_identity["visibility_event_sha256"] = "changed-event"
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "scene_content_sha256",
+        "analytic_transport_sha256",
+        "oriented_boundary_sha256",
+        "visibility_event_sha256",
+        "occlusion_sha256",
+        "action_sha256",
+    ],
+)
+def test_each_portable_identity_changes_both_portable_roots(field: str) -> None:
+    registry = load_appearance_registry(Path("configs/appearance_candidates_v0.yaml"))
+    seeds = load_evaluation_seed_registry(Path("configs/evaluation_seed_candidates_v0.yaml"))
+    cell = _successful_cell()
+    original = audit._roots(registry, seeds, [cell])
+    changed = deepcopy(cell)
+    changed[field] = f"changed-{field}"
+    altered = audit._roots(registry, seeds, [changed])
+    for root_name in (
+        "portable_analytic_identity_root_sha256",
+        "appearance_invariance_outcome_root_sha256",
+    ):
+        assert altered[root_name] != original[root_name]
+
+
+def test_raw_label_changes_only_renderer_local_label_root_among_non_rgb_domains() -> None:
+    registry = load_appearance_registry(Path("configs/appearance_candidates_v0.yaml"))
+    seeds = load_evaluation_seed_registry(Path("configs/evaluation_seed_candidates_v0.yaml"))
+    cell = _successful_cell()
+    original = audit._roots(registry, seeds, [cell])
+    changed = deepcopy(cell)
+    changed["ecological_label_sha256"] = "renderer-local-alternate"
+    altered = audit._roots(registry, seeds, [changed])
     assert (
-        audit._roots(registry, seeds, [changed_identity])["ecological_invariance_root_sha256"]
-        != windows_root
+        altered["renderer_local_ecological_label_root_sha256"]
+        != original["renderer_local_ecological_label_root_sha256"]
     )
+    for root_name in (
+        "appearance_registry_sha256",
+        "seed_registry_sha256",
+        "procedural_asset_root_sha256",
+        "appearance_assignment_root_sha256",
+        "portable_analytic_identity_root_sha256",
+        "appearance_invariance_outcome_root_sha256",
+        "renderer_specific_audit_root_sha256",
+    ):
+        assert altered[root_name] == original[root_name]
+
+
+def test_rgb_and_renderer_provenance_never_enter_portable_roots() -> None:
+    registry = load_appearance_registry(Path("configs/appearance_candidates_v0.yaml"))
+    seeds = load_evaluation_seed_registry(Path("configs/evaluation_seed_candidates_v0.yaml"))
+    cell = _successful_cell()
+    original = audit._roots(registry, seeds, [cell])
+    changed = deepcopy(cell)
+    changed["rgb_logical_sha256"] = "different-rgb"
+    changed["renderer_provenance"] = {"backend": "different-renderer"}
+    altered = audit._roots(registry, seeds, [changed])
+    assert (
+        altered["portable_analytic_identity_root_sha256"]
+        == original["portable_analytic_identity_root_sha256"]
+    )
+    assert (
+        altered["appearance_invariance_outcome_root_sha256"]
+        == original["appearance_invariance_outcome_root_sha256"]
+    )
+
+
+def test_ecological_label_inequality_changes_outcome_and_rejects_cell(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry = load_appearance_registry(Path("configs/appearance_candidates_v0.yaml"))
+    seeds = load_evaluation_seed_registry(Path("configs/evaluation_seed_candidates_v0.yaml"))
+    profile = next(
+        item for item in registry.profiles if item.profile_id == "balanced_solid_palette_v1"
+    )
+    cell = _successful_cell()
+    control = deepcopy(cell)
+    cell["ecological_label_sha256"] = "candidate-label"
+    control["ecological_label_sha256"] = "control-label"
+    cell["semantic_surface_labels"] = {}
+    cell["source_texture_diagnostics"] = []
+    control["semantic_surface_labels"] = {}
+    control["source_texture_diagnostics"] = []
+    monkeypatch.setattr(
+        audit,
+        "_load_frame",
+        lambda *_: (
+            np.zeros((1, 1, 3), dtype=np.uint8),
+            np.zeros((1, 1), dtype=np.float32),
+            np.zeros((1, 1), dtype=np.int32),
+        ),
+    )
+    monkeypatch.setattr(
+        audit,
+        "_frame_metrics",
+        lambda *_: {
+            "material_change_pass": True,
+            "controlled_surface_exposure_pass": True,
+            "textured_surface_variation_pass": True,
+            "surface_diagnostics": [],
+        },
+    )
+    original = audit._roots(registry, seeds, [deepcopy(control)])
+    audit._evaluate_cell(tmp_path, cell, control, profile)
+    assert cell["admission_checks"]["ecological_label_equality"] is False
+    assert cell["admission_status"] == "rejected"
+    assert "ecological_label_equality" in cell["rejection_reasons"]
+    assert (
+        audit._roots(registry, seeds, [cell])["appearance_invariance_outcome_root_sha256"]
+        != original["appearance_invariance_outcome_root_sha256"]
+    )
+
+
+@pytest.mark.parametrize(
+    "root_name",
+    [
+        "appearance_invariance_outcome_root_sha256",
+        "renderer_local_ecological_label_root_sha256",
+    ],
+)
+def test_fully_rehashed_root_corruption_is_rejected(
+    synthetic_packet: Path,
+    root_name: str,
+) -> None:
+    packet_path = synthetic_packet / "candidate_packet.json"
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    packet["roots"][root_name] = "0" * 64
+    logical_domain = {
+        key: packet[key]
+        for key in (
+            "schema_version",
+            "root_schema_version",
+            "freeze_status",
+            "source_provenance",
+            "governing_document_hashes",
+            "roots",
+            "report_file_sha256",
+        )
+    }
+    packet["packet_logical_root_sha256"] = audit._hash_json(logical_domain)
+    write_canonical_json(packet_path, packet)
+    with pytest.raises(audit.AppearanceAuditError, match="root mismatch"):
+        audit.validate_appearance_audit(synthetic_packet)
+
+
+def test_packet_seed_registry_snapshot_is_independently_validated(
+    synthetic_packet: Path,
+) -> None:
+    snapshot = synthetic_packet / "seed_registry_snapshot.json"
+    payload = json.loads(snapshot.read_text(encoding="utf-8"))
+    payload["candidate_episode_seeds"] = list(reversed(payload["candidate_episode_seeds"]))
+    write_canonical_json(snapshot, payload)
+    with pytest.raises(audit.AppearanceAuditError, match="registry snapshot"):
+        audit.validate_appearance_audit(synthetic_packet)

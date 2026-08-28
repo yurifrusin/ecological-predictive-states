@@ -179,18 +179,52 @@ The current Slice 5 schema matrix is:
 | Contract | Pending Slice 5 version |
 | --- | --- |
 | Single-occluder and corridor configuration | `0.1.0-dev.3` |
-| Dataset and episode manifest | `0.1.0-dev.5` |
+| Dataset and episode manifest | `0.1.0-dev.6` |
 | Transition | `0.1.0-dev.9` unchanged |
-| Privileged instrumentation | `0.1.0-dev.10` |
+| Privileged instrumentation | `0.1.0-dev.11` |
 | Appearance registry | `appearance_candidate_registry_v0` |
 | Procedural texture generator | `repository_procedural_texture_v1` |
-| Candidate audit packet | `appearance_candidate_audit_v0` |
+| Appearance instance | `appearance_instance_v2` |
+| Candidate audit packet | `appearance_candidate_audit_v1` |
+| Candidate root domains | `appearance_candidate_root_domains_v1` |
 
-The audit runs every profile over all eight candidate roots and both scene families through ordinary generation and whole-dataset validation, repeats each cell for same-renderer determinism, retains rejected cells, and publishes a deterministic candidate packet plus separate volatile run metadata. Shared roots cover registry, seed, procedural asset/assignment, and ecological-invariance domains; renderer-local RGB diagnostics have a separate root. Representative contact sheets remain outside datasets. See `docs/GATE_0B_SLICE_5_APPEARANCE_CANDIDATES.md` for the full contract and limitations.
+Every generated dataset snapshots the protected evaluation-seed candidate registry. Its version,
+hash, artifact, and assignment-schedule source enter dataset logical identity; appearance-instance
+v2 additionally binds the registry identity, root seed, candidate index or explicit non-candidate
+posture, and semantic-to-style assignment. Whole-dataset validation uses only the dataset snapshot,
+never an ambient repository file. The snapshot and appearance instrumentation require typed
+`appearance_control` plus privileged-generation permission before opening.
+
+The audit runs every profile over all eight candidate roots and both scene families through ordinary
+generation and whole-dataset validation, repeats each cell for same-renderer determinism, retains
+rejected cells, and publishes a deterministic candidate packet plus separate volatile run metadata.
+Audit v1 separates portable registry/seed/procedural/assignment and analytic identities, a portable
+within-renderer appearance-invariance outcome root, a renderer-local complete ecological-label root,
+and renderer-local RGB diagnostics. Appearance invariance is tested against the matched control
+inside each renderer; complete raster-derived ecological-label roots are reported rather than
+compared across WGL and OSMesa. Representative contact sheets remain outside datasets. See
+`docs/GATE_0B_SLICE_5_APPEARANCE_CANDIDATES.md` for the full contract and limitations.
+
+The scientifically reviewed v0 head `e6449cdfcf8a64e5ffd8339a325f21d48a893122`
+remains historical negative apparatus evidence. Its clean Windows/WGL packet/root values were packet
+`f9ac102adac3f5e3b2434ddbc6bcb7504eb0800ac711bda853235364d01f218b`, renderer
+`51c40d2adf569900fa02817bcc8abffc4aa89f67d31851aa40067d8272586b7e`, and nominal ecological
+`556d2c1761823d607188b36401569c584f8f1d1dc1387d1732987bb82bd80ef8`. Exact-head Ubuntu/OSMesa
+run `33130502434` produced packet
+`cd99a9397e8f40b2d95007b8a6c1064d0ee472a169d86c0f29afb6779ae16e84`, renderer
+`ccc0c99a2fe6795119c573e14cbdb49d7655d3b7bd547b61bc3cd00d0854d05b`, and nominal ecological
+`e06d0139c59da07bb229bc26cb783642403e9ec43357bf329e33194792a63a22` before correctly failing the
+over-broad cross-platform assertion. Audit v1 versions the corrected root semantics rather than
+silently redefining v0.
 
 This development-schema migration is not byte compatible with Slice 4 manifests or instrumentation. It does not modify the public transition wire contract or the established Slice 1–4 scene, transport, boundary, visibility-event, or ecological-label identity domains. Historical identities remain evidence for their exact historical heads only.
 
-Candidate admission is neither scientific evidence nor a benchmark freeze. Final development/OOD role selection, final evaluation-seed selection, cross-platform exact-head review convergence, owner approval, and remaining Gate 0B exit criteria are still absent. Gate 0C and model work remain unauthorised.
+Candidate admission is neither scientific evidence nor a benchmark freeze. The exact candidate
+result remains 44 admitted cells and 116 rejected cells, with every profile rejected at profile
+level. `freeze_eligible` means eligible to be audited prospectively, not admitted or freeze-ready;
+the admitted-profile set is empty. Final development/OOD role selection, final evaluation-seed
+selection, cross-platform exact-head review convergence, owner approval, and remaining Gate 0B exit
+criteria are still absent. Gate 0C and model work remain unauthorised.
 
 ## Remaining Gate 0B work
 

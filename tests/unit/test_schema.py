@@ -27,7 +27,7 @@ def test_transition_and_manifest_round_trip(smoke_dataset: Path) -> None:
     transition_bytes = transition_path.read_bytes().rstrip(b"\n")
     transition = TransitionRecord.model_validate_json(transition_bytes)
     assert canonical_json_bytes(transition) == transition_bytes
-    assert manifest.schema_version == "0.1.0-dev.5"
+    assert manifest.schema_version == "0.1.0-dev.6"
     assert transition.schema_version == "0.1.0-dev.9"
 
 
@@ -44,8 +44,8 @@ def test_schema_version_matrix_advances_only_changed_wire_contracts(
         instrumentation = parse_privileged_instrumentation_json(
             (root / manifest.episodes[0].privileged_instrumentation.path).read_bytes()
         )
-        assert manifest.schema_version == "0.1.0-dev.5"
-        assert instrumentation.schema_version == "0.1.0-dev.10"
+        assert manifest.schema_version == "0.1.0-dev.6"
+        assert instrumentation.schema_version == "0.1.0-dev.11"
 
 
 def test_historical_transition_version_is_not_byte_compatible(smoke_dataset: Path) -> None:

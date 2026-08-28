@@ -70,11 +70,16 @@ jobs:
           roots = packet["roots"]
           cells = json.loads((output / "seed_matrix.json").read_text())["cells"]
           successful_cells = [cell for cell in cells if cell["generation_status"] == "success"]
+          assert packet["schema_version"] == "appearance_candidate_audit_v1"
+          assert packet["root_schema_version"] == "appearance_candidate_root_domains_v1"
+          assert len(successful_cells) == 10 * 8 * 2, "every matrix cell must generate and validate"
           for field in (
               "scene_content_sha256",
               "analytic_transport_sha256",
               "oriented_boundary_sha256",
               "visibility_event_sha256",
+              "occlusion_sha256",
+              "action_sha256",
               "ecological_label_sha256",
               "camera_trajectory_sha256",
               "geometry_sha256",
@@ -88,9 +93,26 @@ jobs:
           expected = {
               "appearance_registry_sha256": "fb4311af79e5ccabe2ea186789b4525b6b8c702a73ba2ee46ef1fbc07bceabfe",
               "seed_registry_sha256": "6c6816ae1f6657a710631f08a435cca4c623e81efc71ac4e6330a44338313482",
-              "procedural_asset_root_sha256": "ac21f433bb6720e466d5e38953f5e6f07ff83acfed8501aec9690c3d229b0f8b",
-              "ecological_invariance_root_sha256": "556d2c1761823d607188b36401569c584f8f1d1dc1387d1732987bb82bd80ef8",
+              "procedural_asset_root_sha256": "8eaa6a7cfe832e0a180c043dd71ab9371965247d0bd9b33fb08652e1ef8dab52",
+              "appearance_assignment_root_sha256": "cc8ef00b3f36d85ac9b3a260c6b7e7063a5ff8792103daa7176363b400fca1da",
+              "portable_analytic_identity_root_sha256": "2cb8b42739418faae9666dcb518de3e6655b9ee7f42c63c3acd337debcd224d5",
+              "appearance_invariance_outcome_root_sha256": "2bc8edfe05b0401c48a8bc3d897e965c1925ec53dbdf4273d0ee60cc034b3cde",
           }
           assert all(roots[key] == value for key, value in expected.items()), (roots, expected)
-          print("Exact cross-platform shared roots:", expected)
+          required_local_checks = (
+              "structural_invariance",
+              "portable_analytic_identity_equality",
+              "ecological_label_equality",
+              "depth_segmentation_invariance",
+              "determinism",
+          )
+          assert all(
+              all(cell["admission_checks"][check] for check in required_local_checks)
+              for cell in successful_cells
+          ), "a renderer-local appearance intervention changed matched-control structure"
+          print("Exact cross-platform portable roots:", expected)
+          print(
+              "Renderer-local ecological-label root (reported, not compared):",
+              roots["renderer_local_ecological_label_root_sha256"],
+          )
           PY

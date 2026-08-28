@@ -1196,7 +1196,7 @@ class BoundaryVisibilityDiagnostics(StrictModel):
 
 
 class SingleOccluderInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.10"]
+    schema_version: Literal["0.1.0-dev.11"]
     scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance: AppearanceInstanceRecord
@@ -1247,7 +1247,7 @@ class SingleOccluderInstrumentation(StrictModel):
 
 
 class CorridorInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.10"]
+    schema_version: Literal["0.1.0-dev.11"]
     scene_family: Literal[SceneFamily.CORRIDOR]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance: AppearanceInstanceRecord
@@ -1402,7 +1402,7 @@ class RendererProvenance(StrictModel):
 
 
 class DatasetManifest(StrictModel):
-    schema_version: Literal["0.1.0-dev.5"]
+    schema_version: Literal["0.1.0-dev.6"]
     generator_version: Literal["0.1.0"]
     scene_family: SceneFamily
     root_seed: int = Field(ge=0)
@@ -1411,6 +1411,9 @@ class DatasetManifest(StrictModel):
     appearance_profile_id: str = Field(pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*_v[0-9]+$")
     appearance_profile_sha256: Sha256
     appearance_registry_snapshot: ArtifactRecord
+    evaluation_seed_registry_sha256: Sha256
+    evaluation_seed_registry_snapshot: ArtifactRecord
+    appearance_assignment_schedule_source: Literal["snapshotted_evaluation_seed_registry_v1"]
     resolved_config: ArtifactRecord
     renderer_provenance: RendererProvenance
     renderer_execution_provenance_sha256: Sha256
@@ -1426,6 +1429,10 @@ class DatasetManifest(StrictModel):
             raise ValueError("resolved configuration must be privileged generation data")
         if self.appearance_registry_snapshot.modality != Modality.APPEARANCE_CONTROL:
             raise ValueError("appearance registry snapshot must be protected appearance control")
+        if self.evaluation_seed_registry_snapshot.modality != Modality.APPEARANCE_CONTROL:
+            raise ValueError(
+                "evaluation seed registry snapshot must be protected appearance control"
+            )
         ids = [episode.episode_id for episode in self.episodes]
         indices = [episode.episode_index for episode in self.episodes]
         if len(ids) != len(set(ids)) or len(indices) != len(set(indices)):

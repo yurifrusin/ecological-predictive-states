@@ -76,6 +76,7 @@ def _commit_fully_rehashed_appearance(
         "profile_hash",
         "texture_hash",
         "assignment",
+        "seed_registry_binding",
         "light_record",
         "instance_identity",
     ],
@@ -115,6 +116,8 @@ def test_fully_rehashed_fabricated_appearance_records_are_rejected(
         by_name = {item["semantic_surface_name"]: item for item in appearance["textures"]}
         by_name[names[0]]["style_slot_id"] = second_slot
         by_name[names[1]]["style_slot_id"] = first_slot
+    elif corruption == "seed_registry_binding":
+        appearance["evaluation_seed_registry_sha256"] = "0" * 64
     if corruption != "instance_identity":
         appearance["appearance_instance_sha256"] = "0" * 64
         record = AppearanceInstanceRecord.model_validate_json(canonical_json_bytes(appearance))

@@ -106,6 +106,28 @@ def test_appearance_control_requires_both_private_permissions(smoke_dataset: Pat
     assert record.freeze_status == "candidate_not_frozen"
 
 
+def test_seed_registry_snapshot_denial_happens_before_artifact_is_opened(
+    smoke_dataset: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loader = DatasetLoader(smoke_dataset, ModalityPermissionSet.ecological_only())
+
+    def opened(_: str) -> Path:
+        raise AssertionError("protected seed-registry snapshot was opened")
+
+    monkeypatch.setattr(loader, "_path", opened)
+    with pytest.raises(PermissionDeniedError, match="appearance_control"):
+        loader.read_evaluation_seed_registry_snapshot()
+
+
+def test_seed_registry_snapshot_requires_both_private_permissions(
+    smoke_dataset: Path,
+) -> None:
+    loader = DatasetLoader(smoke_dataset, ModalityPermissionSet.all_modalities())
+    snapshot = loader.read_evaluation_seed_registry_snapshot()
+    assert snapshot.registry_version == "evaluation_seed_candidate_registry_v0"
+
+
 def test_every_profile_generates_validates_and_preserves_matched_control_structure(
     appearance_profile_matrix: dict[
         tuple[str, str], tuple[Path, DatasetManifest, TransitionRecord]

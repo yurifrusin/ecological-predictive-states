@@ -127,7 +127,13 @@ def appearance_audit_command(
         f"registry={roots['appearance_registry_sha256']} "
         f"seeds={roots['seed_registry_sha256']} "
         f"procedural={roots['procedural_asset_root_sha256']} "
-        f"ecological={roots['ecological_invariance_root_sha256']}"
+        f"assignment={roots['appearance_assignment_root_sha256']} "
+        f"analytic={roots['portable_analytic_identity_root_sha256']} "
+        f"outcome={roots['appearance_invariance_outcome_root_sha256']}"
+    )
+    typer.echo(
+        "Renderer-local ecological-label root: "
+        f"{roots['renderer_local_ecological_label_root_sha256']}"
     )
     typer.echo(f"Renderer-specific audit root: {roots['renderer_specific_audit_root_sha256']}")
     typer.echo(f"Candidate packet: {output}")

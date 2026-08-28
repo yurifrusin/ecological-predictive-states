@@ -53,7 +53,8 @@ from epsbench.utils.canonical import (
 )
 from epsbench.utils.seeding import derive_seed
 
-AUDIT_SCHEMA_VERSION = "appearance_candidate_audit_v0"
+AUDIT_SCHEMA_VERSION = "appearance_candidate_audit_v1"
+ROOT_SCHEMA_VERSION = "appearance_candidate_root_domains_v1"
 PACKET_FREEZE_STATUS = "candidate_packet_only_not_frozen"
 SCENE_FAMILIES = ("single_occluder", "corridor")
 GOVERNING_DOCUMENTS = (
@@ -338,7 +339,6 @@ def _structural_domain(cell: dict[str, Any]) -> dict[str, Any]:
             "analytic_transport_sha256",
             "oriented_boundary_sha256",
             "visibility_event_sha256",
-            "ecological_label_sha256",
             "occlusion_sha256",
             "action_sha256",
             "camera_trajectory_sha256",
@@ -348,7 +348,7 @@ def _structural_domain(cell: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _ecological_identity_domain(cell: dict[str, Any]) -> dict[str, Any]:
+def _portable_analytic_identity_domain(cell: dict[str, Any]) -> dict[str, Any]:
     return {
         key: cell[key]
         for key in (
@@ -356,7 +356,8 @@ def _ecological_identity_domain(cell: dict[str, Any]) -> dict[str, Any]:
             "analytic_transport_sha256",
             "oriented_boundary_sha256",
             "visibility_event_sha256",
-            "ecological_label_sha256",
+            "occlusion_sha256",
+            "action_sha256",
         )
     }
 
@@ -372,9 +373,10 @@ def _evaluate_cell(
         cell["rejection_reasons"] = ["generation_or_validation_failed"]
         return
     structural_pass = _structural_domain(cell) == _structural_domain(control)
-    ecological_identity_pass = _ecological_identity_domain(cell) == _ecological_identity_domain(
-        control
-    )
+    portable_analytic_pass = _portable_analytic_identity_domain(
+        cell
+    ) == _portable_analytic_identity_domain(control)
+    ecological_label_pass = cell["ecological_label_sha256"] == control["ecological_label_sha256"]
     depth_segmentation_pass = True
     frames: dict[str, Any] = {}
     for frame_name in ("before", "after"):
@@ -407,7 +409,8 @@ def _evaluate_cell(
     texture_pass = all(frame["textured_surface_variation_pass"] for frame in frames.values())
     checks = {
         "structural_invariance": structural_pass,
-        "ecological_identity_equality": ecological_identity_pass,
+        "portable_analytic_identity_equality": portable_analytic_pass,
+        "ecological_label_equality": ecological_label_pass,
         "depth_segmentation_invariance": depth_segmentation_pass,
         "determinism": bool(cell["determinism_pass"]),
         "material_rgb_change": material_pass if material_required else True,
@@ -533,6 +536,10 @@ def _dataset_cell(
                 "appearance_profile_sha256": manifest.appearance_profile_sha256,
                 "appearance_instance_sha256": episode.appearance_instance_sha256,
                 "appearance_instance": instrumentation.appearance.model_dump(mode="json"),
+                "evaluation_seed_registry_sha256": (manifest.evaluation_seed_registry_sha256),
+                "appearance_assignment_schedule_source": (
+                    manifest.appearance_assignment_schedule_source
+                ),
                 "renderer_provenance": manifest.renderer_provenance.model_dump(mode="json"),
                 "rgb_logical_sha256": list(episode.rgb_logical_sha256),
                 "scene_content_sha256": episode.scene_content_sha256,
@@ -621,11 +628,11 @@ def _contact_sheets(packet_root: Path, cells: list[dict[str, Any]]) -> None:
                 fill="black",
             )
             ecological_equal = cell.get("admission_checks", {}).get(
-                "ecological_identity_equality", False
+                "ecological_label_equality", False
             )
             draw.text(
                 (2, y + 34),
-                f"ecological identities equal={str(bool(ecological_equal)).lower()}",
+                f"renderer-local ecological label equal={str(bool(ecological_equal)).lower()}",
                 fill="black",
             )
         sheet.save(output / f"{scene}_representative_seed_0.png", format="PNG")
@@ -641,21 +648,47 @@ def _roots(
         {
             "cell_id": cell["cell_id"],
             "profile_hash": cell["appearance_profile_sha256"],
-            "instance_hash": cell["appearance_instance_sha256"],
-            "assignment": cell["appearance_instance"]["style_assignment"],
             "textures": cell["appearance_instance"]["textures"],
         }
         for cell in successful
     ]
-    ecological = [
+    assignment = [
         {
             "cell_id": cell["cell_id"],
-            "scene_content_sha256": cell["scene_content_sha256"],
-            "analytic_transport_sha256": cell["analytic_transport_sha256"],
-            "oriented_boundary_sha256": cell["oriented_boundary_sha256"],
-            "visibility_event_sha256": cell["visibility_event_sha256"],
-            "ecological_label_sha256": cell["ecological_label_sha256"],
+            "appearance_instance_sha256": cell["appearance_instance_sha256"],
+            "evaluation_seed_registry_sha256": cell["evaluation_seed_registry_sha256"],
+            "appearance_assignment_schedule_source": cell["appearance_assignment_schedule_source"],
+            "candidate_schedule_index": cell["appearance_instance"]["seeds"][
+                "candidate_schedule_index"
+            ],
+            "assignment_schedule_posture": cell["appearance_instance"][
+                "assignment_schedule_posture"
+            ],
+            "style_assignment": cell["appearance_instance"]["style_assignment"],
+        }
+        for cell in successful
+    ]
+    portable_analytic = [
+        {"cell_id": cell["cell_id"], **_portable_analytic_identity_domain(cell)}
+        for cell in successful
+    ]
+    outcomes = [
+        {
+            "cell_id": cell["cell_id"],
+            **_portable_analytic_identity_domain(cell),
             "structural_invariance": cell["admission_checks"]["structural_invariance"],
+            "ecological_label_equality": cell["admission_checks"]["ecological_label_equality"],
+            "depth_segmentation_invariance": cell["admission_checks"][
+                "depth_segmentation_invariance"
+            ],
+            "determinism": cell["admission_checks"]["determinism"],
+        }
+        for cell in successful
+    ]
+    renderer_local_labels = [
+        {
+            "cell_id": cell["cell_id"],
+            "ecological_label_sha256": cell["ecological_label_sha256"],
         }
         for cell in successful
     ]
@@ -673,7 +706,10 @@ def _roots(
         "appearance_registry_sha256": appearance_registry_hash(registry),
         "seed_registry_sha256": seed_registry_hash(seeds),
         "procedural_asset_root_sha256": _hash_json(procedural),
-        "ecological_invariance_root_sha256": _hash_json(ecological),
+        "appearance_assignment_root_sha256": _hash_json(assignment),
+        "portable_analytic_identity_root_sha256": _hash_json(portable_analytic),
+        "appearance_invariance_outcome_root_sha256": _hash_json(outcomes),
+        "renderer_local_ecological_label_root_sha256": _hash_json(renderer_local_labels),
         "renderer_specific_audit_root_sha256": _hash_json(renderer),
     }
 
@@ -735,6 +771,7 @@ def _write_packet_reports(
     governing_hashes = {path: sha256_file(Path(path)) for path in GOVERNING_DOCUMENTS}
     logical_domain = {
         "schema_version": AUDIT_SCHEMA_VERSION,
+        "root_schema_version": ROOT_SCHEMA_VERSION,
         "freeze_status": PACKET_FREEZE_STATUS,
         "source_provenance": source,
         "governing_document_hashes": governing_hashes,
@@ -759,14 +796,23 @@ def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
     """Independently recompute matrix, metrics, balance, and packet roots."""
 
     packet = _read_json(packet_root / "candidate_packet.json")
-    registry = AppearanceRegistry.model_validate_json(
-        (packet_root / "appearance_registry_snapshot.json").read_bytes()
-    )
-    seeds = EvaluationSeedRegistry.model_validate_json(
-        (packet_root / "seed_registry_snapshot.json").read_bytes()
-    )
+    if packet.get("schema_version") != AUDIT_SCHEMA_VERSION:
+        raise AppearanceAuditError("candidate packet audit schema version is unsupported")
+    if packet.get("root_schema_version") != ROOT_SCHEMA_VERSION:
+        raise AppearanceAuditError("candidate packet root schema version is unsupported")
+    try:
+        registry = AppearanceRegistry.model_validate_json(
+            (packet_root / "appearance_registry_snapshot.json").read_bytes()
+        )
+        seeds = EvaluationSeedRegistry.model_validate_json(
+            (packet_root / "seed_registry_snapshot.json").read_bytes()
+        )
+    except Exception as error:
+        raise AppearanceAuditError("candidate packet registry snapshot is invalid") from error
     validate_axis_isolation(registry)
     matrix = _read_json(packet_root / "seed_matrix.json")
+    if matrix.get("schema_version") != AUDIT_SCHEMA_VERSION:
+        raise AppearanceAuditError("seed matrix audit schema version is unsupported")
     cells = matrix.get("cells")
     if not isinstance(cells, list):
         raise AppearanceAuditError("seed matrix cells must be a list")
@@ -790,6 +836,13 @@ def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
         if cell["generation_status"] == "success":
             if cell["episode_seed"] != derive_seed(cell["candidate_seed"], "episode:0"):
                 raise AppearanceAuditError("episode seed differs from ordinary derivation")
+            if cell["evaluation_seed_registry_sha256"] != seed_registry_hash(seeds):
+                raise AppearanceAuditError("cell seed-registry identity is inconsistent")
+            if (
+                cell["appearance_assignment_schedule_source"]
+                != "snapshotted_evaluation_seed_registry_v1"
+            ):
+                raise AppearanceAuditError("cell assignment schedule source is inconsistent")
             surface_names = (
                 ("support_surface", "occluding_surface", "background_surface")
                 if cell["scene_family"] == "single_occluder"
@@ -931,6 +984,7 @@ def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
         key: packet[key]
         for key in (
             "schema_version",
+            "root_schema_version",
             "freeze_status",
             "source_provenance",
             "governing_document_hashes",
