@@ -88,6 +88,21 @@ def test_audit_refuses_a_non_empty_output(
         )
 
 
+def test_atomic_directory_publication_does_not_replace_a_racing_target(
+    tmp_path: Path,
+) -> None:
+    staging = tmp_path / "staging"
+    destination = tmp_path / "destination"
+    staging.mkdir()
+    destination.mkdir()
+    (staging / "packet.json").write_text("staged\n", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        audit._atomic_no_replace_directory(staging, destination)
+    assert staging.is_dir()
+    assert destination.is_dir()
+    assert not (destination / "packet.json").exists()
+
+
 def test_volatile_metadata_does_not_change_packet_root(synthetic_packet: Path) -> None:
     before = audit.validate_appearance_audit(synthetic_packet)["packet_logical_root_sha256"]
     (synthetic_packet / "run.json").write_text('{"arbitrary":"volatile"}\n', encoding="utf-8")

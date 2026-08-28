@@ -178,14 +178,17 @@ uv run epsbench appearance-audit `
 
 The command validates both registries, refuses non-empty output, generates and validates every
 profile/seed/scene cell through ordinary dataset paths, repeats each cell for determinism, and
-retains failures. It publishes by same-filesystem rename without replacing an existing target.
+retains failures. It publishes with an operating-system no-replace rename (`renameat2` on locked
+Linux and the native no-replace rename on Windows), so a target created during publication is not
+overwritten.
 Temporary full datasets are removed; minimum RGB/depth/segmentation metric evidence is retained.
 
 The packet contains `candidate_packet.json`, both registry snapshots, `profile_summary.json`,
 `seed_matrix.json`, `negative_evidence.json`, metric evidence, and scene-family representative
 contact sheets. Contact sheets show scene, profile, before/after RGB, opaque controlled segmentation,
-declared status, and non-degeneracy metrics. They do not add semantic surface names or private slot
-assignments to learner data and do not modify a dataset.
+declared status, non-degeneracy metrics, and explicit ecological-identity equality status. They do
+not add semantic surface names or private slot assignments to learner data and do not modify a
+dataset.
 
 The independent packet validator recomputes registry and seed validity, matrix completeness,
 admission metrics, structural comparisons, axis isolation, assignment balance, negative-evidence

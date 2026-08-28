@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import json
 import os
 import platform
@@ -64,6 +66,45 @@ GOVERNING_DOCUMENTS = (
 
 class AppearanceAuditError(ValueError):
     """Raised when an audit packet or publication operation is invalid."""
+
+
+def _atomic_no_replace_directory(source: Path, destination: Path) -> None:
+    """Atomically publish one directory without replacing a racing target."""
+
+    if os.name == "nt":
+        os.rename(source, destination)
+        return
+    if platform.system() != "Linux":
+        raise AppearanceAuditError(
+            "atomic no-replace directory publication is supported only on locked Windows/Linux"
+        )
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise AppearanceAuditError("Linux renameat2 is unavailable; refusing unsafe publication")
+    renameat2.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    renameat2.restype = ctypes.c_int
+    at_fdcwd = -100
+    rename_noreplace = 1
+    result = renameat2(
+        at_fdcwd,
+        os.fsencode(source),
+        at_fdcwd,
+        os.fsencode(destination),
+        rename_noreplace,
+    )
+    if result == 0:
+        return
+    error_number = ctypes.get_errno()
+    if error_number == errno.EEXIST:
+        raise FileExistsError(error_number, os.strerror(error_number), destination)
+    raise OSError(error_number, os.strerror(error_number), destination)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -307,6 +348,19 @@ def _structural_domain(cell: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _ecological_identity_domain(cell: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: cell[key]
+        for key in (
+            "scene_content_sha256",
+            "analytic_transport_sha256",
+            "oriented_boundary_sha256",
+            "visibility_event_sha256",
+            "ecological_label_sha256",
+        )
+    }
+
+
 def _evaluate_cell(
     packet_root: Path,
     cell: dict[str, Any],
@@ -318,6 +372,9 @@ def _evaluate_cell(
         cell["rejection_reasons"] = ["generation_or_validation_failed"]
         return
     structural_pass = _structural_domain(cell) == _structural_domain(control)
+    ecological_identity_pass = _ecological_identity_domain(cell) == _ecological_identity_domain(
+        control
+    )
     depth_segmentation_pass = True
     frames: dict[str, Any] = {}
     for frame_name in ("before", "after"):
@@ -350,6 +407,7 @@ def _evaluate_cell(
     texture_pass = all(frame["textured_surface_variation_pass"] for frame in frames.values())
     checks = {
         "structural_invariance": structural_pass,
+        "ecological_identity_equality": ecological_identity_pass,
         "depth_segmentation_invariance": depth_segmentation_pass,
         "determinism": bool(cell["determinism_pass"]),
         "material_rgb_change": material_pass if material_required else True,
@@ -560,6 +618,14 @@ def _contact_sheets(packet_root: Path, cells: list[dict[str, Any]]) -> None:
                 f"changed={metrics.get('changed_controlled_pixel_fraction', 0.0):.3f} "
                 f"mad={metrics.get('normalized_controlled_rgb_mad', 0.0):.3f} | "
                 "before RGB | after RGB | controlled segmentation",
+                fill="black",
+            )
+            ecological_equal = cell.get("admission_checks", {}).get(
+                "ecological_identity_equality", False
+            )
+            draw.text(
+                (2, y + 34),
+                f"ecological identities equal={str(bool(ecological_equal)).lower()}",
                 fill="black",
             )
         sheet.save(output / f"{scene}_representative_seed_0.png", format="PNG")
@@ -895,8 +961,12 @@ def create_appearance_audit(
 ) -> dict[str, Any]:
     """Generate, validate, and atomically publish the complete candidate packet."""
 
-    if output.exists() and (not output.is_dir() or any(output.iterdir())):
-        raise FileExistsError(f"audit output is not an empty directory: {output}")
+    if output.is_symlink():
+        raise FileExistsError(f"audit output cannot be a symbolic link: {output}")
+    if output.exists():
+        if not output.is_dir() or any(output.iterdir()):
+            raise FileExistsError(f"audit output is not an empty directory: {output}")
+        output.rmdir()
     registry = load_appearance_registry(registry_path)
     seeds = load_evaluation_seed_registry(seeds_path)
     validate_axis_isolation(registry)
@@ -955,9 +1025,7 @@ def create_appearance_audit(
             json.dumps(volatile, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         packet = validate_appearance_audit(staging)
-        if output.exists():
-            output.rmdir()
-        os.rename(staging, output)
+        _atomic_no_replace_directory(staging, output)
         return packet
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
