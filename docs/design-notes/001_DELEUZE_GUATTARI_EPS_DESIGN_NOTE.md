@@ -41,8 +41,9 @@ lived-state report (172–173). The work of art creates a compound of percepts a
 through a becoming with the world (168–169).
 
 Gibson's ecological theory of perception is an empirical account of information available to an
-organism in an environment. Gibsonian invariants, ambient optic structure, affordances, and
-perception-action coupling belong to a different intellectual and evidential project.
+organism in an environment (Gibson 1979). Gibsonian invariants, ambient optic structure,
+affordances, and perception-action coupling belong to a different intellectual and evidential
+project.
 
 The useful relationship is therefore neither identity nor derivation:
 
@@ -73,7 +74,8 @@ Any operational analogy introduced below must preserve this distinction.
 | Frame or section | An interface or face of a compound, not merely a coordinate (Deleuze and Guattari 1994, 178–181, 186–187) | Surface, opening, boundary, attachment, interface, or transition structure | `frame = bounding box` |
 | Counterpoint | A relational composition in which heterogeneous beings or trajectories answer one another (Deleuze and Guattari 1994, 184–186) | Body-relative affordance and morphology-environment coupling | `counterpoint = similarity metric` |
 | Heterogenesis | Distinct forms of thought call for further heterogeneous creations without becoming one synthesis (Deleuze and Guattari 1994, 196–199) | Typed neural-colony architecture preserving distinct epistemic products | `heterogenesis = ensemble voting` |
-| Rhizome / assemblage / deterritorialization | Broader concepts from *A Thousand Plateaus*, not chapter 7 of *What Is Philosophy?* (Deleuze and Guattari 1987) | Distributed systems as one limited analogy | `cloud computing = rhizome` |
+| Rhizome / assemblage | Broader concepts invoked from *A Thousand Plateaus* rather than chapter 7 of *What Is Philosophy?* (Deleuze and Guattari 1987) | Distributed systems as one limited analogy | `cloud computing ≠ rhizome` |
+| Deterritorialization / reterritorialization | Concepts used across the broader Deleuze–Guattari corpus and within “Percept, Affect, and Concept,” including its movement from house or territory toward universe and plane of composition (Deleuze and Guattari 1994, 181, 185, 197–198) | A limited question about how systems open beyond or reconcentrate local authority | `network distribution ≠ deterritorialization` |
 
 ## 4. From an internal picture to an ecology of relations
 
@@ -553,9 +555,11 @@ LLM's opinion or an uncoordinated swarm.
 
 ## 14. Cloud and distributed systems: analogy and limit
 
-As a limited design analogy, concepts developed in *A Thousand Plateaus*—including rhizome,
-assemblage, and deterritorialization—can be brought into conversation with later distributed
-systems (Deleuze and Guattari 1987):
+As a limited design analogy, rhizome and assemblage from *A Thousand Plateaus* (Deleuze and Guattari
+1987), together with the wider vocabulary of deterritorialization and reterritorialization—which
+also appears in “Percept, Affect, and Concept” in passages connecting house or territory, universe,
+and plane of composition (Deleuze and Guattari 1994, 181, 185, 197–198)—can be brought into
+conversation with later distributed systems:
 
 ```text
 distributed identity
@@ -731,9 +735,10 @@ The first likely future bridge from the current EPS programme is not an LLM. It 
 
 ## 19. References
 
-Inline citations use author, year, and the printed pagination of the cited English edition. The
-broader philosophical source is separate from chapter 7 and does not make its distributed-systems
-analogy a claim of either source.
+Inline citations use author and year. Printed page numbers are supplied for page-specific claims
+from the consulted chapter; broader work-level references may cite author and year only. The
+broader philosophical source remains separate from chapter 7, and the distributed-systems analogy
+is not a claim of either source.
 
 ### Primary chapter source
 
