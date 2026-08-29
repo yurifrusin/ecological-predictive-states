@@ -956,7 +956,9 @@ def validate_revision_audit(packet_root: Path) -> dict[str, Any]:
                 seeds,
             )
             try:
-                nested = AppearanceInstanceRecord.model_validate(cell["appearance_instance"])
+                nested = AppearanceInstanceRecord.model_validate_json(
+                    canonical_json_bytes(cell["appearance_instance"])
+                )
             except Exception as error:
                 raise RevisionAuditError("revision appearance instance is invalid") from error
             if (
@@ -969,6 +971,18 @@ def validate_revision_audit(packet_root: Path) -> dict[str, Any]:
                 != _source_texture_diagnostics(profile, cell["scene_family"], render_plan.record)
             ):
                 raise RevisionAuditError("revision appearance instance differs from recomputation")
+            for frame_index, frame_name in enumerate(("before", "after")):
+                arrays = frame_cache[(cell["cell_id"], frame_name)]
+                for role, array in zip(("rgb", "depth", "segmentation"), arrays, strict=True):
+                    declared = cell[f"{role}_logical_sha256"]
+                    if (
+                        type(declared) is not list
+                        or len(declared) != 2
+                        or logical_array_hash(array) != declared[frame_index]
+                    ):
+                        raise RevisionAuditError(
+                            "revision retained evidence differs from declared logical identity"
+                        )
         stored = _admission_evidence_domain(cell)
         recomputed = _cell_without_revision_fields(cell)
         for field in (
