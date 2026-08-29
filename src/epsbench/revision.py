@@ -284,7 +284,7 @@ def _validate_lock_commit_snapshot(
     if canonical_json_bytes(committed_lock) != canonical_json_bytes(lock):
         raise RevisionAuditError("revision packet lock differs from the exact lock commit")
     try:
-        provenance = SourceProvenance.model_validate(source_provenance)
+        provenance = SourceProvenance.model_validate_json(canonical_json_bytes(source_provenance))
     except Exception as error:
         raise RevisionAuditError("revision packet source provenance is invalid") from error
     if provenance.git_commit is None:

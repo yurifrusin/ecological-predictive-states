@@ -22,7 +22,8 @@ from epsbench.appearance import (
     seed_registry_hash,
     validate_axis_isolation,
 )
-from epsbench.revision import validate_definition_lock
+from epsbench.data.provenance import collect_source_provenance
+from epsbench.revision import _validate_lock_commit_snapshot, validate_definition_lock
 from epsbench.utils.canonical import canonical_json_bytes, sha256_file
 
 BASELINE_REGISTRY = Path("configs/appearance_candidates_v0.yaml")
@@ -176,3 +177,13 @@ def test_definition_lock_recomputes_and_rejects_fully_rehashed_profile_mutation(
             path,
             BASELINE_ANALYSIS,
         )
+
+
+def test_definition_lock_commit_accepts_canonical_json_source_provenance() -> None:
+    lock = json.loads(DEFINITION_LOCK.read_text(encoding="utf-8"))
+    source = collect_source_provenance(Path.cwd()).model_dump(mode="json")
+    _validate_lock_commit_snapshot(
+        "914550ce4e3a819dcbcd0bd5390e3c6034af5bf6",
+        lock,
+        source,
+    )
