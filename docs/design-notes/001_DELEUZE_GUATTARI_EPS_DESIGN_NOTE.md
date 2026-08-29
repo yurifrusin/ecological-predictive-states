@@ -1,13 +1,17 @@
 # Design Note 001 — Percept, Affect, Concept: Philosophical Provocations for Ecological Predictive States
 
 ```text
-Status: NON-AUTHORITATIVE DESIGN EXPLORATION
+Status: CANONICAL NON-AUTHORITATIVE DESIGN EXPLORATION
 Authority: NONE
-Review posture: concept-generating, not scientific-contract-defining
+Scientific review: SCIENTIFIC_PASS at exact implementation head 4e37f9cc25a33927135077a76cf72eae9d191392
 Scientific result: NONE
 Benchmark effect: NONE
 Gate effect: NONE
 ```
+
+The exact-head scientific pass and owner-approved closeout make this note canonical only as a
+non-authoritative design exploration; they do not scientifically support or authorise its
+hypotheses.
 
 ## 1. Purpose
 
