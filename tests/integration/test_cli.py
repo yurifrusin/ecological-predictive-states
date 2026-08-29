@@ -1,7 +1,9 @@
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
+import epsbench.cli.app as cli_module
 from epsbench.cli.app import app
 
 
@@ -117,3 +119,56 @@ def test_generation_refuses_nonempty_destination(tmp_path: Path) -> None:
     assert result.exit_code != 0
     assert "not empty" in result.output
     assert (output / "existing.txt").read_text(encoding="utf-8") == "preserve me\n"
+
+
+def test_revision_audit_cli_reports_v1_portable_and_renderer_local_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    roots = {
+        "portable_analytic_identity_root_sha256": "1" * 64,
+        "within_renderer_invariance_outcome_root_sha256": "2" * 64,
+        "design_partition_membership_root_sha256": "3" * 64,
+        "qualification_partition_membership_root_sha256": "4" * 64,
+        "profile_admission_outcome_root_sha256": "5" * 64,
+        "renderer_local_design_partition_outcome_root_sha256": "6" * 64,
+        "renderer_local_qualification_partition_outcome_root_sha256": "7" * 64,
+        "renderer_local_ecological_label_root_sha256": "8" * 64,
+        "renderer_specific_audit_root_sha256": "9" * 64,
+    }
+    packet = {
+        "complete_packet_root_sha256": "a" * 64,
+        "matrix_counts": {
+            "design": {"admitted": 99, "rejected": 13},
+            "qualification": {"admitted": 100, "rejected": 12},
+        },
+        "roots": roots,
+    }
+    monkeypatch.setattr(cli_module, "create_revision_audit", lambda *args: packet)
+    monkeypatch.setattr(cli_module, "validate_revision_audit", lambda *args: packet)
+    result = CliRunner().invoke(
+        app,
+        [
+            "appearance-revision-audit",
+            "--baseline-registry",
+            "configs/appearance_candidates_v0.yaml",
+            "--design-seeds",
+            "configs/evaluation_seed_candidates_v0.yaml",
+            "--revision-registry",
+            "configs/appearance_candidates_revision1.yaml",
+            "--qualification-seeds",
+            "configs/appearance_revision1_qualification_seeds_v0.yaml",
+            "--definition-lock",
+            "configs/appearance_candidate_revision1_lock.json",
+            "--single-config",
+            "configs/benchmark_v0.yaml",
+            "--corridor-config",
+            "configs/corridor_v0.yaml",
+            "--output",
+            str(tmp_path / "packet"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "design-membership=" + "3" * 64 in result.output
+    assert "profiles=" + "5" * 64 in result.output
+    assert "design-outcomes=" + "6" * 64 in result.output
+    assert "qualification-outcomes=" + "7" * 64 in result.output

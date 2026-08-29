@@ -190,6 +190,9 @@ jobs:
               (output / "qualification_seed_matrix.json").read_text()
           )["cells"]
           profiles = json.loads((output / "profile_summary.json").read_text())["profiles"]
+          assert packet["root_schema_version"] == (
+              "appearance_candidate_revision_root_domains_v1"
+          )
           print("Design matrix outcomes:", packet["matrix_counts"]["design"], flush=True)
           print(
               "Qualification matrix outcomes:",
@@ -210,20 +213,44 @@ jobs:
               },
               flush=True,
           )
+          portable_expected = {
+              "baseline_failure_analysis_root_sha256": (
+                  "8ff7374fb4ea0144687a4bda3b25ae3936c7b8b7f0d1ace35ce071d64328dea2"
+              ),
+              "definition_lock_root_sha256": (
+                  "71d2ed7a9f45c55bf17ec518c08b5d0b827a7cf0ae2cc3c339dc09197c55f633"
+              ),
+              "revision1_registry_sha256": (
+                  "81da1bb9414e7c53e42bbf65b198aa61d8bb7ed3f81eb2bf5813a1edff245ac4"
+              ),
+              "qualification_seed_registry_sha256": (
+                  "247db21c869703f5604e63678f0cf614f0b88040a05ce42c61629ddf712cefd5"
+              ),
+              "procedural_asset_root_sha256": (
+                  "bd563c543c1dffdd9038e86cb1aa6d97da566fa016d6f6683b11f4964d433ec0"
+              ),
+              "appearance_assignment_root_sha256": (
+                  "9b7118e4faffb2a74980e9c1ca85b4758abafad6dd7e739b9b68af0224010523"
+              ),
+              "portable_analytic_identity_root_sha256": (
+                  "87459ac7f5f09b222ed029afaf3751881398917eb6184c86ce9305902f76ad4e"
+              ),
+              "within_renderer_invariance_outcome_root_sha256": (
+                  "6bad73a2b68310d2e7b3a19f91dc83d94f15213a91b0955dd541d3d22d5bb100"
+              ),
+              "design_partition_membership_root_sha256": (
+                  "2493674443d31059d737f256415500a3951cd37ad50198fa3ce197cdf6c9fbaf"
+              ),
+              "qualification_partition_membership_root_sha256": (
+                  "24eaee5fdb8f01965ac1091defe3d2bf9e62e66c3e862a86528f857e0041eaa3"
+              ),
+              "profile_admission_outcome_root_sha256": (
+                  "8496521a261367e4fb1da340fc6a58b007eb9b2955fb8cafa44c2c8db0532d5b"
+              ),
+          }
           print(
               "Portable revision roots:",
-              {
-                  key: value
-                  for key, value in packet["roots"].items()
-                  if key in {
-                      "procedural_asset_root_sha256",
-                      "appearance_assignment_root_sha256",
-                      "portable_analytic_identity_root_sha256",
-                      "within_renderer_invariance_outcome_root_sha256",
-                      "design_partition_outcome_root_sha256",
-                      "qualification_partition_outcome_root_sha256",
-                  }
-              },
+              {key: packet["roots"][key] for key in portable_expected},
               flush=True,
           )
           print(
@@ -232,9 +259,31 @@ jobs:
                   key: value
                   for key, value in packet["roots"].items()
                   if key in {
+                      "renderer_local_design_partition_outcome_root_sha256",
+                      "renderer_local_qualification_partition_outcome_root_sha256",
                       "renderer_local_ecological_label_root_sha256",
                       "renderer_specific_audit_root_sha256",
                   }
+              },
+              flush=True,
+          )
+          print(
+              "Reviewed Windows/WGL renderer-local partition roots (historical evidence):",
+              {
+                  "renderer_local_design_partition_outcome_root_sha256": (
+                      "826545aa75737fd8d041b703fcf380e16791a70411c2bcb1c38f783a0fa9916c"
+                  ),
+                  "renderer_local_qualification_partition_outcome_root_sha256": (
+                      "fa976fb849d0037af7bcc8d63d1c554099ecc3f1061fd8ad98cd8d7cc8c3177c"
+                  ),
+              },
+              flush=True,
+          )
+          print(
+              "Reviewed Windows/WGL matrix outcomes (historical evidence):",
+              {
+                  "design": {"admitted": 99, "rejected": 13},
+                  "qualification": {"admitted": 100, "rejected": 12},
               },
               flush=True,
           )
@@ -248,15 +297,11 @@ jobs:
           assert len({cell["cell_id"] for cell in [*design, *qualification]}) == 224
           assert all(cell["partition"] == "design" for cell in design)
           assert all(cell["partition"] == "qualification" for cell in qualification)
-          assert packet["roots"]["revision1_registry_sha256"] == (
-              "81da1bb9414e7c53e42bbf65b198aa61d8bb7ed3f81eb2bf5813a1edff245ac4"
-          )
-          assert packet["roots"]["qualification_seed_registry_sha256"] == (
-              "247db21c869703f5604e63678f0cf614f0b88040a05ce42c61629ddf712cefd5"
-          )
-          assert packet["roots"]["definition_lock_root_sha256"] == (
-              "71d2ed7a9f45c55bf17ec518c08b5d0b827a7cf0ae2cc3c339dc09197c55f633"
-          )
+          assert packet["matrix_counts"] == {
+              "design": {"admitted": 97, "rejected": 15},
+              "qualification": {"admitted": 100, "rejected": 12},
+          }
+          assert all(packet["roots"][key] == value for key, value in portable_expected.items())
           assert {
               profile["profile_id"]: profile["revision1_profile_admitted"]
               for profile in profiles
@@ -268,35 +313,5 @@ jobs:
               "revision1_stripes_low_v1": False,
               "revision1_illumination_shift_v1": False,
               "revision1_combined_stress_v1": True,
-          }
-          assert {
-              key: packet["roots"][key]
-              for key in {
-                  "procedural_asset_root_sha256",
-                  "appearance_assignment_root_sha256",
-                  "portable_analytic_identity_root_sha256",
-                  "within_renderer_invariance_outcome_root_sha256",
-                  "design_partition_outcome_root_sha256",
-                  "qualification_partition_outcome_root_sha256",
-              }
-          } == {
-              "procedural_asset_root_sha256": (
-                  "bd563c543c1dffdd9038e86cb1aa6d97da566fa016d6f6683b11f4964d433ec0"
-              ),
-              "appearance_assignment_root_sha256": (
-                  "9b7118e4faffb2a74980e9c1ca85b4758abafad6dd7e739b9b68af0224010523"
-              ),
-              "portable_analytic_identity_root_sha256": (
-                  "87459ac7f5f09b222ed029afaf3751881398917eb6184c86ce9305902f76ad4e"
-              ),
-              "within_renderer_invariance_outcome_root_sha256": (
-                  "6bad73a2b68310d2e7b3a19f91dc83d94f15213a91b0955dd541d3d22d5bb100"
-              ),
-              "design_partition_outcome_root_sha256": (
-                  "826545aa75737fd8d041b703fcf380e16791a70411c2bcb1c38f783a0fa9916c"
-              ),
-              "qualification_partition_outcome_root_sha256": (
-                  "fa976fb849d0037af7bcc8d63d1c554099ecc3f1061fd8ad98cd8d7cc8c3177c"
-              ),
           }
           PY

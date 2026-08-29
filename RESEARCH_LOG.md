@@ -108,3 +108,27 @@ combined stress passed every local cell; stripe and illumination profiles retain
 No definition, seed, threshold, or admission rule changed after qualification began. Exact-head
 Ubuntu/OSMesa confirmation, dual review, and owner approval remain pending; no freeze or scientific
 result follows.
+
+## 2026-08-29 — Revision 1 portable profile disposition versus renderer-local cells
+
+Scientific review of exact head `679d85fb40288715482f604d1585cdd6a045e0db` found that the
+Revision 1 partition-outcome roots included per-cell RGB, exposure, and rendered-texture admission
+outcomes but were asserted as portable. The red exact-head CI run `33247224228` is retained as
+evidence against that root ontology. Windows/WGL admitted 99/112 design cells; Ubuntu/OSMesa
+admitted 97/112. Both admitted 100/112 qualification cells, and both independently admitted the
+same five profiles. The two additional OSMesa failures remain negative cell evidence in the
+already-rejected stripe profile, not a portable membership disagreement.
+
+Root-domain v1 therefore binds partition membership without renderer evidence, binds only
+whole-profile dispositions for cross-renderer admission comparison, and explicitly labels the
+unchanged per-cell outcome hashes as renderer-local. The portable profile root omits per-cell counts
+and reasons; if a future renderer changes a whole-profile disposition, the disagreement is retained
+and the cross-renderer admitted set becomes the intersection.
+
+The same review found that the portable baseline-analysis root alone did not bind the complete
+prospective diagnosis. Validation now reconstructs both analysis roots, checks the three child-root
+receipts and every lock-facing baseline field, and requires the exact analysis snapshot from the
+immutable definition-lock commit. Neither committed prospective record changes. This evidence
+correction changes no profile, seed, control, threshold, renderer, admission rule, or experimental
+outcome. The agreed admitted set supports only a later freeze proposal. Full Gate 0B, Gate 0C,
+Gate 0D, models, benchmark freeze, and scientific results remain unauthorised.

@@ -198,11 +198,16 @@ def appearance_revision_audit_command(
         "Portable roots: "
         f"analytic={roots['portable_analytic_identity_root_sha256']} "
         f"invariance={roots['within_renderer_invariance_outcome_root_sha256']} "
-        f"design={roots['design_partition_outcome_root_sha256']} "
-        f"qualification={roots['qualification_partition_outcome_root_sha256']}"
+        f"design-membership={roots['design_partition_membership_root_sha256']} "
+        f"qualification-membership="
+        f"{roots['qualification_partition_membership_root_sha256']} "
+        f"profiles={roots['profile_admission_outcome_root_sha256']}"
     )
     typer.echo(
         "Renderer-local roots: "
+        f"design-outcomes={roots['renderer_local_design_partition_outcome_root_sha256']} "
+        f"qualification-outcomes="
+        f"{roots['renderer_local_qualification_partition_outcome_root_sha256']} "
         f"labels={roots['renderer_local_ecological_label_root_sha256']} "
         f"audit={roots['renderer_specific_audit_root_sha256']}"
     )

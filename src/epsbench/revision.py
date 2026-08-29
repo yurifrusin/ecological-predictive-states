@@ -53,7 +53,13 @@ from epsbench.audit import (
 )
 from epsbench.config import load_config
 from epsbench.data.provenance import collect_source_provenance
-from epsbench.failure_analysis import CANONICAL_BASE, CANONICAL_ROOTS
+from epsbench.failure_analysis import (
+    ANALYSIS_SCHEMA_VERSION,
+    CANONICAL_BASE,
+    CANONICAL_COUNTS,
+    CANONICAL_ROOTS,
+    THRESHOLDS,
+)
 from epsbench.schema import SourceProvenance
 from epsbench.utils.canonical import (
     canonical_json_bytes,
@@ -63,9 +69,10 @@ from epsbench.utils.canonical import (
 )
 
 REVISION_AUDIT_SCHEMA_VERSION = "appearance_candidate_revision_audit_v0"
-REVISION_ROOT_SCHEMA_VERSION = "appearance_candidate_revision_root_domains_v0"
+REVISION_ROOT_SCHEMA_VERSION = "appearance_candidate_revision_root_domains_v1"
 REVISION_FREEZE_STATUS = "candidate_revision_packet_only_not_frozen"
 REVISION_CONTACT_SHEET_VERSION = "appearance_revision_contact_sheet_manifest_v0"
+FAILURE_ANALYSIS_METHOD = "privileged_surface_frame_threshold_margin_analysis_v0"
 PARTITIONS = ("design", "qualification")
 SNAPSHOT_FILES = (
     "baseline_failure_analysis.json",
@@ -81,6 +88,54 @@ REPORT_FILES = (
     "qualification_seed_matrix.json",
     "profile_summary.json",
     "negative_evidence.json",
+)
+REVISION_ROOT_FIELDS = frozenset(
+    {
+        "baseline_failure_analysis_root_sha256",
+        "definition_lock_root_sha256",
+        "revision1_registry_sha256",
+        "qualification_seed_registry_sha256",
+        "procedural_asset_root_sha256",
+        "appearance_assignment_root_sha256",
+        "portable_analytic_identity_root_sha256",
+        "within_renderer_invariance_outcome_root_sha256",
+        "design_partition_membership_root_sha256",
+        "qualification_partition_membership_root_sha256",
+        "profile_admission_outcome_root_sha256",
+        "renderer_local_design_partition_outcome_root_sha256",
+        "renderer_local_qualification_partition_outcome_root_sha256",
+        "renderer_local_ecological_label_root_sha256",
+        "renderer_specific_audit_root_sha256",
+    }
+)
+FAILURE_ANALYSIS_FIELDS = frozenset(
+    {
+        "schema_version",
+        "source_packet_logical_root_sha256",
+        "source_canonical_base",
+        "source_matrix_counts",
+        "source_profile_count",
+        "source_roots",
+        "canonical_admission_thresholds",
+        "analysis_method",
+        "renderer_fingerprints",
+        "profile_failure_matrix_sha256",
+        "surface_failure_matrix_sha256",
+        "threshold_margin_summary_sha256",
+        "diagnostic_summary",
+        "causal_diagnostic_answers",
+        "baseline_failure_analysis_sha256",
+        "renderer_specific_failure_analysis_sha256",
+    }
+)
+FAILURE_ANALYSIS_PORTABLE_FIELDS = (
+    "schema_version",
+    "source_canonical_base",
+    "source_matrix_counts",
+    "source_profile_count",
+    "source_roots",
+    "canonical_admission_thresholds",
+    "analysis_method",
 )
 
 
@@ -99,6 +154,176 @@ def _definition_lock_domain(lock: dict[str, Any]) -> dict[str, Any]:
     domain = dict(lock)
     domain.pop("definition_lock_sha256", None)
     return domain
+
+
+def _is_sha256(value: Any) -> bool:
+    return (
+        type(value) is str
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _validate_count_map(value: Any, expected_keys: frozenset[str], context: str) -> None:
+    if (
+        type(value) is not dict
+        or set(value) != expected_keys
+        or any(type(count) is not int or count < 0 for count in value.values())
+    ):
+        raise RevisionAuditError(f"{context} is not a strict non-negative count map")
+
+
+def _validate_baseline_analysis_snapshot(analysis: dict[str, Any], lock: dict[str, Any]) -> None:
+    """Fail closed over the exact prospective diagnosis snapshot and its lock receipts."""
+
+    if set(analysis) != FAILURE_ANALYSIS_FIELDS:
+        raise RevisionAuditError("baseline failure-analysis snapshot schema is not strict")
+    if analysis["schema_version"] != ANALYSIS_SCHEMA_VERSION:
+        raise RevisionAuditError("baseline failure-analysis snapshot version is unsupported")
+    hash_fields = {
+        "source_packet_logical_root_sha256",
+        "profile_failure_matrix_sha256",
+        "surface_failure_matrix_sha256",
+        "threshold_margin_summary_sha256",
+        "baseline_failure_analysis_sha256",
+        "renderer_specific_failure_analysis_sha256",
+    }
+    if any(not _is_sha256(analysis[field]) for field in hash_fields):
+        raise RevisionAuditError("baseline failure-analysis snapshot hash field is malformed")
+    if (
+        type(analysis["source_canonical_base"]) is not str
+        or type(analysis["source_profile_count"]) is not int
+        or type(analysis["analysis_method"]) is not str
+        or type(analysis["source_matrix_counts"]) is not dict
+        or type(analysis["source_roots"]) is not dict
+        or type(analysis["canonical_admission_thresholds"]) is not dict
+    ):
+        raise RevisionAuditError("baseline failure-analysis portable field type differs")
+    fingerprints = analysis["renderer_fingerprints"]
+    if (
+        type(fingerprints) is not list
+        or not fingerprints
+        or any(type(item) is not str or not item for item in fingerprints)
+    ):
+        raise RevisionAuditError("baseline failure-analysis renderer fingerprints are invalid")
+    diagnostic = analysis["diagnostic_summary"]
+    diagnostic_fields = {
+        "exposure_failure_occurrences_by_semantic_surface": frozenset(
+            {
+                "background_surface",
+                "corridor_end_surface",
+                "corridor_left_surface",
+                "corridor_right_surface",
+                "occluding_surface",
+            }
+        ),
+        "exposure_failure_occurrences_by_style_slot": frozenset(
+            {"style-slot-0", "style-slot-1", "style-slot-2", "style-slot-3"}
+        ),
+        "failure_category_occurrences": frozenset(
+            {
+                "lower_exposure_failure",
+                "material_rgb_change_failure",
+                "texture_variation_failure",
+            }
+        ),
+        "texture_failure_occurrences_by_family": frozenset({"checker", "stripes"}),
+        "texture_failure_occurrences_by_semantic_surface": frozenset(
+            {
+                "background_surface",
+                "corridor_end_surface",
+                "corridor_floor",
+                "corridor_left_surface",
+                "corridor_right_surface",
+                "occluding_surface",
+                "support_surface",
+            }
+        ),
+    }
+    if type(diagnostic) is not dict or set(diagnostic) != {
+        *diagnostic_fields,
+        "high_source_variation_but_rendered_failure_occurrences",
+    }:
+        raise RevisionAuditError("baseline failure-analysis diagnostic schema is not strict")
+    for field, keys in diagnostic_fields.items():
+        _validate_count_map(diagnostic[field], keys, f"baseline diagnosis {field}")
+    high_variation = diagnostic["high_source_variation_but_rendered_failure_occurrences"]
+    if type(high_variation) is not int or high_variation < 0:
+        raise RevisionAuditError("baseline diagnosis high-variation count is invalid")
+    answers = analysis["causal_diagnostic_answers"]
+    if (
+        type(answers) is not list
+        or len(answers) != 8
+        or any(
+            type(item) is not dict
+            or set(item) != {"question", "answer"}
+            or type(item["question"]) is not str
+            or not item["question"]
+            or type(item["answer"]) is not str
+            or not item["answer"]
+            for item in answers
+        )
+    ):
+        raise RevisionAuditError("baseline failure-analysis causal answers are not strict")
+
+    portable_domain = {field: analysis[field] for field in FAILURE_ANALYSIS_PORTABLE_FIELDS}
+    if _hash_json(portable_domain) != analysis["baseline_failure_analysis_sha256"]:
+        raise RevisionAuditError("baseline failure-analysis portable root mismatch")
+    renderer_domain = dict(analysis)
+    renderer_root = renderer_domain.pop("renderer_specific_failure_analysis_sha256")
+    if _hash_json(renderer_domain) != renderer_root:
+        raise RevisionAuditError("baseline failure-analysis renderer-specific root mismatch")
+
+    lock_thresholds = lock["admission_thresholds"]
+    expected_thresholds = {
+        "changed_controlled_pixel_fraction": lock_thresholds[
+            "changed_controlled_pixel_fraction_minimum"
+        ],
+        "normalized_controlled_rgb_mad": lock_thresholds["normalized_controlled_rgb_mad_minimum"],
+        "visible_surface_mean_luminance_lower": lock_thresholds[
+            "visible_surface_mean_luminance_minimum"
+        ],
+        "visible_surface_mean_luminance_upper": lock_thresholds[
+            "visible_surface_mean_luminance_maximum"
+        ],
+        "textured_surface_minimum_pixels": lock_thresholds["textured_surface_minimum_pixels"],
+        "textured_surface_luminance_standard_deviation": lock_thresholds[
+            "textured_surface_luminance_std_minimum"
+        ],
+    }
+    lock_children = lock["baseline"]["failure_analysis_child_roots"]
+    expected_child_fields = {
+        "profile_failure_matrix_sha256",
+        "surface_failure_matrix_sha256",
+        "threshold_margin_summary_sha256",
+    }
+    if set(lock_children) != expected_child_fields or any(
+        analysis[field] != lock_children[field] for field in expected_child_fields
+    ):
+        raise RevisionAuditError("definition lock baseline analysis child-root binding differs")
+    expected_matrix_counts = {
+        "admitted": lock["baseline"]["matrix"]["admitted"],
+        "rejected": lock["baseline"]["matrix"]["rejected"],
+    }
+    if (
+        analysis["baseline_failure_analysis_sha256"] != lock["baseline"]["failure_analysis_sha256"]
+        or analysis["source_canonical_base"] != lock["canonical_base_sha"]
+        or canonical_json_bytes(analysis["source_matrix_counts"])
+        != canonical_json_bytes(expected_matrix_counts)
+        or analysis["source_profile_count"] != lock["baseline"]["matrix"]["rejected_profiles"]
+        or canonical_json_bytes(analysis["source_roots"])
+        != canonical_json_bytes(lock["baseline"]["portable_roots"])
+        or canonical_json_bytes(analysis["canonical_admission_thresholds"])
+        != canonical_json_bytes(expected_thresholds)
+        or canonical_json_bytes(analysis["canonical_admission_thresholds"])
+        != canonical_json_bytes(THRESHOLDS)
+        or analysis["analysis_method"] != FAILURE_ANALYSIS_METHOD
+        or analysis["source_canonical_base"] != CANONICAL_BASE
+        or canonical_json_bytes(analysis["source_matrix_counts"])
+        != canonical_json_bytes(CANONICAL_COUNTS)
+        or canonical_json_bytes(analysis["source_roots"]) != canonical_json_bytes(CANONICAL_ROOTS)
+    ):
+        raise RevisionAuditError("definition lock baseline analysis binding differs")
 
 
 def validate_definition_lock(
@@ -227,11 +452,13 @@ def validate_definition_lock(
         raise RevisionAuditError("definition lock exceeds prospective authority")
     if baseline_analysis_path is not None:
         analysis = _read_json(baseline_analysis_path)
-        if (
-            analysis.get("baseline_failure_analysis_sha256")
-            != lock["baseline"]["failure_analysis_sha256"]
-        ):
-            raise RevisionAuditError("definition lock baseline analysis binding differs")
+        _validate_baseline_analysis_snapshot(analysis, lock)
+        _validate_lock_commit_snapshot(
+            _lock_commit(definition_lock_path),
+            lock,
+            analysis,
+            collect_source_provenance(Path.cwd()).model_dump(mode="json"),
+        )
     return lock
 
 
@@ -264,12 +491,13 @@ def _lock_commit(definition_lock_path: Path) -> str:
 def _validate_lock_commit_snapshot(
     commit: str,
     lock: dict[str, Any],
+    analysis: dict[str, Any],
     source_provenance: dict[str, Any],
 ) -> None:
     if type(commit) is not str or len(commit) != 40:
         raise RevisionAuditError("revision packet definition-lock commit is malformed")
     try:
-        committed = subprocess.run(
+        committed_lock_bytes = subprocess.run(
             [
                 "git",
                 "show",
@@ -278,11 +506,30 @@ def _validate_lock_commit_snapshot(
             capture_output=True,
             check=True,
         ).stdout
-        committed_lock = json.loads(committed.decode("utf-8"))
+        committed_analysis_bytes = subprocess.run(
+            [
+                "git",
+                "show",
+                f"{commit}:configs/appearance_revision1_baseline_failure_analysis.json",
+            ],
+            capture_output=True,
+            check=True,
+        ).stdout
+        committed_lock = json.loads(committed_lock_bytes.decode("utf-8"))
+        committed_analysis = json.loads(committed_analysis_bytes.decode("utf-8"))
     except Exception as error:
         raise RevisionAuditError("revision packet definition-lock commit is unavailable") from error
+    if (
+        committed_lock_bytes != canonical_json_bytes(committed_lock) + b"\n"
+        or committed_analysis_bytes != canonical_json_bytes(committed_analysis) + b"\n"
+    ):
+        raise RevisionAuditError("revision packet lock-commit snapshots are not canonical JSON")
     if canonical_json_bytes(committed_lock) != canonical_json_bytes(lock):
         raise RevisionAuditError("revision packet lock differs from the exact lock commit")
+    if canonical_json_bytes(committed_analysis) != canonical_json_bytes(analysis):
+        raise RevisionAuditError(
+            "revision packet baseline analysis differs from the exact lock commit"
+        )
     try:
         provenance = SourceProvenance.model_validate_json(canonical_json_bytes(source_provenance))
     except Exception as error:
@@ -309,6 +556,75 @@ def _cell_without_revision_fields(cell: dict[str, Any]) -> dict[str, Any]:
     payload.pop("partition", None)
     payload.pop("control_cell_id", None)
     return payload
+
+
+def _partition_membership_domain(
+    candidates: list[dict[str, Any]],
+    revision: AppearanceRevision1Registry,
+    partition: str,
+) -> list[dict[str, Any]]:
+    """Return the renderer-independent matrix membership and comparison identities."""
+
+    domain = [
+        {
+            "partition": cell["partition"],
+            "cell_id": cell["cell_id"],
+            "profile_id": cell["profile_id"],
+            "profile_sha256": cell["appearance_profile_sha256"],
+            "scene_family": cell["scene_family"],
+            "seed_index": cell["seed_index"],
+            "candidate_seed": cell["candidate_seed"],
+            "control_cell_id": cell["control_cell_id"],
+            "matched_control_profile_id": profile_by_id(
+                revision, cell["profile_id"]
+            ).matched_control_profile_id,
+        }
+        for cell in candidates
+        if cell["partition"] == partition
+    ]
+    return sorted(domain, key=lambda item: cast(str, item["cell_id"]))
+
+
+def _renderer_local_partition_outcome_domain(
+    candidates: list[dict[str, Any]], partition: str
+) -> list[dict[str, Any]]:
+    """Retain the v0 per-cell renderer-local outcome domain without reclassification."""
+
+    return [
+        {
+            "cell_id": cell["cell_id"],
+            "profile_id": cell["profile_id"],
+            "scene_family": cell["scene_family"],
+            "seed_index": cell["seed_index"],
+            "candidate_seed": cell["candidate_seed"],
+            "control_cell_id": cell["control_cell_id"],
+            "generation_status": cell["generation_status"],
+            "admission_checks": cell["admission_checks"],
+            "admission_status": cell["admission_status"],
+            "rejection_reasons": cell["rejection_reasons"],
+        }
+        for cell in candidates
+        if cell["partition"] == partition
+    ]
+
+
+def _profile_admission_outcome_domain(profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return only the cross-renderer-comparable profile dispositions."""
+
+    domain = [
+        {
+            "profile_id": profile["profile_id"],
+            "profile_sha256": profile["profile_sha256"],
+            "matched_control_profile_id": profile["matched_control_profile_id"],
+            "design_cell_count": profile["design"]["cell_count"],
+            "qualification_cell_count": profile["qualification"]["cell_count"],
+            "design_set_admitted": profile["design"]["set_admitted"],
+            "qualification_set_admitted": profile["qualification"]["set_admitted"],
+            "revision1_profile_admitted": profile["revision1_profile_admitted"],
+        }
+        for profile in profile_summary["profiles"]
+    ]
+    return sorted(domain, key=lambda item: cast(str, item["profile_id"]))
 
 
 def _root_domains(
@@ -363,24 +679,6 @@ def _root_domains(
         if cell["generation_status"] == "success"
     ]
 
-    def partition_outcomes(partition: str) -> list[dict[str, Any]]:
-        return [
-            {
-                "cell_id": cell["cell_id"],
-                "profile_id": cell["profile_id"],
-                "scene_family": cell["scene_family"],
-                "seed_index": cell["seed_index"],
-                "candidate_seed": cell["candidate_seed"],
-                "control_cell_id": cell["control_cell_id"],
-                "generation_status": cell["generation_status"],
-                "admission_checks": cell["admission_checks"],
-                "admission_status": cell["admission_status"],
-                "rejection_reasons": cell["rejection_reasons"],
-            }
-            for cell in candidates
-            if cell["partition"] == partition
-        ]
-
     renderer_labels = [
         {
             "cell_id": cell["cell_id"],
@@ -400,7 +698,8 @@ def _root_domains(
         }
         for cell in successful
     ]
-    return {
+    profile_summary = _profile_summary(candidates, revision)
+    roots = {
         "baseline_failure_analysis_root_sha256": analysis["baseline_failure_analysis_sha256"],
         "definition_lock_root_sha256": lock["definition_lock_sha256"],
         "revision1_registry_sha256": appearance_registry_hash(revision),
@@ -409,13 +708,27 @@ def _root_domains(
         "appearance_assignment_root_sha256": _hash_json(assignments),
         "portable_analytic_identity_root_sha256": _hash_json(portable),
         "within_renderer_invariance_outcome_root_sha256": _hash_json(invariance),
-        "design_partition_outcome_root_sha256": _hash_json(partition_outcomes("design")),
-        "qualification_partition_outcome_root_sha256": _hash_json(
-            partition_outcomes("qualification")
+        "design_partition_membership_root_sha256": _hash_json(
+            _partition_membership_domain(candidates, revision, "design")
+        ),
+        "qualification_partition_membership_root_sha256": _hash_json(
+            _partition_membership_domain(candidates, revision, "qualification")
+        ),
+        "profile_admission_outcome_root_sha256": _hash_json(
+            _profile_admission_outcome_domain(profile_summary)
+        ),
+        "renderer_local_design_partition_outcome_root_sha256": _hash_json(
+            _renderer_local_partition_outcome_domain(candidates, "design")
+        ),
+        "renderer_local_qualification_partition_outcome_root_sha256": _hash_json(
+            _renderer_local_partition_outcome_domain(candidates, "qualification")
         ),
         "renderer_local_ecological_label_root_sha256": _hash_json(renderer_labels),
         "renderer_specific_audit_root_sha256": _hash_json(renderer_evidence),
     }
+    if set(roots) != REVISION_ROOT_FIELDS:
+        raise RevisionAuditError("revision root domain implementation is not exact")
+    return roots
 
 
 def _profile_summary(candidates: list[dict[str, Any]], revision: Any) -> dict[str, Any]:
@@ -806,6 +1119,12 @@ def validate_revision_audit(packet_root: Path) -> dict[str, Any]:
         or packet["benchmark_frozen"] is not False
     ):
         raise RevisionAuditError("revision packet makes an unauthorised status claim")
+    if (
+        type(packet["roots"]) is not dict
+        or set(packet["roots"]) != REVISION_ROOT_FIELDS
+        or any(not _is_sha256(value) for value in packet["roots"].values())
+    ):
+        raise RevisionAuditError("revision packet root schema is not strict")
     snapshot_hashes = packet["snapshot_file_sha256"]
     report_hashes = packet["report_file_sha256"]
     if set(snapshot_hashes) != set(SNAPSHOT_FILES) or set(report_hashes) != set(REPORT_FILES):
@@ -839,14 +1158,11 @@ def validate_revision_audit(packet_root: Path) -> dict[str, Any]:
     validate_axis_isolation(revision)
     if _hash_json(_definition_lock_domain(lock)) != lock.get("definition_lock_sha256"):
         raise RevisionAuditError("revision packet definition-lock snapshot is invalid")
-    if (
-        analysis.get("baseline_failure_analysis_sha256")
-        != lock["baseline"]["failure_analysis_sha256"]
-    ):
-        raise RevisionAuditError("revision packet baseline analysis snapshot differs")
+    _validate_baseline_analysis_snapshot(analysis, lock)
     _validate_lock_commit_snapshot(
         packet["candidate_definition_lock_commit"],
         lock,
+        analysis,
         packet["source_provenance"],
     )
     if (

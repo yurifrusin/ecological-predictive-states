@@ -14,8 +14,12 @@ profile IDs plus a disjoint eight-seed qualification partition before any new-pr
 The complete locked local Windows/WGL run generated all 224 candidate cells and 32 controls. Its
 design partition admitted 99/112 cells and its untouched qualification partition admitted 100/112;
 five profiles passed every local design and qualification cell, while the stripe and illumination
-profiles were retained as rejected negative evidence. Exact-head Ubuntu/OSMesa confirmation remains
-pending and renderer disagreement rejects admission.
+profiles were retained as rejected negative evidence. Locked Ubuntu/OSMesa evidence admitted
+97/112 design cells and 100/112 qualification cells. Its two additional design failures were in the
+already-rejected stripe profile, so both environments independently produced the same five-profile
+admitted set. Per-cell admission outcomes remain renderer-local; portable comparison binds matrix
+membership and whole-profile disposition. The admitted set supports only a later freeze proposal,
+not a freeze. Exact-head correction review and owner approval remain pending.
 The protocol and locked definitions are documented in
 [the Revision 1 contract](docs/GATE_0B_APPEARANCE_CANDIDATE_REVISION_1.md).
 

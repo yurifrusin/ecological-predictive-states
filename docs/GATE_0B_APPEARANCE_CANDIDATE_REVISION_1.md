@@ -113,6 +113,14 @@ prospective definition-lock root is
 baseline, analysis, registry/profile hashes, exact seed lists, thresholds, design targets,
 rationales, and schema/method versions while declaring `qualification_started: false`.
 
+The validator reconstructs both the portable and renderer-specific analysis roots, binds the three
+profile/surface/threshold child-report receipts, and requires exact canonical content equality with
+`configs/appearance_revision1_baseline_failure_analysis.json` at the immutable definition-lock
+commit. Thus the diagnosis, causal answers, renderer fingerprint, source-packet receipt, child
+roots, baseline counts and roots, thresholds, method, and canonical base cannot be fully rehashed
+into a different post-qualification account while retaining a valid lock relationship. The child
+reports remain reproducible WGL evidence receipts; no cross-renderer equality is claimed for them.
+
 Qualification may begin only after the exact commit adding this lock has been pushed. That commit is
 never amended or rewritten. Once qualification begins, rendered definitions and admission semantics
 cannot change within this work package.
@@ -128,6 +136,7 @@ cannot change within this work package.
 | Privileged instrumentation | `0.1.0-dev.12` | `0.1.0-dev.13` |
 | Appearance instance | `appearance_instance_v3` | `appearance_instance_v4` |
 | Candidate audit | `appearance_candidate_audit_v2` | `appearance_candidate_revision_audit_v0` |
+| Revision root domains | n/a | `appearance_candidate_revision_root_domains_v1` |
 
 The profile schema advances because nonzero ambient is now accepted and explicitly rendered. The
 config, manifest, instrumentation, and instance contracts advance only on Revision 1 records; the
@@ -147,49 +156,70 @@ complete locked local Windows/WGL run then generated and validated all 224 candi
 32 controls. The design partition admitted 99/112 cells and rejected 13; the untouched
 qualification partition admitted 100/112 and rejected 12.
 
-| Profile | Design | Qualification | Local WGL profile outcome |
+Exact-head Ubuntu/OSMesa independently generated and validated the same membership: its design
+partition admitted 97/112 and rejected 15, while qualification admitted 100/112 and rejected 12.
+The two extra OSMesa failures occur in the already-rejected stripe profile. They are retained
+renderer-local evidence, not a portable-identity failure.
+
+| Profile | WGL design / qualification | OSMesa design / qualification | Cross-renderer profile outcome |
 | --- | --- | --- | --- |
-| `revision1_balanced_reference_v1` | 16/16 | 16/16 | admitted |
-| `revision1_colour_shift_v1` | 16/16 | 16/16 | admitted |
-| `revision1_checker_low_v1` | 16/16 | 16/16 | admitted |
-| `revision1_checker_high_v1` | 16/16 | 16/16 | admitted |
-| `revision1_stripes_low_v1` | 11/16 | 12/16 | rejected |
-| `revision1_illumination_shift_v1` | 8/16 | 8/16 | rejected |
-| `revision1_combined_stress_v1` | 16/16 | 16/16 | admitted |
+| `revision1_balanced_reference_v1` | 16/16 · 16/16 | 16/16 · 16/16 | admitted |
+| `revision1_colour_shift_v1` | 16/16 · 16/16 | 16/16 · 16/16 | admitted |
+| `revision1_checker_low_v1` | 16/16 · 16/16 | 16/16 · 16/16 | admitted |
+| `revision1_checker_high_v1` | 16/16 · 16/16 | 16/16 · 16/16 | admitted |
+| `revision1_stripes_low_v1` | 11/16 · 12/16 | 9/16 · 12/16 | rejected |
+| `revision1_illumination_shift_v1` | 8/16 · 8/16 | 8/16 · 8/16 | rejected |
+| `revision1_combined_stress_v1` | 16/16 · 16/16 | 16/16 · 16/16 | admitted |
 
 All sixteen local illumination rejections were single-occluder material-change failures. The nine
 stripe rejections comprise two single-occluder material-change failures and seven corridor
 texture-variation failures. These failures are retained without threshold, seed, or profile tuning.
 
-The local complete packet root is
-`533624890830305bbd78958b4cfe2668aaca7838d36d48a52d0d0e0c56d0bc76`. Its six portable
-outcome/identity roots are:
+Root-domain v1 separates portable membership and whole-profile dispositions from per-cell
+renderer-local admissions. Its exact cross-renderer comparison roots are:
 
 | Domain | SHA-256 |
 | --- | --- |
+| Baseline failure-analysis | `8ff7374fb4ea0144687a4bda3b25ae3936c7b8b7f0d1ace35ce071d64328dea2` |
+| Definition lock | `71d2ed7a9f45c55bf17ec518c08b5d0b827a7cf0ae2cc3c339dc09197c55f633` |
+| Revision 1 registry | `81da1bb9414e7c53e42bbf65b198aa61d8bb7ed3f81eb2bf5813a1edff245ac4` |
+| Qualification-seed registry | `247db21c869703f5604e63678f0cf614f0b88040a05ce42c61629ddf712cefd5` |
 | Procedural assets | `bd563c543c1dffdd9038e86cb1aa6d97da566fa016d6f6683b11f4964d433ec0` |
 | Appearance assignment | `9b7118e4faffb2a74980e9c1ca85b4758abafad6dd7e739b9b68af0224010523` |
 | Portable analytic identity | `87459ac7f5f09b222ed029afaf3751881398917eb6184c86ce9305902f76ad4e` |
 | Within-renderer invariance outcome | `6bad73a2b68310d2e7b3a19f91dc83d94f15213a91b0955dd541d3d22d5bb100` |
-| Design-partition outcome | `826545aa75737fd8d041b703fcf380e16791a70411c2bcb1c38f783a0fa9916c` |
-| Qualification-partition outcome | `fa976fb849d0037af7bcc8d63d1c554099ecc3f1061fd8ad98cd8d7cc8c3177c` |
+| Design-partition membership | `2493674443d31059d737f256415500a3951cd37ad50198fa3ce197cdf6c9fbaf` |
+| Qualification-partition membership | `24eaee5fdb8f01965ac1091defe3d2bf9e62e66c3e862a86528f857e0041eaa3` |
+| Profile-admission outcome | `8496521a261367e4fb1da340fc6a58b007eb9b2955fb8cafa44c2c8db0532d5b` |
 
-The local renderer-specific ecological-label and audit roots are respectively
-`e1060ab78d6a2f2725b4c87e7ea485a74253eb51a792c247a52496a9b3f21ab6` and
-`c63665c0e4f0c151b06a614ef8a8ef5d14eeb294be73702c0cb1144fd2828773`.
-Exact-head Ubuntu/OSMesa must reproduce the portable roots and independently apply all criteria;
-the local profile outcomes alone do not establish cross-renderer admission.
+Per-cell admission checks, statuses, reasons, and RGB/rendered-texture metrics are renderer-local.
+The unchanged v0 cell-outcome domains retain these historical exact values under explicit names:
+
+| Renderer-local domain | Windows/WGL | Ubuntu/OSMesa |
+| --- | --- | --- |
+| Design-partition outcome | `826545aa75737fd8d041b703fcf380e16791a70411c2bcb1c38f783a0fa9916c` | `96bb5661fdbff0491134ba52011bcea081f1cfb3de73e25956ac4d364e26764d` |
+| Qualification-partition outcome | `fa976fb849d0037af7bcc8d63d1c554099ecc3f1061fd8ad98cd8d7cc8c3177c` | `fa976fb849d0037af7bcc8d63d1c554099ecc3f1061fd8ad98cd8d7cc8c3177c` |
+| Ecological labels | `e1060ab78d6a2f2725b4c87e7ea485a74253eb51a792c247a52496a9b3f21ab6` | `7d916ca67af7f9bd4fed32e1d706b1236a3abe1ef2bfd81d8959aeb679dbc406` |
+| Renderer-specific audit | `c63665c0e4f0c151b06a614ef8a8ef5d14eeb294be73702c0cb1144fd2828773` | `31d0a707acf7f7791b8a72908a9cd433f44878cb7b8f81d32176b36a8cef38d0` |
+
+Matching qualification outcome hashes are incidental: the field domain remains renderer-local.
+The initial exact-head CI failure at run `33247224228` and the Windows/WGL v0 packet root
+`533624890830305bbd78958b4cfe2668aaca7838d36d48a52d0d0e0c56d0bc76` are preserved as
+evidence for the rejected over-broad root ontology. No candidate result was removed or tuned.
 
 The final packet status is `candidate_revision_packet_only_not_frozen`, with null final split and
-evaluation seeds and `full_gate_0b_complete: false`. Portable roots exclude RGB, raw renderer-local
-labels, depth/segmentation hashes, provenance, paths, clocks, hostnames, and contact sheets.
+evaluation seeds and `full_gate_0b_complete: false`. Portable membership/profile roots exclude RGB,
+raw renderer-local labels, per-cell metrics, reasons, depth/segmentation hashes, provenance, paths,
+clocks, hostnames, and contact sheets.
 Renderer/source-specific roots retain metrics, raster identities, provenance, and reconstructible
-contact sheets. Windows/WGL and exact-head Ubuntu/OSMesa must each independently apply all criteria;
-renderer disagreement rejects profile admission.
+contact sheets. Windows/WGL and Ubuntu/OSMesa each independently apply all criteria; if a later
+profile disposition differs, the admitted set is the intersection and the disagreement is
+preserved rather than forced to converge.
 
 ## Remaining work
 
-Independent engineering and scientific review and owner approval remain pending. Even an admitted
-set would only support a later, separately authorised freeze proposal. Final evaluation seeds and a
-development/OOD split remain open. Full Gate 0B exit criteria remain incomplete, and no action in
-this work package authorises Gate 0C, Gate 0D, a model, a tag, a Release, or a scientific claim.
+Independent engineering and scientific re-review and owner approval remain pending. The agreed
+five-profile admitted set only supports a later, separately authorised freeze proposal; it does not
+freeze anything. Final evaluation seeds and a development/OOD split remain open. Full Gate 0B exit
+criteria remain incomplete, and no action in this work package authorises Gate 0C, Gate 0D, a
+model, a tag, a Release, or a scientific claim.
