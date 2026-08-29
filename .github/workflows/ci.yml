@@ -19,6 +19,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install offscreen rendering libraries
         run: sudo apt-get update && sudo apt-get install --yes libgl1-mesa-dri libglfw3 libosmesa6
@@ -55,12 +56,17 @@ jobs:
 
       - name: Audit the complete appearance candidate matrix
         run: |
+          revision_head="$(git rev-parse HEAD)"
+          git checkout --detach 9df0b7a37ab81b02855ef8016e60d79c4f671071
+          uv sync --locked
           uv run epsbench appearance-audit \
             --registry configs/appearance_candidates_v0.yaml \
             --seeds configs/evaluation_seed_candidates_v0.yaml \
             --single-config configs/benchmark_v0.yaml \
             --corridor-config configs/corridor_v0.yaml \
             --output artifacts/gate-0b-slice-5-candidates
+          git checkout --detach "$revision_head"
+          uv sync --locked
           uv run python - <<'PY'
           import hashlib
           import json
