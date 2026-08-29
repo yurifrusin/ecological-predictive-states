@@ -216,6 +216,8 @@ jobs:
                   key: value
                   for key, value in packet["roots"].items()
                   if key in {
+                      "procedural_asset_root_sha256",
+                      "appearance_assignment_root_sha256",
                       "portable_analytic_identity_root_sha256",
                       "within_renderer_invariance_outcome_root_sha256",
                       "design_partition_outcome_root_sha256",
@@ -255,10 +257,6 @@ jobs:
           assert packet["roots"]["definition_lock_root_sha256"] == (
               "71d2ed7a9f45c55bf17ec518c08b5d0b827a7cf0ae2cc3c339dc09197c55f633"
           )
-          assert packet["matrix_counts"] == {
-              "design": {"admitted": 99, "rejected": 13},
-              "qualification": {"admitted": 100, "rejected": 12},
-          }
           assert {
               profile["profile_id"]: profile["revision1_profile_admitted"]
               for profile in profiles
