@@ -34,9 +34,11 @@ can influence implementation.
 ## 2. Source distinction: Deleuze and Guattari are not Gibson
 
 Deleuze and Guattari's **percept** is an aesthetic being of sensation: it is no longer a perception
-belonging to a perceiving subject. Their **affect** is likewise no longer a personal feeling or
-affection. The work of art creates a compound of percepts and affects capable of “standing up” on
-its own.
+belonging to a perceiving subject (Deleuze and Guattari 1994, 164–165). Their **affect** is a
+nonhuman becoming and a zone of indetermination or indiscernibility, not a personal feeling or
+lived-state report (172–173). The work of art creates a compound of percepts and affects capable of
+“standing up” on its own (164–165). The chapter also develops landscape and nonhuman becoming
+through a becoming with the world (168–169).
 
 Gibson's ecological theory of perception is an empirical account of information available to an
 organism in an environment. Gibsonian invariants, ambient optic structure, affordances, and
@@ -65,18 +67,18 @@ Any operational analogy introduced below must preserve this distinction.
 
 | Source term | Source role in the chapter | Possible operational inspiration | Equation that must not be made |
 | --- | --- | --- | --- |
-| Percept | A self-sustaining aesthetic being of sensation, no longer a subject's perception | A typed ecological relational record that is not reducible to a private picture | `percept = EPS label` |
-| Affect | A non-personal becoming or zone of transition, not an emotion report | A future record of changing agent-environment capacities | `affect = reward`, `affect = emotion score`, or `affect = affordance` |
-| Plane of composition | The compositional field on which sensations and their compounds stand and open onto further forces | A protocol for composing heterogeneous cognitive records | `plane of composition = latent space` |
-| Frame or section | An interface or face of a compound, not merely a coordinate | Surface, opening, boundary, attachment, interface, or transition structure | `frame = bounding box` |
-| Counterpoint | A relational composition in which heterogeneous beings or trajectories answer one another | Body-relative affordance and morphology-environment coupling | `counterpoint = similarity metric` |
-| Heterogenesis | Distinct forms of thought call for further heterogeneous creations without becoming one synthesis | Typed neural-colony architecture preserving distinct epistemic products | `heterogenesis = ensemble voting` |
-| Rhizome / assemblage | Broader Deleuze–Guattari concepts concerning non-arborescent multiplicity and contingent composition | Distributed systems as one limited analogy | `cloud computing = rhizome` |
+| Percept | A self-sustaining aesthetic being of sensation, no longer a subject's perception (Deleuze and Guattari 1994, 164–165) | A typed ecological relational record that is not reducible to a private picture | `percept = EPS label` |
+| Affect | A nonhuman becoming and zone of indetermination or indiscernibility, not a personal feeling or lived-state report (Deleuze and Guattari 1994, 172–173) | A future `CAPACITY_TRANSITION` record of changing agent-environment capacities | `affect ≠ CAPACITY_TRANSITION`, `affect ≠ affordance`, `affect ≠ reward`, and `affect ≠ emotion score` |
+| Plane of composition | The compositional field on which sensations and their compounds stand and open onto further forces (Deleuze and Guattari 1994, 190–192) | A protocol for composing heterogeneous cognitive records | `plane of composition = latent space` |
+| Frame or section | An interface or face of a compound, not merely a coordinate (Deleuze and Guattari 1994, 178–181, 186–187) | Surface, opening, boundary, attachment, interface, or transition structure | `frame = bounding box` |
+| Counterpoint | A relational composition in which heterogeneous beings or trajectories answer one another (Deleuze and Guattari 1994, 184–186) | Body-relative affordance and morphology-environment coupling | `counterpoint = similarity metric` |
+| Heterogenesis | Distinct forms of thought call for further heterogeneous creations without becoming one synthesis (Deleuze and Guattari 1994, 196–199) | Typed neural-colony architecture preserving distinct epistemic products | `heterogenesis = ensemble voting` |
+| Rhizome / assemblage / deterritorialization | Broader concepts from *A Thousand Plateaus*, not chapter 7 of *What Is Philosophy?* (Deleuze and Guattari 1987) | Distributed systems as one limited analogy | `cloud computing = rhizome` |
 
 ## 4. From an internal picture to an ecology of relations
 
 One of the chapter's strongest provocations for EPS is its description of the **house** through
-differently oriented sections and joined planes:
+differently oriented sections and joined planes (Deleuze and Guattari 1994, 178–181):
 
 ```text
 foreground and background
@@ -86,9 +88,9 @@ straight and oblique
 walls, floors, doors, windows, mirrors, and openings
 ```
 
-The house is a finite junction of planes that can open toward a larger field of forces. Later, the
-chapter says that frames or sections are not coordinates: they are faces and interfaces of a
-compound.
+The house is a finite junction of planes that can open toward a larger field of forces (178–181).
+Later, the chapter says that frames or sections are not coordinates: they are faces and interfaces
+of a compound (186–187).
 
 This does not scientifically establish an ecological robotics ontology. It nevertheless sharpens a
 design alternative to the idea that a robot must first reconstruct one exhaustive Cartesian scene
@@ -115,7 +117,10 @@ validation, navigation, manipulation, mapping, and communication. The design cla
 > Cartesian coordinates need not be the universal representational substance into which every
 > perceptual relation is first translated.
 
-The current EPS apparatus already points in this direction through:
+The current EPS apparatus documented in the [Slice 3 analytic-flow
+contract](../GATE_0B_SLICE_3_ANALYTIC_FLOW.md), [Slice 4 boundary/event
+contract](../GATE_0B_SLICE_4_BOUNDARY_EVENTS.md), and [Slice 5 appearance-candidate
+contract](../GATE_0B_SLICE_5_APPEARANCE_CANDIDATES.md) already points in this direction through:
 
 ```text
 opaque surfaces
@@ -125,7 +130,7 @@ local projected attachment loci
 accretion and deletion
 frame entry and exit
 occlusion relations
-appearance-controlled ecological invariance
+appearance-candidate audit evidence with no admitted profile
 ```
 
 These are not Deleuzian percepts. They are scientifically controlled relational constructs that
@@ -133,8 +138,9 @@ happen to make the philosophical alternative easier to articulate.
 
 ## 5. Composition rather than universal representation
 
-The chapter repeatedly treats **composition** as more basic than representation. Its artistic claim
-should not be copied into science, but it suggests a powerful engineering question:
+The chapter repeatedly treats **composition** as more basic than representation (Deleuze and
+Guattari 1994, 190–192). Its artistic claim should not be copied into science, but it suggests a
+powerful engineering question:
 
 > Should embodied intelligence be organized around one universal world representation, or around
 > the composition of several distinct but interoperable epistemic products?
@@ -189,10 +195,11 @@ derived.
 
 ## 6. Selective invariance, not material blindness
 
-The chapter insists that sensation cannot be cleanly separated from material expression. Colour,
-line, light, texture, sound, and material are not neutral containers that can always be discarded.
-The percept can make otherwise imperceptible forces perceptible: weight, rotation, pressure,
-expansion, time, growth, and mechanical movement.
+The chapter treats material as passing into expressive sensation rather than as a neutral carrier
+that can always be discarded (Deleuze and Guattari 1994, 166–167). Colour, line, light, texture,
+sound, and material therefore cannot be cleanly separated from expression. The percept can make
+otherwise imperceptible forces perceptible: weight, rotation, pressure, expansion, time, growth,
+and mechanical movement (182–183).
 
 This offers an important correction to a crude interpretation of ecological abstraction.
 
@@ -214,7 +221,8 @@ These alter sensory presentation without changing the ecological situation under
 - renderer-specific raster differences;
 - style-slot permutation independent of surface role.
 
-Slice 5 audits this class.
+[Slice 5](../GATE_0B_SLICE_5_APPEARANCE_CANDIDATES.md) audits candidate controls in this class; it
+does not freeze an appearance profile.
 
 ### 6.2 Ecologically expressive material changes
 
@@ -250,11 +258,11 @@ A concise design rule is:
 
 ## 7. From visibility events to capacity transitions
 
-Deleuze and Guattari's affect should not be implemented as a robot's emotion, reward value, or
-affordance probability.
+Deleuze and Guattari's affect should not be implemented as a robot's emotion, reward value,
+affordance probability, or capacity-transition record (Deleuze and Guattari 1994, 172–173).
 
-A more defensible operational inspiration is the transformation of an **agent-environment
-capacity**:
+The project's candidate engineering translation—not the philosophical definition—is a
+transformation of an **agent-environment capacity**:
 
 ```text
 an opening becomes traversable
@@ -297,8 +305,8 @@ A neutral technical name such as `CAPACITY_TRANSITION` is preferable to naming a
 ## 8. Ambiguity as a first-class epistemic state
 
 The chapter treats zones of indetermination and indiscernibility as productive rather than merely
-defective. This resonates with an existing EPS discipline: do not convert every unresolved state
-into a fabricated positive or zero-valued conclusion.
+defective (Deleuze and Guattari 1994, 172–173). This resonates with an existing EPS discipline: do
+not convert every unresolved state into a fabricated positive or zero-valued conclusion.
 
 An embodied system should distinguish:
 
@@ -343,8 +351,8 @@ and then allow the latter to re-enter the perceptual state as fact.
 ## 9. Counterpoint and body-relative affordance
 
 The chapter's discussion of Uexküll describes nature contrapuntally: web and fly, tick and mammal,
-shell and hermit crab, organism and environmental trajectory. The relationship is neither a
-property of one isolated object nor a teleological master plan.
+shell and hermit crab, organism and environmental trajectory (Deleuze and Guattari 1994, 184–186).
+The relationship is neither a property of one isolated object nor a teleological master plan.
 
 A robotics analogue is:
 
@@ -384,8 +392,9 @@ The research question would be:
 ## 10. The Gibsonian perceiver and the LLM reasoner
 
 The chapter's closing distinction among art, science, and philosophy is especially useful for the
-Gibsonian-head/LLM architecture. The three forms of thought intersect and call for one another, but
-do not become one synthesis.
+Gibsonian-head/LLM architecture. The three forms of thought intersect and call for one another,
+without becoming one synthesis; their intersection instead calls for further heterogeneous
+creation (Deleuze and Guattari 1994, 196–199).
 
 The engineering analogue is not a mapping of philosophy directly onto modules. It is a rule of
 epistemic separation:
@@ -476,7 +485,7 @@ heterogeneous products whose differences remain operationally meaningful.
 Unfrozen Schemas provides a natural substrate for this architecture because it treats typed
 interfaces, provenance, role separation, and bounded authority as central rather than incidental.
 
-The EPS review workflow is itself a useful organizational analogy:
+The [EPS review workflow](../review-protocol.md) is itself a useful organizational analogy:
 
 ```text
 implementation
@@ -487,13 +496,13 @@ closeout
 empirical gate evaluation
 ```
 
-The process became more reliable when these roles were not collapsed into one universal authority.
-Engineering review detects defects that scientific review may not. Scientific review catches
+The workflow's explicit separation of these roles illustrates the architectural analogy.
+Engineering review addresses defects that scientific review may not. Scientific review addresses
 construct errors that passing tests may not. Owner approval does not become empirical evidence.
 Closeout does not repair implementation.
 
-This organizational result should not be confused with a scientific result about cognition. It
-does, however, strengthen one architectural intuition:
+This organizational analogy should not be confused with a scientific result about cognition. It
+does, however, motivate one architectural intuition:
 
 > Composition of heterogeneous authorities can be more reliable and auditable than premature
 > unification.
@@ -501,7 +510,7 @@ does, however, strengthen one architectural intuition:
 ## 13. Opinion and chaos as engineering failure modes
 
 The chapter's final warning identifies two dangers when heterogeneous forms of thought intersect:
-return to opinion and collapse into chaos.
+return to opinion and collapse into chaos (Deleuze and Guattari 1994, 196–199).
 
 These have useful AI analogues.
 
@@ -544,8 +553,9 @@ LLM's opinion or an uncoordinated swarm.
 
 ## 14. Cloud and distributed systems: analogy and limit
 
-The popularity of *A Thousand Plateaus* in the 1990s can be read genealogically against later
-networked realities:
+As a limited design analogy, concepts developed in *A Thousand Plateaus*—including rhizome,
+assemblage, and deterritorialization—can be brought into conversation with later distributed
+systems (Deleuze and Guattari 1987):
 
 ```text
 distributed identity
@@ -559,7 +569,7 @@ flows detached from one physical location
 
 This does not mean Deleuze and Guattari technically predicted cloud computing.
 
-Cloud systems also create strong centres and reterritorializations:
+Cloud systems also create centralisation and reterritorialisation:
 
 ```text
 hyperscale providers
@@ -719,24 +729,33 @@ A disciplined sequence is:
 The first likely future bridge from the current EPS programme is not an LLM. It is a bounded
 `CAPACITY_TRANSITION` experiment built on the already canonical perceptual apparatus.
 
-## 19. Source basis
+## 19. References
 
-Primary philosophical source:
+Inline citations use author, year, and the printed pagination of the cited English edition. The
+broader philosophical source is separate from chapter 7 and does not make its distributed-systems
+analogy a claim of either source.
 
-- Gilles Deleuze and Félix Guattari, *What Is Philosophy?*, chapter 7,
-  “Percept, Affect, and Concept,” especially the discussions of:
-  - percepts and affects as beings of sensation;
-  - material expression;
-  - landscape and nonhuman becoming;
-  - the house, sections, planes, and frames;
-  - imperceptible forces;
-  - Uexküll and counterpoint;
-  - composition;
-  - the distinction and intersection of art, science, and philosophy.
+### Primary chapter source
 
-Related scientific source:
+- Deleuze, Gilles, and Félix Guattari. *What Is Philosophy?* Translated by Hugh Tomlinson
+  and Graham Burchell. New York: Columbia University Press, 1994. Chapter 7, “Percept, Affect, and
+  Concept,” pp. 163–199.
 
-- James J. Gibson, *The Ecological Approach to Visual Perception*.
+### Broader philosophical source
+
+- Deleuze, Gilles, and Félix Guattari. *A Thousand Plateaus: Capitalism and Schizophrenia*.
+  Translation and foreword by Brian Massumi. Minneapolis: University of Minnesota Press, 1987.
+
+### Related scientific source
+
+- Gibson, James J. *The Ecological Approach to Visual Perception*. Boston: Houghton Mifflin, 1979.
+
+### Internal project documents
+
+- [Gate 0B Slice 3 — Analytic Optical Transport](../GATE_0B_SLICE_3_ANALYTIC_FLOW.md)
+- [Gate 0B Slice 4 — Oriented Boundaries and Visibility Events](../GATE_0B_SLICE_4_BOUNDARY_EVENTS.md)
+- [Gate 0B Slice 5 — Procedural Appearance Candidates](../GATE_0B_SLICE_5_APPEARANCE_CANDIDATES.md)
+- [Research-software review protocol](../review-protocol.md)
 
 The relationship between these sources is interpretive and exploratory. No direct historical or
 scientific derivation is asserted.
