@@ -202,6 +202,52 @@ jobs:
           assert packet["roots"]["definition_lock_root_sha256"] == (
               "71d2ed7a9f45c55bf17ec518c08b5d0b827a7cf0ae2cc3c339dc09197c55f633"
           )
+          assert packet["matrix_counts"] == {
+              "design": {"admitted": 99, "rejected": 13},
+              "qualification": {"admitted": 100, "rejected": 12},
+          }
+          assert {
+              profile["profile_id"]: profile["revision1_profile_admitted"]
+              for profile in profiles
+          } == {
+              "revision1_balanced_reference_v1": True,
+              "revision1_colour_shift_v1": True,
+              "revision1_checker_low_v1": True,
+              "revision1_checker_high_v1": True,
+              "revision1_stripes_low_v1": False,
+              "revision1_illumination_shift_v1": False,
+              "revision1_combined_stress_v1": True,
+          }
+          assert {
+              key: packet["roots"][key]
+              for key in {
+                  "procedural_asset_root_sha256",
+                  "appearance_assignment_root_sha256",
+                  "portable_analytic_identity_root_sha256",
+                  "within_renderer_invariance_outcome_root_sha256",
+                  "design_partition_outcome_root_sha256",
+                  "qualification_partition_outcome_root_sha256",
+              }
+          } == {
+              "procedural_asset_root_sha256": (
+                  "bd563c543c1dffdd9038e86cb1aa6d97da566fa016d6f6683b11f4964d433ec0"
+              ),
+              "appearance_assignment_root_sha256": (
+                  "9b7118e4faffb2a74980e9c1ca85b4758abafad6dd7e739b9b68af0224010523"
+              ),
+              "portable_analytic_identity_root_sha256": (
+                  "87459ac7f5f09b222ed029afaf3751881398917eb6184c86ce9305902f76ad4e"
+              ),
+              "within_renderer_invariance_outcome_root_sha256": (
+                  "6bad73a2b68310d2e7b3a19f91dc83d94f15213a91b0955dd541d3d22d5bb100"
+              ),
+              "design_partition_outcome_root_sha256": (
+                  "826545aa75737fd8d041b703fcf380e16791a70411c2bcb1c38f783a0fa9916c"
+              ),
+              "qualification_partition_outcome_root_sha256": (
+                  "fa976fb849d0037af7bcc8d63d1c554099ecc3f1061fd8ad98cd8d7cc8c3177c"
+              ),
+          }
           print("Design matrix outcomes:", packet["matrix_counts"]["design"])
           print("Qualification matrix outcomes:", packet["matrix_counts"]["qualification"])
           print(

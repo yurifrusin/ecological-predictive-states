@@ -7,7 +7,11 @@ This implementation completes the repository foundation in Gate 0A and preserves
 Appearance Candidate Revision 1 adds a separate v2 registry, a prospective qualification-seed
 registry, deterministic baseline failure analysis, and a two-partition revision packet. The
 canonical v1 registry, design seeds, thresholds, and 44/116 result remain immutable. Revision 1 is
-pending independent review and owner approval and has no freeze or gate effect.
+pending exact-head Ubuntu/OSMesa confirmation, independent review, and owner approval and has no
+freeze or gate effect. The complete locked Windows/WGL run generated all 256 candidate/control
+records: the design partition admitted 99/112 candidate cells, the untouched qualification
+partition admitted 100/112, and five of seven profiles passed all local cells. Stripe and
+illumination candidates remain retained negative evidence.
 
 The path is intentionally short:
 

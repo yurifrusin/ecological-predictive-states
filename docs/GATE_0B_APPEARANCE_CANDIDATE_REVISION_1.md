@@ -141,8 +141,44 @@ eight seeds, for exactly 224 Revision 1 candidate cells. Legacy reference contro
 in addition. A profile is admitted only if all 16 design cells and all 16 qualification cells are
 admitted. Every failure and control failure remains retained.
 
-Qualification outcome at the definition lock: **not yet rendered**. This section is updated
-factually after the pushed lock commit without modifying the locked definitions.
+The immutable lock commit
+`914550ce4e3a819dcbcd0bd5390e3c6034af5bf6` was pushed before qualification began. The
+complete locked local Windows/WGL run then generated and validated all 224 candidate cells and all
+32 controls. The design partition admitted 99/112 cells and rejected 13; the untouched
+qualification partition admitted 100/112 and rejected 12.
+
+| Profile | Design | Qualification | Local WGL profile outcome |
+| --- | --- | --- | --- |
+| `revision1_balanced_reference_v1` | 16/16 | 16/16 | admitted |
+| `revision1_colour_shift_v1` | 16/16 | 16/16 | admitted |
+| `revision1_checker_low_v1` | 16/16 | 16/16 | admitted |
+| `revision1_checker_high_v1` | 16/16 | 16/16 | admitted |
+| `revision1_stripes_low_v1` | 11/16 | 12/16 | rejected |
+| `revision1_illumination_shift_v1` | 8/16 | 8/16 | rejected |
+| `revision1_combined_stress_v1` | 16/16 | 16/16 | admitted |
+
+All sixteen local illumination rejections were single-occluder material-change failures. The nine
+stripe rejections comprise two single-occluder material-change failures and seven corridor
+texture-variation failures. These failures are retained without threshold, seed, or profile tuning.
+
+The local complete packet root is
+`533624890830305bbd78958b4cfe2668aaca7838d36d48a52d0d0e0c56d0bc76`. Its six portable
+outcome/identity roots are:
+
+| Domain | SHA-256 |
+| --- | --- |
+| Procedural assets | `bd563c543c1dffdd9038e86cb1aa6d97da566fa016d6f6683b11f4964d433ec0` |
+| Appearance assignment | `9b7118e4faffb2a74980e9c1ca85b4758abafad6dd7e739b9b68af0224010523` |
+| Portable analytic identity | `87459ac7f5f09b222ed029afaf3751881398917eb6184c86ce9305902f76ad4e` |
+| Within-renderer invariance outcome | `6bad73a2b68310d2e7b3a19f91dc83d94f15213a91b0955dd541d3d22d5bb100` |
+| Design-partition outcome | `826545aa75737fd8d041b703fcf380e16791a70411c2bcb1c38f783a0fa9916c` |
+| Qualification-partition outcome | `fa976fb849d0037af7bcc8d63d1c554099ecc3f1061fd8ad98cd8d7cc8c3177c` |
+
+The local renderer-specific ecological-label and audit roots are respectively
+`e1060ab78d6a2f2725b4c87e7ea485a74253eb51a792c247a52496a9b3f21ab6` and
+`c63665c0e4f0c151b06a614ef8a8ef5d14eeb294be73702c0cb1144fd2828773`.
+Exact-head Ubuntu/OSMesa must reproduce the portable roots and independently apply all criteria;
+the local profile outcomes alone do not establish cross-renderer admission.
 
 The final packet status is `candidate_revision_packet_only_not_frozen`, with null final split and
 evaluation seeds and `full_gate_0b_complete: false`. Portable roots exclude RGB, raw renderer-local

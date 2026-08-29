@@ -99,3 +99,12 @@ failures are retained and do not trigger within-work-package parameter tuning. T
 chooses explicit ambient fill, moderate-luminance palettes, and one-cycle/four-cycle texture partners
 from the baseline surface/normal and minification diagnosis. These are candidate interventions, not
 a benchmark freeze or scientific result.
+
+The immutable definition-lock commit `914550ce4e3a819dcbcd0bd5390e3c6034af5bf6` was pushed
+before any Revision 1 candidate rendering. The complete locked Windows/WGL run subsequently
+generated and validated 224 candidate cells and 32 controls. Design admitted 99/112 and untouched
+qualification admitted 100/112. Balanced reference, colour shift, both checker frequencies, and
+combined stress passed every local cell; stripe and illumination profiles retained their failures.
+No definition, seed, threshold, or admission rule changed after qualification began. Exact-head
+Ubuntu/OSMesa confirmation, dual review, and owner approval remain pending; no freeze or scientific
+result follows.

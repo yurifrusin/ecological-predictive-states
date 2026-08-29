@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from epsbench.appearance import (
     CANONICAL_PROFILE_IDS,
     REVISION1_PROFILE_IDS,
+    AppearanceInstanceRecord,
     AppearanceRevision1Registry,
     QualificationSeedRegistry,
     appearance_profile_hash,
@@ -143,6 +144,8 @@ def test_revision_instance_binds_ambient_registry_and_partition_seed_identity() 
         "snapshotted_revision_partition_seed_registry_v1"
     )
     assert plan.light_ambient == "0.35 0.35 0.35"
+    canonical_record = canonical_json_bytes(plan.record)
+    assert AppearanceInstanceRecord.model_validate_json(canonical_record) == plan.record
 
 
 def test_definition_lock_recomputes_and_rejects_fully_rehashed_profile_mutation(

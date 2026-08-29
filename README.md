@@ -11,6 +11,11 @@ Gate 0B procedural appearance-candidate Slice 5 is also canonical after exact-he
 Appearance Candidate Revision 1 is an implementation work package pending dual review. It preserves
 the canonical 44/116 result, diagnoses its retained failures, and prospectively locks seven new
 profile IDs plus a disjoint eight-seed qualification partition before any new-profile rendering.
+The complete locked local Windows/WGL run generated all 224 candidate cells and 32 controls. Its
+design partition admitted 99/112 cells and its untouched qualification partition admitted 100/112;
+five profiles passed every local design and qualification cell, while the stripe and illumination
+profiles were retained as rejected negative evidence. Exact-head Ubuntu/OSMesa confirmation remains
+pending and renderer disagreement rejects admission.
 The protocol and locked definitions are documented in
 [the Revision 1 contract](docs/GATE_0B_APPEARANCE_CANDIDATE_REVISION_1.md).
 
