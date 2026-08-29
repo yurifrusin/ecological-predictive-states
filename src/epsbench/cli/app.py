@@ -9,6 +9,8 @@ import typer
 from epsbench.audit import create_appearance_audit, validate_appearance_audit
 from epsbench.config import load_config
 from epsbench.data import DatasetLoader, create_inspection_image, generate_dataset, validate_dataset
+from epsbench.failure_analysis import create_failure_analysis, validate_failure_analysis
+from epsbench.revision import create_revision_audit, validate_revision_audit
 from epsbench.schema import DatasetManifest, ModalityPermissionSet
 
 app = typer.Typer(
@@ -137,6 +139,74 @@ def appearance_audit_command(
     )
     typer.echo(f"Renderer-specific audit root: {roots['renderer_specific_audit_root_sha256']}")
     typer.echo(f"Candidate packet: {output}")
+
+
+@app.command(name="appearance-failure-analysis")
+def appearance_failure_analysis_command(
+    packet: Annotated[Path, typer.Option(exists=True, file_okay=False, readable=True)],
+    output: Annotated[Path, typer.Option(file_okay=False)],
+) -> None:
+    """Analyse the independently validated canonical Slice 5 negative evidence."""
+
+    try:
+        analysis = create_failure_analysis(packet, output)
+        validate_failure_analysis(output, source_packet=packet)
+    except Exception as error:
+        typer.echo(f"Appearance failure analysis failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(
+        f"Baseline failure-analysis logical root: {analysis['baseline_failure_analysis_sha256']}"
+    )
+    typer.echo(f"Baseline failure analysis: {output}")
+
+
+@app.command(name="appearance-revision-audit")
+def appearance_revision_audit_command(
+    baseline_registry: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    design_seeds: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    revision_registry: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    qualification_seeds: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    definition_lock: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    single_config: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    corridor_config: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    output: Annotated[Path, typer.Option(file_okay=False)],
+) -> None:
+    """Build and validate the locked two-partition Revision 1 candidate packet."""
+
+    try:
+        packet = create_revision_audit(
+            baseline_registry,
+            design_seeds,
+            revision_registry,
+            qualification_seeds,
+            definition_lock,
+            single_config,
+            corridor_config,
+            output,
+        )
+        validate_revision_audit(output)
+    except Exception as error:
+        typer.echo(f"Appearance revision audit failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    roots = packet["roots"]
+    typer.echo(f"Revision packet root: {packet['complete_packet_root_sha256']}")
+    typer.echo(
+        f"Design outcomes: {packet['matrix_counts']['design']}; "
+        f"qualification outcomes: {packet['matrix_counts']['qualification']}"
+    )
+    typer.echo(
+        "Portable roots: "
+        f"analytic={roots['portable_analytic_identity_root_sha256']} "
+        f"invariance={roots['within_renderer_invariance_outcome_root_sha256']} "
+        f"design={roots['design_partition_outcome_root_sha256']} "
+        f"qualification={roots['qualification_partition_outcome_root_sha256']}"
+    )
+    typer.echo(
+        "Renderer-local roots: "
+        f"labels={roots['renderer_local_ecological_label_root_sha256']} "
+        f"audit={roots['renderer_specific_audit_root_sha256']}"
+    )
+    typer.echo(f"Revision candidate packet: {output}")
 
 
 def main() -> None:

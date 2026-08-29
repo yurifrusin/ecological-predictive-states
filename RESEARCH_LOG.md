@@ -85,3 +85,17 @@ registry and binds its identity and schedule source into the manifest, dataset l
 appearance-instance identity. Validation is self-contained. This does not promote candidate seeds to
 final evaluation seeds: the unchanged result remains 44 admitted cells, 116 rejected cells, and no
 profile admitted across every scene/seed cell. No freeze or scientific result follows.
+
+## 2026-08-29 — Appearance Candidate Revision 1 prospective lock
+
+The canonical Slice 5 profiles, seeds, thresholds, and 44/116 result remain immutable. Revision 1
+adds new profile IDs rather than editing failed candidates in place.
+
+Revision 1 uses the original eight seeds for diagnosis and a separately derived, prospectively
+locked eight-seed qualification set. Neither set is a final evaluation-seed freeze.
+
+Revision 1 profile definitions are committed before qualification rendering. Qualification
+failures are retained and do not trigger within-work-package parameter tuning. The definition lock
+chooses explicit ambient fill, moderate-luminance palettes, and one-cycle/four-cycle texture partners
+from the baseline surface/normal and minification diagnosis. These are candidate interventions, not
+a benchmark freeze or scientific result.

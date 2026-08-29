@@ -4,6 +4,11 @@
 
 This implementation completes the repository foundation in Gate 0A and preserves the canonical single-occluder Gate 0B Slice 1, corridor Slice 2, analytic optical-transport Slice 3, and oriented-boundary and ecological visibility-event Slice 4. Slice 4 became canonical after exact-head dual independent review and owner approval at `24deb074d4ba0cf3e1044e466ecbbb6e0b2a4cc4`. Slice 5 procedural appearance-candidate apparatus is also canonical after exact-head engineering and scientific review and owner approval at `2ea05867e7c8cb04ee4f9d0138394602b6c3e53a`; its empty admitted-profile set remains preserved negative evidence. This does not satisfy the full Gate 0B deliverable list in `MILESTONE_0.md` and makes no scientific claim.
 
+Appearance Candidate Revision 1 adds a separate v2 registry, a prospective qualification-seed
+registry, deterministic baseline failure analysis, and a two-partition revision packet. The
+canonical v1 registry, design seeds, thresholds, and 44/116 result remain immutable. Revision 1 is
+pending independent review and owner approval and has no freeze or gate effect.
+
 The path is intentionally short:
 
 ```text

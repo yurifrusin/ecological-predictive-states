@@ -24,11 +24,14 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from epsbench.appearance import (
+    APPEARANCE_REGISTRY_VERSION,
     AppearanceInstanceRecord,
     AppearanceProfile,
     AppearanceRegistry,
+    AppearanceRegistryType,
     CandidateClass,
     EvaluationSeedRegistry,
+    SeedRegistryType,
     TextureFamily,
     appearance_profile_hash,
     appearance_registry_hash,
@@ -560,14 +563,22 @@ def _validate_cell_schema(cell: dict[str, Any]) -> None:
 
 
 def _profile_config(
-    config: BenchmarkConfig, profile: AppearanceProfile, candidate_seed: int
+    config: BenchmarkConfig,
+    profile: AppearanceProfile,
+    candidate_seed: int,
+    registry_version: str = APPEARANCE_REGISTRY_VERSION,
 ) -> BenchmarkConfig:
     return type(config).model_validate(
         {
             **config.model_dump(mode="python"),
+            "schema_version": (
+                "0.1.0-dev.5"
+                if registry_version == "appearance_candidate_registry_v2"
+                else "0.1.0-dev.4"
+            ),
             "seed": candidate_seed,
             "appearance": {
-                "registry_version": "appearance_candidate_registry_v1",
+                "registry_version": registry_version,
                 "profile_id": profile.profile_id,
             },
         }
@@ -998,11 +1009,14 @@ def _dataset_cell(
     profile: AppearanceProfile,
     seed_index: int,
     candidate_seed: int,
-    registry: AppearanceRegistry,
-    seeds: EvaluationSeedRegistry,
+    registry: AppearanceRegistryType,
+    seeds: SeedRegistryType,
+    *,
+    cell_id_prefix: str | None = None,
 ) -> dict[str, Any]:
     scene = config.scene_family.value
-    cell_id = _cell_id(scene, profile.profile_id, seed_index)
+    base_cell_id = _cell_id(scene, profile.profile_id, seed_index)
+    cell_id = f"{cell_id_prefix}--{base_cell_id}" if cell_id_prefix else base_cell_id
     cell: dict[str, Any] = {
         "cell_id": cell_id,
         "scene_family": scene,
@@ -1015,7 +1029,7 @@ def _dataset_cell(
         "rejection_reasons": [],
     }
     try:
-        selected = _profile_config(config, profile, candidate_seed)
+        selected = _profile_config(config, profile, candidate_seed, registry.registry_version)
         manifest = generate_dataset(
             selected,
             1,
@@ -1361,8 +1375,8 @@ def _validate_contact_sheet_manifest(
 
 
 def _roots(
-    registry: AppearanceRegistry,
-    seeds: EvaluationSeedRegistry,
+    registry: AppearanceRegistryType,
+    seeds: SeedRegistryType,
     cells: list[dict[str, Any]],
 ) -> dict[str, str]:
     successful = [cell for cell in cells if cell["generation_status"] == "success"]
@@ -1526,7 +1540,11 @@ def _write_packet_reports(
     return packet
 
 
-def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
+def validate_appearance_audit(
+    packet_root: Path,
+    *,
+    verify_current_source_provenance: bool = True,
+) -> dict[str, Any]:
     """Independently recompute matrix, metrics, balance, and packet roots."""
 
     artifact_registry = _PacketArtifactRegistry(packet_root)
@@ -1831,7 +1849,11 @@ def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
     current_governing_hashes = {path: sha256_file(Path(path)) for path in GOVERNING_DOCUMENTS}
     if current_governing_hashes != packet["governing_document_hashes"]:
         raise AppearanceAuditError("governing-document hash mismatch")
-    if collect_source_provenance(Path.cwd()).model_dump(mode="json") != packet["source_provenance"]:
+    if (
+        verify_current_source_provenance
+        and collect_source_provenance(Path.cwd()).model_dump(mode="json")
+        != packet["source_provenance"]
+    ):
         raise AppearanceAuditError("packet source provenance is not truthful for this source tree")
     return packet
 
@@ -1853,6 +1875,10 @@ def create_appearance_audit(
         output.rmdir()
     registry = load_appearance_registry(registry_path)
     seeds = load_evaluation_seed_registry(seeds_path)
+    if not isinstance(registry, AppearanceRegistry) or not isinstance(
+        seeds, EvaluationSeedRegistry
+    ):
+        raise AppearanceAuditError("canonical audit requires the v1 registry and design seeds")
     validate_axis_isolation(registry)
     configs = (load_config(single_config_path), load_config(corridor_config_path))
     if tuple(config.scene_family.value for config in configs) != SCENE_FAMILIES:

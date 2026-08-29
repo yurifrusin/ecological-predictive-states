@@ -104,7 +104,9 @@ class ForwardActionConfig(StrictConfigModel):
 
 
 class AppearanceConfig(StrictConfigModel):
-    registry_version: Literal["appearance_candidate_registry_v1"]
+    registry_version: Literal[
+        "appearance_candidate_registry_v1", "appearance_candidate_registry_v2"
+    ]
     profile_id: str = Field(pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*_v[0-9]+$")
 
 
@@ -138,7 +140,7 @@ class CorridorGeometryConfig(StrictConfigModel):
 
 
 class SingleOccluderConfig(StrictConfigModel):
-    schema_version: Literal["0.1.0-dev.4"]
+    schema_version: Literal["0.1.0-dev.4", "0.1.0-dev.5"]
     scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
     seed: int = Field(ge=0, lt=2**64)
     render: RenderConfig
@@ -148,6 +150,13 @@ class SingleOccluderConfig(StrictConfigModel):
 
     @model_validator(mode="after")
     def action_matches_camera_motion(self) -> "SingleOccluderConfig":
+        expected_schema = (
+            "0.1.0-dev.5"
+            if self.appearance.registry_version == "appearance_candidate_registry_v2"
+            else "0.1.0-dev.4"
+        )
+        if self.schema_version != expected_schema:
+            raise ValueError("configuration schema and appearance registry versions disagree")
         observed_delta = self.camera.after_lateral - self.camera.before_lateral
         if not math.isclose(
             observed_delta,
@@ -160,7 +169,7 @@ class SingleOccluderConfig(StrictConfigModel):
 
 
 class CorridorConfig(StrictConfigModel):
-    schema_version: Literal["0.1.0-dev.4"]
+    schema_version: Literal["0.1.0-dev.4", "0.1.0-dev.5"]
     scene_family: Literal[SceneFamily.CORRIDOR]
     seed: int = Field(ge=0, lt=2**64)
     render: RenderConfig
@@ -171,6 +180,13 @@ class CorridorConfig(StrictConfigModel):
 
     @model_validator(mode="after")
     def camera_path_is_legal_for_every_sample(self) -> "CorridorConfig":
+        expected_schema = (
+            "0.1.0-dev.5"
+            if self.appearance.registry_version == "appearance_candidate_registry_v2"
+            else "0.1.0-dev.4"
+        )
+        if self.schema_version != expected_schema:
+            raise ValueError("configuration schema and appearance registry versions disagree")
         wall_clearance = 0.1
         half_minimum_width = self.geometry.width.minimum / 2.0
         if abs(self.camera.lateral_position) >= half_minimum_width - wall_clearance:

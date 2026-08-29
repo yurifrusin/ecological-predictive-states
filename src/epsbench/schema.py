@@ -1202,7 +1202,7 @@ class BoundaryVisibilityDiagnostics(StrictModel):
 
 
 class SingleOccluderInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.12"]
+    schema_version: Literal["0.1.0-dev.12", "0.1.0-dev.13"]
     scene_family: Literal[SceneFamily.SINGLE_OCCLUDER]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance: AppearanceInstanceRecord
@@ -1219,6 +1219,13 @@ class SingleOccluderInstrumentation(StrictModel):
 
     @model_validator(mode="after")
     def apparatus_mapping_is_exact_and_finite(self) -> SingleOccluderInstrumentation:
+        expected_schema = (
+            "0.1.0-dev.13"
+            if self.appearance.registry_version == "appearance_candidate_registry_v2"
+            else "0.1.0-dev.12"
+        )
+        if self.schema_version != expected_schema:
+            raise ValueError("instrumentation schema and appearance instance versions disagree")
         expected_names = {"support_surface", "occluding_surface", "background_surface"}
         if set(self.raw_geom_ids) != expected_names:
             raise ValueError("raw geom IDs must describe exactly the single-occluder apparatus")
@@ -1253,7 +1260,7 @@ class SingleOccluderInstrumentation(StrictModel):
 
 
 class CorridorInstrumentation(StrictModel):
-    schema_version: Literal["0.1.0-dev.12"]
+    schema_version: Literal["0.1.0-dev.12", "0.1.0-dev.13"]
     scene_family: Literal[SceneFamily.CORRIDOR]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     appearance: AppearanceInstanceRecord
@@ -1273,13 +1280,20 @@ class CorridorInstrumentation(StrictModel):
         RawSegmentationFrameEvidence,
     ]
     geometry_sampling_rule: Literal["uniform_width_length_v1"]
-    appearance_rule: Literal["procedural_profile_instance_v1"]
+    appearance_rule: Literal["procedural_profile_instance_v1", "procedural_profile_instance_v2"]
     analytic_transport_diagnostics: AnalyticTransportDiagnostics
     attachment_contract: PrivilegedAttachmentContractEvidence
     boundary_visibility_diagnostics: BoundaryVisibilityDiagnostics
 
     @model_validator(mode="after")
     def apparatus_mapping_and_evidence_are_exact(self) -> CorridorInstrumentation:
+        revision1 = self.appearance.registry_version == "appearance_candidate_registry_v2"
+        expected_schema = "0.1.0-dev.13" if revision1 else "0.1.0-dev.12"
+        expected_rule = (
+            "procedural_profile_instance_v2" if revision1 else "procedural_profile_instance_v1"
+        )
+        if self.schema_version != expected_schema or self.appearance_rule != expected_rule:
+            raise ValueError("instrumentation schema and appearance rule versions disagree")
         expected_names = {
             "corridor_floor",
             "corridor_left_surface",
@@ -1408,7 +1422,7 @@ class RendererProvenance(StrictModel):
 
 
 class DatasetManifest(StrictModel):
-    schema_version: Literal["0.1.0-dev.7"]
+    schema_version: Literal["0.1.0-dev.7", "0.1.0-dev.8"]
     generator_version: Literal["0.1.0"]
     scene_family: SceneFamily
     root_seed: int = Field(ge=0)
@@ -1419,7 +1433,10 @@ class DatasetManifest(StrictModel):
     appearance_registry_snapshot: ArtifactRecord
     evaluation_seed_registry_sha256: Sha256
     evaluation_seed_registry_snapshot: ArtifactRecord
-    appearance_assignment_schedule_source: Literal["snapshotted_evaluation_seed_registry_v1"]
+    appearance_assignment_schedule_source: Literal[
+        "snapshotted_evaluation_seed_registry_v1",
+        "snapshotted_revision_partition_seed_registry_v1",
+    ]
     resolved_config: ArtifactRecord
     renderer_provenance: RendererProvenance
     renderer_execution_provenance_sha256: Sha256
@@ -1431,6 +1448,11 @@ class DatasetManifest(StrictModel):
 
     @model_validator(mode="after")
     def episodes_are_unique_and_ordered(self) -> DatasetManifest:
+        revision1 = self.appearance_assignment_schedule_source == (
+            "snapshotted_revision_partition_seed_registry_v1"
+        )
+        if self.schema_version != ("0.1.0-dev.8" if revision1 else "0.1.0-dev.7"):
+            raise ValueError("dataset schema and appearance assignment versions disagree")
         if self.resolved_config.modality != Modality.PRIVILEGED_GENERATION_RECORDS:
             raise ValueError("resolved configuration must be privileged generation data")
         if self.appearance_registry_snapshot.modality != Modality.APPEARANCE_CONTROL:

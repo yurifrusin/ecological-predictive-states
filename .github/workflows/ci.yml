@@ -125,3 +125,114 @@ jobs:
               roots["renderer_local_ecological_label_root_sha256"],
           )
           PY
+
+      - name: Analyse the canonical negative evidence and validate the definition lock
+        run: |
+          uv run epsbench appearance-failure-analysis \
+            --packet artifacts/gate-0b-slice-5-candidates \
+            --output artifacts/appearance-revision1-analysis
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from epsbench.revision import validate_definition_lock
+
+          analysis = json.loads(
+              Path("artifacts/appearance-revision1-analysis/baseline_failure_analysis.json")
+              .read_text()
+          )
+          assert analysis["baseline_failure_analysis_sha256"] == (
+              "8ff7374fb4ea0144687a4bda3b25ae3936c7b8b7f0d1ace35ce071d64328dea2"
+          )
+          lock = validate_definition_lock(
+              Path("configs/appearance_candidates_v0.yaml"),
+              Path("configs/evaluation_seed_candidates_v0.yaml"),
+              Path("configs/appearance_candidates_revision1.yaml"),
+              Path("configs/appearance_revision1_qualification_seeds_v0.yaml"),
+              Path("configs/appearance_candidate_revision1_lock.json"),
+              Path("configs/appearance_revision1_baseline_failure_analysis.json"),
+          )
+          assert lock["definition_lock_sha256"] == (
+              "71d2ed7a9f45c55bf17ec518c08b5d0b827a7cf0ae2cc3c339dc09197c55f633"
+          )
+          print(
+              "Renderer-specific baseline analysis root (reported, not compared):",
+              analysis["renderer_specific_failure_analysis_sha256"],
+          )
+          PY
+
+      - name: Qualify every locked Revision 1 profile in both seed partitions
+        run: |
+          uv run epsbench appearance-revision-audit \
+            --baseline-registry configs/appearance_candidates_v0.yaml \
+            --design-seeds configs/evaluation_seed_candidates_v0.yaml \
+            --revision-registry configs/appearance_candidates_revision1.yaml \
+            --qualification-seeds configs/appearance_revision1_qualification_seeds_v0.yaml \
+            --definition-lock configs/appearance_candidate_revision1_lock.json \
+            --single-config configs/benchmark_v0.yaml \
+            --corridor-config configs/corridor_v0.yaml \
+            --output artifacts/gate-0b-appearance-revision1
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          output = Path("artifacts/gate-0b-appearance-revision1")
+          packet = json.loads((output / "revision1_candidate_packet.json").read_text())
+          design = json.loads((output / "design_seed_matrix.json").read_text())["cells"]
+          qualification = json.loads(
+              (output / "qualification_seed_matrix.json").read_text()
+          )["cells"]
+          profiles = json.loads((output / "profile_summary.json").read_text())["profiles"]
+          assert packet["freeze_status"] == "candidate_revision_packet_only_not_frozen"
+          assert packet["final_split"] is None
+          assert packet["final_evaluation_seeds"] is None
+          assert packet["full_gate_0b_complete"] is False
+          assert packet["benchmark_frozen"] is False
+          assert len(design) == 112
+          assert len(qualification) == 112
+          assert len({cell["cell_id"] for cell in [*design, *qualification]}) == 224
+          assert all(cell["partition"] == "design" for cell in design)
+          assert all(cell["partition"] == "qualification" for cell in qualification)
+          assert packet["roots"]["revision1_registry_sha256"] == (
+              "81da1bb9414e7c53e42bbf65b198aa61d8bb7ed3f81eb2bf5813a1edff245ac4"
+          )
+          assert packet["roots"]["qualification_seed_registry_sha256"] == (
+              "247db21c869703f5604e63678f0cf614f0b88040a05ce42c61629ddf712cefd5"
+          )
+          assert packet["roots"]["definition_lock_root_sha256"] == (
+              "71d2ed7a9f45c55bf17ec518c08b5d0b827a7cf0ae2cc3c339dc09197c55f633"
+          )
+          print("Design matrix outcomes:", packet["matrix_counts"]["design"])
+          print("Qualification matrix outcomes:", packet["matrix_counts"]["qualification"])
+          print(
+              "Profile admission outcomes:",
+              {
+                  profile["profile_id"]: profile["revision1_profile_admitted"]
+                  for profile in profiles
+              },
+          )
+          print(
+              "Portable revision roots:",
+              {
+                  key: value
+                  for key, value in packet["roots"].items()
+                  if key in {
+                      "portable_analytic_identity_root_sha256",
+                      "within_renderer_invariance_outcome_root_sha256",
+                      "design_partition_outcome_root_sha256",
+                      "qualification_partition_outcome_root_sha256",
+                  }
+              },
+          )
+          print(
+              "Renderer-local revision roots (reported, not compared):",
+              {
+                  key: value
+                  for key, value in packet["roots"].items()
+                  if key in {
+                      "renderer_local_ecological_label_root_sha256",
+                      "renderer_specific_audit_root_sha256",
+                  }
+              },
+          )
+          PY
