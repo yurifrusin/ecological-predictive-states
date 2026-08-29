@@ -190,6 +190,52 @@ jobs:
               (output / "qualification_seed_matrix.json").read_text()
           )["cells"]
           profiles = json.loads((output / "profile_summary.json").read_text())["profiles"]
+          print("Design matrix outcomes:", packet["matrix_counts"]["design"], flush=True)
+          print(
+              "Qualification matrix outcomes:",
+              packet["matrix_counts"]["qualification"],
+              flush=True,
+          )
+          print(
+              "Profile partition and admission outcomes:",
+              {
+                  profile["profile_id"]: {
+                      "design": profile["design"],
+                      "qualification": profile["qualification"],
+                      "revision1_profile_admitted": profile[
+                          "revision1_profile_admitted"
+                      ],
+                  }
+                  for profile in profiles
+              },
+              flush=True,
+          )
+          print(
+              "Portable revision roots:",
+              {
+                  key: value
+                  for key, value in packet["roots"].items()
+                  if key in {
+                      "portable_analytic_identity_root_sha256",
+                      "within_renderer_invariance_outcome_root_sha256",
+                      "design_partition_outcome_root_sha256",
+                      "qualification_partition_outcome_root_sha256",
+                  }
+              },
+              flush=True,
+          )
+          print(
+              "Renderer-local revision roots (reported, not compared):",
+              {
+                  key: value
+                  for key, value in packet["roots"].items()
+                  if key in {
+                      "renderer_local_ecological_label_root_sha256",
+                      "renderer_specific_audit_root_sha256",
+                  }
+              },
+              flush=True,
+          )
           assert packet["freeze_status"] == "candidate_revision_packet_only_not_frozen"
           assert packet["final_split"] is None
           assert packet["final_evaluation_seeds"] is None
@@ -255,37 +301,4 @@ jobs:
                   "fa976fb849d0037af7bcc8d63d1c554099ecc3f1061fd8ad98cd8d7cc8c3177c"
               ),
           }
-          print("Design matrix outcomes:", packet["matrix_counts"]["design"])
-          print("Qualification matrix outcomes:", packet["matrix_counts"]["qualification"])
-          print(
-              "Profile admission outcomes:",
-              {
-                  profile["profile_id"]: profile["revision1_profile_admitted"]
-                  for profile in profiles
-              },
-          )
-          print(
-              "Portable revision roots:",
-              {
-                  key: value
-                  for key, value in packet["roots"].items()
-                  if key in {
-                      "portable_analytic_identity_root_sha256",
-                      "within_renderer_invariance_outcome_root_sha256",
-                      "design_partition_outcome_root_sha256",
-                      "qualification_partition_outcome_root_sha256",
-                  }
-              },
-          )
-          print(
-              "Renderer-local revision roots (reported, not compared):",
-              {
-                  key: value
-                  for key, value in packet["roots"].items()
-                  if key in {
-                      "renderer_local_ecological_label_root_sha256",
-                      "renderer_specific_audit_root_sha256",
-                  }
-              },
-          )
           PY
