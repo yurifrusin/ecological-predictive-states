@@ -15,8 +15,11 @@ The scientific authority is [the Research Charter](docs/RESEARCH_CHARTER.md), fo
 ## Design explorations
 
 [Design Note 001 — Percept, Affect, Concept](docs/design-notes/001_DELEUZE_GUATTARI_EPS_DESIGN_NOTE.md)
-is a non-authoritative conceptual exploration. Design notes do not define benchmark or gate
-authority.
+is canonical after exact-head `SCIENTIFIC_PASS` at
+`4e37f9cc25a33927135077a76cf72eae9d191392` and owner-approved closeout, solely as a
+non-authoritative design exploration. This status does not make its hypotheses scientifically
+supported, implemented, or authorised. Design notes do not define scientific-contract, benchmark,
+or gate authority.
 
 ## Windows PowerShell setup
 
