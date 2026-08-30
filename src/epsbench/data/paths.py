@@ -6,7 +6,7 @@ import hashlib
 import os
 import re
 import stat
-from collections.abc import Iterator
+from collections.abc import Iterator, Set
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -205,6 +205,78 @@ def sha256_open_file(owned: OwnedRegularFile) -> str:
     """Hash the immutable snapshot captured from an owned file handle."""
 
     return hashlib.sha256(owned.payload).hexdigest()
+
+
+def validate_exact_owned_file_tree(root: Path, expected_files: Set[str]) -> None:
+    """Require an exact, non-link tree of uniquely owned regular files."""
+
+    try:
+        root_stat = root.lstat()
+    except OSError as error:
+        raise UnsafeOwnedFileError("artifact root does not exist") from error
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+
+    def is_link_or_reparse(value: os.stat_result) -> bool:
+        return stat.S_ISLNK(value.st_mode) or bool(
+            getattr(value, "st_file_attributes", 0) & reparse_flag
+        )
+
+    if is_link_or_reparse(root_stat) or not stat.S_ISDIR(root_stat.st_mode):
+        raise UnsafeOwnedFileError("artifact root must be a non-link directory")
+    resolved_root = root.resolve(strict=True)
+    canonical_files: set[str] = set()
+    expected_directories: set[str] = set()
+    for relative_path in expected_files:
+        logical_path = _canonical_logical_path(relative_path)
+        canonical_files.add(logical_path.as_posix())
+        parts = logical_path.parts
+        expected_directories.update(
+            PurePosixPath(*parts[:index]).as_posix() for index in range(1, len(parts))
+        )
+    if canonical_files != set(expected_files):
+        raise UnsafeOwnedFileError("artifact tree expectation is not canonical")
+
+    actual_files: set[str] = set()
+    actual_directories: set[str] = set()
+    file_identities: set[tuple[int, int]] = set()
+
+    def visit(directory: Path, prefix: PurePosixPath | None = None) -> None:
+        try:
+            entries = list(os.scandir(directory))
+        except OSError as error:
+            raise UnsafeOwnedFileError("artifact tree cannot be enumerated") from error
+        for entry in entries:
+            relative = PurePosixPath(entry.name) if prefix is None else prefix / entry.name
+            relative_path = relative.as_posix()
+            try:
+                entry_stat = Path(entry.path).lstat()
+            except OSError as error:
+                raise UnsafeOwnedFileError(
+                    f"artifact tree entry cannot be inspected: {relative_path}"
+                ) from error
+            if is_link_or_reparse(entry_stat):
+                raise UnsafeOwnedFileError(
+                    f"artifact tree entry must not be a link alias: {relative_path}"
+                )
+            if stat.S_ISDIR(entry_stat.st_mode):
+                actual_directories.add(relative_path)
+                visit(Path(entry.path), relative)
+                continue
+            if not stat.S_ISREG(entry_stat.st_mode) or entry_stat.st_nlink != 1:
+                raise UnsafeOwnedFileError(
+                    f"artifact tree entry must be one owned regular file: {relative_path}"
+                )
+            identity = (entry_stat.st_dev, entry_stat.st_ino)
+            if identity in file_identities:
+                raise UnsafeOwnedFileError(
+                    f"artifact tree entries must have unique identities: {relative_path}"
+                )
+            file_identities.add(identity)
+            actual_files.add(relative_path)
+
+    visit(resolved_root)
+    if actual_files != canonical_files or actual_directories != expected_directories:
+        raise UnsafeOwnedFileError("artifact tree contains missing or additional entries")
 
 
 class UnsafeDatasetManifestError(ValueError):

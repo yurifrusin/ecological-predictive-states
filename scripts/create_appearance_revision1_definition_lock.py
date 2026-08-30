@@ -80,8 +80,9 @@ def _load_json(path: Path) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--analysis", type=Path, required=True)
+    parser.add_argument("--packet", type=Path, required=True)
     args = parser.parse_args()
-    analysis = validate_failure_analysis(args.analysis)
+    analysis = validate_failure_analysis(args.analysis, source_packet=args.packet)
 
     baseline = load_appearance_registry_any(BASELINE_REGISTRY_PATH)
     design = load_evaluation_seed_registry(DESIGN_SEEDS_PATH)

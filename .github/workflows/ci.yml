@@ -315,3 +315,10 @@ jobs:
               "revision1_combined_stress_v1": True,
           }
           PY
+
+      - name: Reject complete-packet adversarial mutations
+        run: |
+          uv run python scripts/check_revision1_adversarial_packets.py \
+            --baseline-packet artifacts/gate-0b-slice-5-candidates \
+            --analysis artifacts/appearance-revision1-analysis \
+            --revision-packet artifacts/gate-0b-appearance-revision1

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
+from PIL import Image
 from pydantic import ValidationError
 
 from epsbench.appearance import (
@@ -25,11 +28,12 @@ from epsbench.appearance import (
     seed_registry_hash,
     validate_axis_isolation,
 )
-from epsbench.audit import _hash_json
+from epsbench.audit import _hash_json, _PacketArtifactRegistry
 from epsbench.data.provenance import collect_source_provenance
 from epsbench.revision import (
     REPORT_FILES,
     REVISION_AUDIT_SCHEMA_VERSION,
+    REVISION_CONTACT_SHEET_VERSION,
     REVISION_FREEZE_STATUS,
     REVISION_ROOT_FIELDS,
     REVISION_ROOT_SCHEMA_VERSION,
@@ -38,11 +42,17 @@ from epsbench.revision import (
     _profile_admission_outcome_domain,
     _renderer_local_partition_outcome_domain,
     _validate_baseline_analysis_snapshot,
+    _validate_contact_sheets,
     _validate_lock_commit_snapshot,
     validate_definition_lock,
     validate_revision_audit,
 )
-from epsbench.utils.canonical import canonical_json_bytes, sha256_file, write_canonical_json
+from epsbench.utils.canonical import (
+    canonical_json_bytes,
+    logical_array_hash,
+    sha256_file,
+    write_canonical_json,
+)
 
 BASELINE_REGISTRY = Path("configs/appearance_candidates_v0.yaml")
 DESIGN_SEEDS = Path("configs/evaluation_seed_candidates_v0.yaml")
@@ -211,6 +221,82 @@ def test_definition_lock_commit_accepts_canonical_json_source_provenance() -> No
         analysis,
         source,
     )
+
+
+def test_definition_lock_commit_rejects_an_alternate_ancestor() -> None:
+    lock = json.loads(DEFINITION_LOCK.read_text(encoding="utf-8"))
+    analysis = json.loads(BASELINE_ANALYSIS.read_text(encoding="utf-8"))
+    source = collect_source_provenance(Path.cwd()).model_dump(mode="json")
+    with pytest.raises(ValueError, match="definition-lock commit is not exact"):
+        _validate_lock_commit_snapshot(
+            "6eb70d34d840e2370dace0a19ad601d99072c18a",
+            lock,
+            analysis,
+            source,
+        )
+
+
+def test_definition_lock_commit_rejects_forged_source_provenance() -> None:
+    lock = json.loads(DEFINITION_LOCK.read_text(encoding="utf-8"))
+    analysis = json.loads(BASELINE_ANALYSIS.read_text(encoding="utf-8"))
+    source = collect_source_provenance(Path.cwd()).model_dump(mode="json")
+    source["git_commit"] = LOCK_COMMIT
+    with pytest.raises(ValueError, match="source provenance is not truthful"):
+        _validate_lock_commit_snapshot(LOCK_COMMIT, lock, analysis, source)
+
+
+def test_revision_contact_sheets_decode_claimed_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_image = Image.new("RGB", (2, 1), color=(10, 20, 30))
+    expected_array = np.asarray(expected_image, dtype=np.uint8)
+    records: list[dict[str, Any]] = []
+    for partition in ("design", "qualification"):
+        for scene in ("single_occluder", "corridor"):
+            relative = f"contact/{partition}-{scene}.png"
+            path = tmp_path / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload_buffer = BytesIO()
+            expected_image.save(payload_buffer, format="PNG")
+            path.write_bytes(payload_buffer.getvalue())
+            records.append(
+                {
+                    "partition": partition,
+                    "scene_family": scene,
+                    "seed_index": 0,
+                    "path": relative,
+                    "media_type": "image/png",
+                    "mode": "RGB",
+                    "dimensions": [2, 1],
+                    "dtype": "uint8",
+                    "shape": [1, 2, 3],
+                    "logical_sha256": logical_array_hash(expected_array),
+                    "file_sha256": sha256_file(path),
+                    "byte_count": path.stat().st_size,
+                }
+            )
+    opened_inputs: list[Any] = []
+    original_open = Image.open
+
+    def record_open(value: Any, *args: Any, **kwargs: Any) -> Any:
+        opened_inputs.append(value)
+        return original_open(value, *args, **kwargs)
+
+    monkeypatch.setattr(Image, "open", record_open)
+    monkeypatch.setattr(
+        "epsbench.revision._contact_sheet_image",
+        lambda *args, **kwargs: expected_image.copy(),
+    )
+    _validate_contact_sheets(
+        tmp_path,
+        [],
+        {"schema_version": REVISION_CONTACT_SHEET_VERSION, "sheets": records},
+        _PacketArtifactRegistry(tmp_path),
+        {},
+    )
+    assert len(opened_inputs) == 4
+    assert all(isinstance(value, BytesIO) for value in opened_inputs)
 
 
 def _rehash_renderer_analysis(analysis: dict[str, Any]) -> None:

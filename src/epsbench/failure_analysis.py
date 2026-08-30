@@ -10,7 +10,12 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
-from epsbench.audit import _atomic_no_replace_directory, _hash_json, validate_appearance_audit
+from epsbench.audit import (
+    _atomic_no_replace_directory,
+    _hash_json,
+    _PacketArtifactRegistry,
+    validate_appearance_audit,
+)
 from epsbench.data.paths import open_owned_regular_file
 from epsbench.utils.canonical import canonical_json_bytes, write_canonical_json
 
@@ -58,11 +63,27 @@ class FailureAnalysisError(ValueError):
     """Raised when a baseline packet or derived analysis is not canonical."""
 
 
-def _owned_json(root: Path, relative_path: str) -> dict[str, Any]:
-    with open_owned_regular_file(root, relative_path) as owned:
-        payload = json.loads(owned.payload.decode("utf-8"))
+def _owned_json(
+    root: Path,
+    relative_path: str,
+    *,
+    artifacts: _PacketArtifactRegistry | None = None,
+) -> dict[str, Any]:
+    context = (
+        artifacts.claim(relative_path, f"failure-analysis:{relative_path}")
+        if artifacts is not None
+        else open_owned_regular_file(root, relative_path)
+    )
+    try:
+        with context as owned:
+            raw = owned.payload
+            payload = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise FailureAnalysisError(f"analysis JSON is invalid: {relative_path}") from error
     if type(payload) is not dict:
         raise FailureAnalysisError(f"analysis source must be a JSON object: {relative_path}")
+    if raw != canonical_json_bytes(payload) + b"\n":
+        raise FailureAnalysisError(f"analysis JSON is not canonical: {relative_path}")
     return payload
 
 
@@ -285,74 +306,18 @@ def _analysis_domains(cells: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]
     return profile_matrix, surface_matrix, threshold_summary, diagnostics
 
 
-def _markdown(analysis: dict[str, Any]) -> str:
-    diagnostics = analysis["diagnostic_summary"]
-    categories = diagnostics["failure_category_occurrences"]
-    lines = [
-        "# Canonical Slice 5 baseline failure analysis",
-        "",
-        f"Logical analysis root: `{analysis['baseline_failure_analysis_sha256']}`.",
-        "",
-        "The independently validated baseline contains 160 successful cells, 44 admitted cells, "
-        "116 rejected cells, and no profile admitted over all 16 cells.",
-        "",
-        "## Criterion findings",
-        "",
-    ]
-    for name, count in sorted(categories.items()):
-        lines.append(f"- {name}: {count} occurrence(s)")
-    lines.extend(
-        [
-            "",
-            "## Causal diagnostic answers",
-            "",
-        ]
-    )
-    for index, item in enumerate(analysis["causal_diagnostic_answers"], start=1):
-        lines.append(f"{index}. **{item['question']}** {item['answer']}")
-    lines.extend(
-        [
-            "",
-            "This diagnosis is privileged apparatus analysis. It does not change the ecological "
-            "learner interface, weaken admission, select a split, freeze a seed, or establish a "
-            "scientific result.",
-            "",
-        ]
-    )
-    return "\n".join(lines)
-
-
-def create_failure_analysis(packet_root: Path, output: Path) -> dict[str, Any]:
-    """Validate the canonical packet, derive all margins, and publish atomically."""
-
-    if output.exists():
-        if not output.is_dir() or any(output.iterdir()):
-            raise FileExistsError(f"analysis output is not an empty directory: {output}")
-        output.rmdir()
-    packet = validate_appearance_audit(
-        packet_root,
-        verify_current_source_provenance=False,
-    )
-    if packet["matrix_counts"] != CANONICAL_COUNTS or any(
-        packet["roots"].get(name) != value for name, value in CANONICAL_ROOTS.items()
-    ):
-        raise FailureAnalysisError("source packet is not the protected canonical Slice 5 result")
-    source_commit = packet["source_provenance"].get("git_commit")
-    if source_commit != CANONICAL_BASE:
-        raise FailureAnalysisError("source packet is not bound to the canonical base commit")
-    matrix = _owned_json(packet_root, "seed_matrix.json")
-    cells = matrix.get("cells")
-    if type(cells) is not list or len(cells) != 160:
-        raise FailureAnalysisError("canonical source matrix is incomplete")
-    profile_matrix, surface_matrix, threshold_summary, diagnostics = _analysis_domains(cells)
-    renderer_fingerprints = sorted(
+def _renderer_fingerprints(cells: list[dict[str, Any]]) -> list[str]:
+    return sorted(
         {
             canonical_json_bytes(cell["renderer_provenance"]).decode("utf-8")
             for cell in cells
             if cell["generation_status"] == "success"
         }
     )
-    causal_answers = [
+
+
+def _causal_diagnostic_answers(diagnostics: dict[str, Any]) -> list[dict[str, str]]:
+    return [
         {
             "question": "Are exposure failures concentrated on particular surfaces or normals?",
             "answer": (
@@ -424,6 +389,70 @@ def create_failure_analysis(packet_root: Path, output: Path) -> dict[str, Any]:
             ),
         },
     ]
+
+
+def _markdown(analysis: dict[str, Any]) -> str:
+    diagnostics = analysis["diagnostic_summary"]
+    categories = diagnostics["failure_category_occurrences"]
+    lines = [
+        "# Canonical Slice 5 baseline failure analysis",
+        "",
+        f"Logical analysis root: `{analysis['baseline_failure_analysis_sha256']}`.",
+        "",
+        "The independently validated baseline contains 160 successful cells, 44 admitted cells, "
+        "116 rejected cells, and no profile admitted over all 16 cells.",
+        "",
+        "## Criterion findings",
+        "",
+    ]
+    for name, count in sorted(categories.items()):
+        lines.append(f"- {name}: {count} occurrence(s)")
+    lines.extend(
+        [
+            "",
+            "## Causal diagnostic answers",
+            "",
+        ]
+    )
+    for index, item in enumerate(analysis["causal_diagnostic_answers"], start=1):
+        lines.append(f"{index}. **{item['question']}** {item['answer']}")
+    lines.extend(
+        [
+            "",
+            "This diagnosis is privileged apparatus analysis. It does not change the ecological "
+            "learner interface, weaken admission, select a split, freeze a seed, or establish a "
+            "scientific result.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def create_failure_analysis(packet_root: Path, output: Path) -> dict[str, Any]:
+    """Validate the canonical packet, derive all margins, and publish atomically."""
+
+    if output.exists():
+        if not output.is_dir() or any(output.iterdir()):
+            raise FileExistsError(f"analysis output is not an empty directory: {output}")
+        output.rmdir()
+    packet = validate_appearance_audit(
+        packet_root,
+        verify_current_source_provenance=False,
+    )
+    if packet["matrix_counts"] != CANONICAL_COUNTS or any(
+        packet["roots"].get(name) != value for name, value in CANONICAL_ROOTS.items()
+    ):
+        raise FailureAnalysisError("source packet is not the protected canonical Slice 5 result")
+    source_commit = packet["source_provenance"].get("git_commit")
+    if source_commit != CANONICAL_BASE:
+        raise FailureAnalysisError("source packet is not bound to the canonical base commit")
+    matrix = _owned_json(packet_root, "seed_matrix.json")
+    cells = matrix.get("cells")
+    if type(cells) is not list or len(cells) != 160:
+        raise FailureAnalysisError("canonical source matrix is incomplete")
+    profile_matrix, surface_matrix, threshold_summary, diagnostics = _analysis_domains(cells)
+    renderer_fingerprints = _renderer_fingerprints(cells)
+    causal_answers = _causal_diagnostic_answers(diagnostics)
     portable_domain = {
         "schema_version": ANALYSIS_SCHEMA_VERSION,
         "source_canonical_base": CANONICAL_BASE,
@@ -457,7 +486,7 @@ def create_failure_analysis(packet_root: Path, output: Path) -> dict[str, Any]:
         write_canonical_json(staging / "surface_failure_matrix.json", surface_matrix)
         write_canonical_json(staging / "threshold_margin_summary.json", threshold_summary)
         write_canonical_json(staging / "baseline_failure_analysis.json", analysis)
-        (staging / "baseline_failure_analysis.md").write_text(_markdown(analysis), encoding="utf-8")
+        (staging / "baseline_failure_analysis.md").write_bytes(_markdown(analysis).encode("utf-8"))
         validate_failure_analysis(staging, source_packet=packet_root)
         _atomic_no_replace_directory(staging, output)
     except Exception:
@@ -473,17 +502,16 @@ def validate_failure_analysis(
 ) -> dict[str, Any]:
     """Independently validate every deterministic analysis identity."""
 
-    expected = {
+    if source_packet is None:
+        raise FailureAnalysisError(
+            "source packet is required to recompute failure-analysis renderer evidence"
+        )
+    artifacts = _PacketArtifactRegistry(output)
+    analysis = _owned_json(
+        output,
         "baseline_failure_analysis.json",
-        "baseline_failure_analysis.md",
-        "profile_failure_matrix.json",
-        "surface_failure_matrix.json",
-        "threshold_margin_summary.json",
-    }
-    actual = frozenset(path.name for path in output.iterdir())
-    if actual not in {frozenset(expected), frozenset((*expected, "run.json"))}:
-        raise FailureAnalysisError("failure-analysis artifact set is not exact")
-    analysis = _owned_json(output, "baseline_failure_analysis.json")
+        artifacts=artifacts,
+    )
     exact_fields = {
         "schema_version",
         "source_packet_logical_root_sha256",
@@ -510,7 +538,7 @@ def validate_failure_analysis(
         ("surface_failure_matrix.json", "surface_failure_matrix_sha256"),
         ("threshold_margin_summary.json", "threshold_margin_summary_sha256"),
     ):
-        child_payloads[filename] = _owned_json(output, filename)
+        child_payloads[filename] = _owned_json(output, filename, artifacts=artifacts)
         if _hash_json(child_payloads[filename]) != analysis[field]:
             raise FailureAnalysisError(f"failure-analysis child identity mismatch: {filename}")
     portable_domain = {
@@ -531,33 +559,65 @@ def validate_failure_analysis(
     declared_renderer = renderer_domain.pop("renderer_specific_failure_analysis_sha256")
     if _hash_json(renderer_domain) != declared_renderer:
         raise FailureAnalysisError("renderer-specific failure-analysis logical root mismatch")
-    markdown = (output / "baseline_failure_analysis.md").read_text(encoding="utf-8")
+    if (
+        type(analysis["renderer_fingerprints"]) is not list
+        or not all(type(value) is str for value in analysis["renderer_fingerprints"])
+        or analysis["renderer_fingerprints"] != sorted(set(analysis["renderer_fingerprints"]))
+    ):
+        raise FailureAnalysisError("failure-analysis renderer fingerprints are not unique")
+    try:
+        for fingerprint in analysis["renderer_fingerprints"]:
+            decoded = json.loads(fingerprint)
+            if (
+                type(decoded) is not dict
+                or canonical_json_bytes(decoded).decode("utf-8") != fingerprint
+            ):
+                raise FailureAnalysisError("failure-analysis renderer fingerprint is not canonical")
+        expected_answers = _causal_diagnostic_answers(analysis["diagnostic_summary"])
+    except (KeyError, TypeError, json.JSONDecodeError) as error:
+        raise FailureAnalysisError("failure-analysis causal inputs are invalid") from error
+    if analysis["causal_diagnostic_answers"] != expected_answers:
+        raise FailureAnalysisError("failure-analysis causal answers differ from reconstruction")
+    with artifacts.claim(
+        "baseline_failure_analysis.md",
+        "failure-analysis:baseline_failure_analysis.md",
+    ) as owned:
+        try:
+            markdown = owned.payload.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise FailureAnalysisError("failure-analysis Markdown is not UTF-8") from error
     if markdown != _markdown(analysis):
         raise FailureAnalysisError("failure-analysis Markdown differs from reconstruction")
-    if source_packet is not None:
-        packet = validate_appearance_audit(
-            source_packet,
-            verify_current_source_provenance=False,
+    packet = validate_appearance_audit(
+        source_packet,
+        verify_current_source_provenance=False,
+    )
+    matrix = _owned_json(source_packet, "seed_matrix.json")
+    cells = matrix.get("cells")
+    if type(cells) is not list:
+        raise FailureAnalysisError("failure-analysis source matrix is invalid")
+    expected_profile, expected_surface, expected_thresholds, expected_diagnostics = (
+        _analysis_domains(cells)
+    )
+    expected_children = {
+        "profile_failure_matrix.json": expected_profile,
+        "surface_failure_matrix.json": expected_surface,
+        "threshold_margin_summary.json": expected_thresholds,
+    }
+    if any(
+        canonical_json_bytes(child_payloads[name]) != canonical_json_bytes(expected_payload)
+        for name, expected_payload in expected_children.items()
+    ):
+        raise FailureAnalysisError("failure-analysis reports differ from source evidence")
+    if analysis["diagnostic_summary"] != expected_diagnostics:
+        raise FailureAnalysisError("failure-analysis diagnosis differs from source evidence")
+    if analysis["renderer_fingerprints"] != _renderer_fingerprints(cells):
+        raise FailureAnalysisError(
+            "failure-analysis renderer fingerprints differ from source evidence"
         )
-        matrix = _owned_json(source_packet, "seed_matrix.json")
-        cells = matrix.get("cells")
-        if type(cells) is not list:
-            raise FailureAnalysisError("failure-analysis source matrix is invalid")
-        expected_profile, expected_surface, expected_thresholds, expected_diagnostics = (
-            _analysis_domains(cells)
-        )
-        expected_children = {
-            "profile_failure_matrix.json": expected_profile,
-            "surface_failure_matrix.json": expected_surface,
-            "threshold_margin_summary.json": expected_thresholds,
-        }
-        if any(
-            canonical_json_bytes(child_payloads[name]) != canonical_json_bytes(expected_payload)
-            for name, expected_payload in expected_children.items()
-        ):
-            raise FailureAnalysisError("failure-analysis reports differ from source evidence")
-        if analysis["diagnostic_summary"] != expected_diagnostics:
-            raise FailureAnalysisError("failure-analysis diagnosis differs from source evidence")
-        if analysis["source_packet_logical_root_sha256"] != packet["packet_logical_root_sha256"]:
-            raise FailureAnalysisError("failure-analysis source packet root differs")
+    if analysis["causal_diagnostic_answers"] != _causal_diagnostic_answers(expected_diagnostics):
+        raise FailureAnalysisError("failure-analysis causal answers differ from source evidence")
+    if analysis["source_packet_logical_root_sha256"] != packet["packet_logical_root_sha256"]:
+        raise FailureAnalysisError("failure-analysis source packet root differs")
+    artifacts.assert_exact_tree()
     return analysis

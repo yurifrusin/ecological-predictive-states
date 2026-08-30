@@ -50,6 +50,7 @@ from epsbench.data.paths import (
     UnsafeOwnedFileError,
     open_owned_regular_file,
     sha256_open_file,
+    validate_exact_owned_file_tree,
 )
 from epsbench.data.provenance import collect_source_provenance
 from epsbench.data.validate import validate_dataset
@@ -209,7 +210,12 @@ class _PacketArtifactRegistry:
             self.root = root.resolve(strict=True)
         except OSError as error:
             raise AppearanceAuditError("candidate packet root does not exist") from error
-        if root.is_symlink() or not stat.S_ISDIR(root_stat.st_mode):
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        if (
+            stat.S_ISLNK(root_stat.st_mode)
+            or bool(getattr(root_stat, "st_file_attributes", 0) & reparse_flag)
+            or not stat.S_ISDIR(root_stat.st_mode)
+        ):
             raise AppearanceAuditError("candidate packet root must be a non-link directory")
         self.roles: set[str] = set()
         self.paths: set[str] = set()
@@ -251,6 +257,14 @@ class _PacketArtifactRegistry:
                 self.resolved_paths.add(owned.path)
                 self.file_identities.add(identity)
                 yield owned
+        except UnsafeOwnedFileError as error:
+            raise AppearanceAuditError(str(error)) from error
+
+    def assert_exact_tree(self) -> None:
+        """Reject every unclaimed path, link, special file, and aliased identity."""
+
+        try:
+            validate_exact_owned_file_tree(self.root, self.paths)
         except UnsafeOwnedFileError as error:
             raise AppearanceAuditError(str(error)) from error
 

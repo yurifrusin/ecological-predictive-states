@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import platform
 import shutil
 import socket
@@ -11,6 +12,7 @@ import tempfile
 import time
 from collections import Counter
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 
@@ -73,6 +75,7 @@ REVISION_ROOT_SCHEMA_VERSION = "appearance_candidate_revision_root_domains_v1"
 REVISION_FREEZE_STATUS = "candidate_revision_packet_only_not_frozen"
 REVISION_CONTACT_SHEET_VERSION = "appearance_revision_contact_sheet_manifest_v0"
 FAILURE_ANALYSIS_METHOD = "privileged_surface_frame_threshold_margin_analysis_v0"
+REVISION_DEFINITION_LOCK_COMMIT = "914550ce4e3a819dcbcd0bd5390e3c6034af5bf6"
 PARTITIONS = ("design", "qualification")
 SNAPSHOT_FILES = (
     "baseline_failure_analysis.json",
@@ -478,6 +481,10 @@ def _lock_commit(definition_lock_path: Path) -> str:
     if len(commits) != 1:
         raise RevisionAuditError("definition lock must have exactly one additive Git commit")
     commit = commits[0]
+    if commit != REVISION_DEFINITION_LOCK_COMMIT:
+        raise RevisionAuditError(
+            "definition lock does not have the exact authorised additive commit"
+        )
     ancestry = subprocess.run(
         ["git", "merge-base", "--is-ancestor", commit, "HEAD"],
         capture_output=True,
@@ -496,6 +503,9 @@ def _validate_lock_commit_snapshot(
 ) -> None:
     if type(commit) is not str or len(commit) != 40:
         raise RevisionAuditError("revision packet definition-lock commit is malformed")
+    repository_commit = _lock_commit(Path("configs/appearance_candidate_revision1_lock.json"))
+    if commit != repository_commit:
+        raise RevisionAuditError("revision packet definition-lock commit is not exact")
     try:
         committed_lock_bytes = subprocess.run(
             [
@@ -536,6 +546,11 @@ def _validate_lock_commit_snapshot(
         raise RevisionAuditError("revision packet source provenance is invalid") from error
     if provenance.git_commit is None:
         raise RevisionAuditError("revision qualification requires exact Git source provenance")
+    independently_collected = collect_source_provenance(Path.cwd()).model_dump(mode="json")
+    if source_provenance != independently_collected:
+        raise RevisionAuditError(
+            "revision qualification source provenance is not truthful for this source tree"
+        )
     ancestry = subprocess.run(
         ["git", "merge-base", "--is-ancestor", commit, provenance.git_commit],
         capture_output=True,
@@ -986,19 +1001,20 @@ def create_revision_audit(
             "complete_packet_root_sha256": _hash_json(logical_domain),
         }
         write_canonical_json(staging / "revision1_candidate_packet.json", packet)
-        (staging / "run.json").write_text(
-            json.dumps(
-                {
-                    "generated_at_utc": datetime.now(UTC).isoformat(),
-                    "hostname": socket.gethostname(),
-                    "operating_system": platform.platform(),
-                    "wall_clock_seconds": time.monotonic() - started,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
+        (staging / "run.json").write_bytes(
+            (
+                json.dumps(
+                    {
+                        "generated_at_utc": datetime.now(UTC).isoformat(),
+                        "hostname": socket.gethostname(),
+                        "operating_system": platform.platform(),
+                        "wall_clock_seconds": time.monotonic() - started,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n"
+            ).encode("utf-8")
         )
         validate_revision_audit(staging)
         _atomic_no_replace_directory(staging, output)
@@ -1006,6 +1022,50 @@ def create_revision_audit(
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+
+
+def _decode_canonical_json_object(payload: bytes, role: str) -> dict[str, Any]:
+    try:
+        decoded = json.loads(payload.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise RevisionAuditError(f"revision packet JSON is invalid: {role}") from error
+    if type(decoded) is not dict:
+        raise RevisionAuditError(f"revision packet JSON must be an object: {role}")
+    if payload != canonical_json_bytes(decoded) + b"\n":
+        raise RevisionAuditError(f"revision packet JSON is not canonical: {role}")
+    return decoded
+
+
+def _claim_run_metadata(artifacts: _PacketArtifactRegistry) -> None:
+    with artifacts.claim("run.json", "volatile-run-metadata") as owned:
+        try:
+            run = json.loads(owned.payload.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise RevisionAuditError("revision run metadata is invalid") from error
+        expected_bytes = (json.dumps(run, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        if owned.payload != expected_bytes:
+            raise RevisionAuditError("revision run metadata encoding is not exact")
+    if type(run) is not dict or set(run) != {
+        "generated_at_utc",
+        "hostname",
+        "operating_system",
+        "wall_clock_seconds",
+    }:
+        raise RevisionAuditError("revision run metadata schema is not strict")
+    if not all(
+        type(run[field]) is str and bool(run[field])
+        for field in ("generated_at_utc", "hostname", "operating_system")
+    ):
+        raise RevisionAuditError("revision run metadata strings are invalid")
+    try:
+        generated_at = datetime.fromisoformat(run["generated_at_utc"])
+    except ValueError as error:
+        raise RevisionAuditError("revision run timestamp is invalid") from error
+    if generated_at.tzinfo is None:
+        raise RevisionAuditError("revision run timestamp must include a timezone")
+    elapsed = run["wall_clock_seconds"]
+    if type(elapsed) not in {int, float} or not math.isfinite(elapsed) or elapsed < 0:
+        raise RevisionAuditError("revision run duration is invalid")
 
 
 def _validate_contact_sheets(
@@ -1057,7 +1117,8 @@ def _validate_contact_sheets(
                 expected_file_sha256=record["file_sha256"],
                 expected_byte_count=record["byte_count"],
             ) as owned:
-                with Image.open(owned.path) as image:
+                with Image.open(BytesIO(owned.payload)) as image:
+                    image.load()
                     actual = np.asarray(image, dtype=np.uint8).copy()
             expected = np.asarray(
                 _contact_sheet_image(
@@ -1085,7 +1146,7 @@ def validate_revision_audit(packet_root: Path) -> dict[str, Any]:
 
     artifacts = _PacketArtifactRegistry(packet_root)
     with artifacts.claim("revision1_candidate_packet.json", "revision-candidate-packet") as owned:
-        packet = json.loads(owned.payload.decode("utf-8"))
+        packet = _decode_canonical_json_object(owned.payload, "revision1_candidate_packet.json")
     logical_fields = {
         "schema_version",
         "root_schema_version",
@@ -1134,13 +1195,13 @@ def validate_revision_audit(packet_root: Path) -> dict[str, Any]:
         with artifacts.claim(
             name, f"snapshot:{name}", expected_file_sha256=snapshot_hashes[name]
         ) as owned:
-            snapshots[name] = json.loads(owned.payload.decode("utf-8"))
+            snapshots[name] = _decode_canonical_json_object(owned.payload, name)
     reports: dict[str, dict[str, Any]] = {}
     for name in REPORT_FILES:
         with artifacts.claim(
             name, f"report:{name}", expected_file_sha256=report_hashes[name]
         ) as owned:
-            reports[name] = json.loads(owned.payload.decode("utf-8"))
+            reports[name] = _decode_canonical_json_object(owned.payload, name)
     baseline = parse_appearance_registry(snapshots["baseline_registry_snapshot.json"])
     revision = parse_appearance_registry(snapshots["revision_registry_snapshot.json"])
     design = parse_seed_registry(snapshots["design_seed_registry_snapshot.json"])
@@ -1362,11 +1423,6 @@ def validate_revision_audit(packet_root: Path) -> dict[str, Any]:
     logical = {field: packet[field] for field in logical_fields}
     if _hash_json(logical) != packet["complete_packet_root_sha256"]:
         raise RevisionAuditError("revision complete packet root mismatch")
-    actual_files = {
-        path.relative_to(packet_root).as_posix()
-        for path in packet_root.rglob("*")
-        if path.is_file()
-    }
-    if actual_files != artifacts.paths | {"run.json"}:
-        raise RevisionAuditError("revision packet contains missing or additional files")
+    _claim_run_metadata(artifacts)
+    artifacts.assert_exact_tree()
     return packet
