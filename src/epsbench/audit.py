@@ -15,6 +15,7 @@ import time
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -84,6 +85,26 @@ GOVERNING_DOCUMENTS = (
 
 class AppearanceAuditError(ValueError):
     """Raised when an audit packet or publication operation is invalid."""
+
+
+@dataclass(frozen=True, slots=True)
+class _ValidatedAppearanceAudit:
+    """Immutable packet evidence retained from one complete validation snapshot."""
+
+    packet_payload: bytes
+    seed_matrix_payload: bytes
+
+    def packet(self) -> dict[str, Any]:
+        payload = json.loads(self.packet_payload)
+        if not isinstance(payload, dict):
+            raise AppearanceAuditError("validated candidate packet is not an object")
+        return payload
+
+    def seed_matrix(self) -> dict[str, Any]:
+        payload = json.loads(self.seed_matrix_payload)
+        if not isinstance(payload, dict):
+            raise AppearanceAuditError("validated seed matrix is not an object")
+        return payload
 
 
 PACKET_LOGICAL_FIELDS = (
@@ -1554,17 +1575,18 @@ def _write_packet_reports(
     return packet
 
 
-def validate_appearance_audit(
+def _validate_appearance_audit_evidence(
     packet_root: Path,
     *,
     verify_current_source_provenance: bool = True,
-) -> dict[str, Any]:
-    """Independently recompute matrix, metrics, balance, and packet roots."""
+) -> _ValidatedAppearanceAudit:
+    """Validate one packet snapshot and retain its exact seed-matrix bytes."""
 
     artifact_registry = _PacketArtifactRegistry(packet_root)
     with artifact_registry.claim("candidate_packet.json", "candidate-packet") as owned:
+        packet_payload = owned.payload
         try:
-            packet = json.loads(owned.payload.decode("utf-8"))
+            packet = json.loads(packet_payload.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as error:
             raise AppearanceAuditError("candidate packet JSON is invalid") from error
     expected_packet_fields = set(PACKET_LOGICAL_FIELDS) | {"packet_logical_root_sha256"}
@@ -1601,18 +1623,21 @@ def validate_appearance_audit(
     except Exception as error:
         raise AppearanceAuditError("candidate packet registry snapshot is invalid") from error
     report_payloads: dict[str, dict[str, Any]] = {}
+    report_bytes: dict[str, bytes] = {}
     for name in report_names:
         with artifact_registry.claim(
             name,
             f"report:{name}",
             expected_file_sha256=report_hashes[name],
         ) as owned:
+            raw = owned.payload
             try:
-                payload = json.loads(owned.payload.decode("utf-8"))
+                payload = json.loads(raw.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError) as error:
                 raise AppearanceAuditError(f"candidate packet report is invalid: {name}") from error
             if not isinstance(payload, dict):
                 raise AppearanceAuditError(f"candidate packet report must be an object: {name}")
+            report_bytes[name] = raw
             report_payloads[name] = payload
     validate_axis_isolation(registry)
     matrix = report_payloads["seed_matrix.json"]
@@ -1869,7 +1894,24 @@ def validate_appearance_audit(
         != packet["source_provenance"]
     ):
         raise AppearanceAuditError("packet source provenance is not truthful for this source tree")
-    return packet
+    return _ValidatedAppearanceAudit(
+        packet_payload=packet_payload,
+        seed_matrix_payload=report_bytes["seed_matrix.json"],
+    )
+
+
+def validate_appearance_audit(
+    packet_root: Path,
+    *,
+    verify_current_source_provenance: bool = True,
+) -> dict[str, Any]:
+    """Independently recompute matrix, metrics, balance, and packet roots."""
+
+    evidence = _validate_appearance_audit_evidence(
+        packet_root,
+        verify_current_source_provenance=verify_current_source_provenance,
+    )
+    return evidence.packet()
 
 
 def create_appearance_audit(

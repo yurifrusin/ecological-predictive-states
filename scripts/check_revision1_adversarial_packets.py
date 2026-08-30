@@ -7,12 +7,21 @@ import json
 import os
 import tempfile
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+from epsbench import failure_analysis as failure_analysis_module
 from epsbench.audit import _hash_json
-from epsbench.failure_analysis import _markdown, validate_failure_analysis
+from epsbench.failure_analysis import (
+    THRESHOLDS,
+    _analysis_domains,
+    _causal_diagnostic_answers,
+    _markdown,
+    _renderer_fingerprints,
+    validate_failure_analysis,
+)
 from epsbench.revision import validate_revision_audit
 from epsbench.utils.canonical import canonical_json_bytes
 
@@ -136,6 +145,83 @@ def _failure_content_regressions(analysis_root: Path, baseline_root: Path) -> No
         )
 
 
+def _failure_snapshot_regression(analysis_root: Path, baseline_root: Path) -> None:
+    matrix_path = baseline_root / "seed_matrix.json"
+    analysis_path = analysis_root / "baseline_failure_analysis.json"
+    original_matrix_bytes = matrix_path.read_bytes()
+    original_matrix = json.loads(original_matrix_bytes)
+    forged_matrix = json.loads(json.dumps(original_matrix))
+    cell = next(item for item in forged_matrix["cells"] if item["generation_status"] == "success")
+    cell["renderer_provenance"] = {"forged_renderer": "post-validation-snapshot"}
+    frame = cell["frame_metrics"]["before"]
+    frame["changed_controlled_pixel_fraction"] = (
+        0.0
+        if frame["changed_controlled_pixel_fraction"]
+        >= THRESHOLDS["changed_controlled_pixel_fraction"]
+        else 1.0
+    )
+    frame["normalized_controlled_rgb_mad"] = (
+        0.0
+        if frame["normalized_controlled_rgb_mad"] >= THRESHOLDS["normalized_controlled_rgb_mad"]
+        else 1.0
+    )
+    frame["material_change_pass"] = not frame["material_change_pass"]
+    surface = frame["surface_diagnostics"][0]
+    surface["luminance_mean"] = (
+        0.0
+        if surface["luminance_mean"] >= THRESHOLDS["visible_surface_mean_luminance_lower"]
+        else 0.5
+    )
+
+    profile, surfaces, margins, diagnostics = _analysis_domains(forged_matrix["cells"])
+    forged_analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+    forged_analysis["renderer_fingerprints"] = _renderer_fingerprints(forged_matrix["cells"])
+    forged_analysis["profile_failure_matrix_sha256"] = _hash_json(profile)
+    forged_analysis["surface_failure_matrix_sha256"] = _hash_json(surfaces)
+    forged_analysis["threshold_margin_summary_sha256"] = _hash_json(margins)
+    forged_analysis["diagnostic_summary"] = diagnostics
+    forged_analysis["causal_diagnostic_answers"] = _causal_diagnostic_answers(diagnostics)
+    _rehash_failure_analysis(forged_analysis)
+    replacements = {
+        analysis_path: canonical_json_bytes(forged_analysis) + b"\n",
+        analysis_root / "profile_failure_matrix.json": canonical_json_bytes(profile) + b"\n",
+        analysis_root / "surface_failure_matrix.json": canonical_json_bytes(surfaces) + b"\n",
+        analysis_root / "threshold_margin_summary.json": canonical_json_bytes(margins) + b"\n",
+        analysis_root / "baseline_failure_analysis.md": _markdown(forged_analysis).encode("utf-8"),
+    }
+    forged_matrix_bytes = canonical_json_bytes(forged_matrix) + b"\n"
+    original_validator = failure_analysis_module._validate_appearance_audit_evidence
+    replaced = False
+
+    def validate_then_replace(*args: Any, **kwargs: Any) -> Any:
+        nonlocal replaced
+        evidence = original_validator(*args, **kwargs)
+        matrix_path.write_bytes(forged_matrix_bytes)
+        replaced = True
+        return evidence
+
+    try:
+        with ExitStack() as stack:
+            for path, replacement in replacements.items():
+                stack.enter_context(_replace_bytes(path, replacement))
+            with patch.object(
+                failure_analysis_module,
+                "_validate_appearance_audit_evidence",
+                validate_then_replace,
+            ):
+                _expect_rejected(
+                    "post-validation seed-matrix replacement with fully resealed analysis",
+                    lambda: validate_failure_analysis(
+                        analysis_root,
+                        source_packet=baseline_root,
+                    ),
+                )
+    finally:
+        matrix_path.write_bytes(original_matrix_bytes)
+    if not replaced:
+        raise AssertionError("seed-matrix snapshot adversary did not reach the replacement point")
+
+
 def _failure_path_regressions(
     analysis_root: Path,
     baseline_root: Path,
@@ -235,6 +321,7 @@ def main() -> None:
         scratch = Path(directory)
         _revision_provenance_regressions(args.revision_packet)
         _failure_content_regressions(args.analysis, args.baseline_packet)
+        _failure_snapshot_regression(args.analysis, args.baseline_packet)
         _failure_path_regressions(args.analysis, args.baseline_packet, scratch)
         _revision_tree_regressions(args.revision_packet, scratch)
     validate_failure_analysis(args.analysis, source_packet=args.baseline_packet)

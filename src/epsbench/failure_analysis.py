@@ -14,7 +14,8 @@ from epsbench.audit import (
     _atomic_no_replace_directory,
     _hash_json,
     _PacketArtifactRegistry,
-    validate_appearance_audit,
+    _validate_appearance_audit_evidence,
+    _ValidatedAppearanceAudit,
 )
 from epsbench.data.paths import open_owned_regular_file
 from epsbench.utils.canonical import canonical_json_bytes, write_canonical_json
@@ -435,10 +436,11 @@ def create_failure_analysis(packet_root: Path, output: Path) -> dict[str, Any]:
         if not output.is_dir() or any(output.iterdir()):
             raise FileExistsError(f"analysis output is not an empty directory: {output}")
         output.rmdir()
-    packet = validate_appearance_audit(
+    source_evidence = _validate_appearance_audit_evidence(
         packet_root,
         verify_current_source_provenance=False,
     )
+    packet = source_evidence.packet()
     if packet["matrix_counts"] != CANONICAL_COUNTS or any(
         packet["roots"].get(name) != value for name, value in CANONICAL_ROOTS.items()
     ):
@@ -446,7 +448,7 @@ def create_failure_analysis(packet_root: Path, output: Path) -> dict[str, Any]:
     source_commit = packet["source_provenance"].get("git_commit")
     if source_commit != CANONICAL_BASE:
         raise FailureAnalysisError("source packet is not bound to the canonical base commit")
-    matrix = _owned_json(packet_root, "seed_matrix.json")
+    matrix = source_evidence.seed_matrix()
     cells = matrix.get("cells")
     if type(cells) is not list or len(cells) != 160:
         raise FailureAnalysisError("canonical source matrix is incomplete")
@@ -487,7 +489,7 @@ def create_failure_analysis(packet_root: Path, output: Path) -> dict[str, Any]:
         write_canonical_json(staging / "threshold_margin_summary.json", threshold_summary)
         write_canonical_json(staging / "baseline_failure_analysis.json", analysis)
         (staging / "baseline_failure_analysis.md").write_bytes(_markdown(analysis).encode("utf-8"))
-        validate_failure_analysis(staging, source_packet=packet_root)
+        _validate_failure_analysis(staging, source_evidence=source_evidence)
         _atomic_no_replace_directory(staging, output)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
@@ -506,6 +508,20 @@ def validate_failure_analysis(
         raise FailureAnalysisError(
             "source packet is required to recompute failure-analysis renderer evidence"
         )
+    source_evidence = _validate_appearance_audit_evidence(
+        source_packet,
+        verify_current_source_provenance=False,
+    )
+    return _validate_failure_analysis(output, source_evidence=source_evidence)
+
+
+def _validate_failure_analysis(
+    output: Path,
+    *,
+    source_evidence: _ValidatedAppearanceAudit,
+) -> dict[str, Any]:
+    """Validate analysis against one already validated immutable source snapshot."""
+
     artifacts = _PacketArtifactRegistry(output)
     analysis = _owned_json(
         output,
@@ -588,11 +604,8 @@ def validate_failure_analysis(
             raise FailureAnalysisError("failure-analysis Markdown is not UTF-8") from error
     if markdown != _markdown(analysis):
         raise FailureAnalysisError("failure-analysis Markdown differs from reconstruction")
-    packet = validate_appearance_audit(
-        source_packet,
-        verify_current_source_provenance=False,
-    )
-    matrix = _owned_json(source_packet, "seed_matrix.json")
+    packet = source_evidence.packet()
+    matrix = source_evidence.seed_matrix()
     cells = matrix.get("cells")
     if type(cells) is not list:
         raise FailureAnalysisError("failure-analysis source matrix is invalid")

@@ -7,13 +7,18 @@ from typing import Any
 
 import pytest
 
-from epsbench.audit import _hash_json
+from epsbench import failure_analysis as failure_analysis_module
+from epsbench.audit import _hash_json, _ValidatedAppearanceAudit
 from epsbench.failure_analysis import (
     ANALYSIS_SCHEMA_VERSION,
+    CANONICAL_BASE,
+    CANONICAL_COUNTS,
+    CANONICAL_ROOTS,
     _analysis_domains,
     _causal_diagnostic_answers,
     _markdown,
     _renderer_fingerprints,
+    create_failure_analysis,
     validate_failure_analysis,
 )
 from epsbench.utils.canonical import canonical_json_bytes, write_canonical_json
@@ -22,8 +27,19 @@ from epsbench.utils.canonical import canonical_json_bytes, write_canonical_json
 @pytest.fixture(autouse=True)
 def _accept_synthetic_source_packet(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epsbench.failure_analysis.validate_appearance_audit",
-        lambda *args, **kwargs: {"packet_logical_root_sha256": "0" * 64},
+        "epsbench.failure_analysis._validate_appearance_audit_evidence",
+        lambda packet_root, **kwargs: _synthetic_evidence(packet_root),
+    )
+
+
+def _synthetic_evidence(
+    source: Path,
+    packet: dict[str, Any] | None = None,
+) -> _ValidatedAppearanceAudit:
+    return _ValidatedAppearanceAudit(
+        packet_payload=canonical_json_bytes(packet or {"packet_logical_root_sha256": "0" * 64})
+        + b"\n",
+        seed_matrix_payload=(source / "seed_matrix.json").read_bytes(),
     )
 
 
@@ -185,3 +201,80 @@ def test_failure_analysis_root_link_is_rejected(tmp_path: Path) -> None:
         pytest.skip("directory symbolic links are unavailable")
     with pytest.raises(ValueError, match="root must be a non-link directory"):
         validate_failure_analysis(alias, source_packet=source)
+
+
+def test_seed_matrix_replacement_after_packet_validation_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, source, analysis = _analysis_bundle(tmp_path)
+    original_matrix = json.loads((source / "seed_matrix.json").read_text(encoding="utf-8"))
+    forged_matrix = json.loads(json.dumps(original_matrix))
+    forged_matrix["cells"][0]["failure_message"] = "forged post-validation evidence"
+    forged_profile, _, _, _ = _analysis_domains(forged_matrix["cells"])
+    analysis["profile_failure_matrix_sha256"] = _hash_json(forged_profile)
+    _rehash_renderer_domain(analysis)
+    write_canonical_json(root / "profile_failure_matrix.json", forged_profile)
+    write_canonical_json(root / "baseline_failure_analysis.json", analysis)
+
+    def validate_then_replace(*args: Any, **kwargs: Any) -> _ValidatedAppearanceAudit:
+        evidence = _synthetic_evidence(source)
+        write_canonical_json(source / "seed_matrix.json", forged_matrix)
+        return evidence
+
+    monkeypatch.setattr(
+        failure_analysis_module,
+        "_validate_appearance_audit_evidence",
+        validate_then_replace,
+    )
+    with pytest.raises(ValueError, match="reports differ from source evidence"):
+        validate_failure_analysis(root, source_packet=source)
+
+
+def test_failure_analysis_creation_uses_validated_seed_matrix_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    output = tmp_path / "analysis"
+    source.mkdir()
+    original_cells = [
+        {
+            "generation_status": "failed",
+            "cell_id": f"test-cell-{index}",
+            "profile_id": "test-profile",
+            "scene_family": "corridor",
+            "seed_index": index,
+            "candidate_seed": index,
+            "failure_type": "SyntheticFailure",
+            "failure_message": "validated source evidence",
+        }
+        for index in range(160)
+    ]
+    write_canonical_json(source / "seed_matrix.json", {"cells": original_cells})
+    forged_matrix = {"cells": json.loads(json.dumps(original_cells))}
+    forged_matrix["cells"][0]["failure_message"] = "forged post-validation evidence"
+    packet = {
+        "matrix_counts": CANONICAL_COUNTS,
+        "roots": CANONICAL_ROOTS,
+        "source_provenance": {"git_commit": CANONICAL_BASE},
+        "profile_count": 10,
+        "packet_logical_root_sha256": "0" * 64,
+    }
+
+    def validate_then_replace(*args: Any, **kwargs: Any) -> _ValidatedAppearanceAudit:
+        evidence = _synthetic_evidence(source, packet)
+        write_canonical_json(source / "seed_matrix.json", forged_matrix)
+        return evidence
+
+    monkeypatch.setattr(
+        failure_analysis_module,
+        "_validate_appearance_audit_evidence",
+        validate_then_replace,
+    )
+    create_failure_analysis(source, output)
+    profile_matrix = json.loads(
+        (output / "profile_failure_matrix.json").read_text(encoding="utf-8")
+    )
+    assert profile_matrix["rows"][0]["failure_message"] == "validated source evidence"
+    assert json.loads((source / "seed_matrix.json").read_text(encoding="utf-8")) == forged_matrix
