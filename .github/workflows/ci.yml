@@ -421,7 +421,9 @@ jobs:
           assert packet["seed_set_disposition"] == (
               "eligible_for_owner_freeze_if_approved"
           )
-          assert packet["portable_profile_readiness_root_sha256"] is not None
+          assert packet["portable_profile_readiness_root_sha256"] == (
+              "da9aad546bf6223d1802cf57990779f952d410340e7bd37d1b07c83c081e65d5"
+          )
           assert packet["benchmark_frozen"] is False
           assert packet["model_protocol_frozen"] is False
           assert packet["full_gate_0b_complete"] is False

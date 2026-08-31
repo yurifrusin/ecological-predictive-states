@@ -148,7 +148,13 @@ evaluation use for a revised profile set.
 
 The pushed immutable lock commit is `1a5929307dfcba1d726c650f5e1ce68771f66801`. The subsequent
 complete Windows/WGL audit admitted all 160 selected cells, with every selected profile passing
-32/32 cells; all 32 legacy controls were retained. Ubuntu/OSMesa exact-head qualification remains
-pending. Successful apparatus qualification creates only a freeze candidate. A benchmark freeze
-still requires exact-head engineering and scientific passes, owner approval, and separately
-authorised benchmark-freeze closeout. No model protocol, gate, or scientific result follows.
+32/32 cells; all 32 legacy controls were retained. Exact-head Ubuntu/OSMesa CI independently
+repeated the same 160/160 selected and 16/16 admitted/rejected control counts. Every profile passed
+32/32 cells in both renderers, all portable apparatus roots matched, and the cross-renderer
+readiness root is `da9aad546bf6223d1802cf57990779f952d410340e7bd37d1b07c83c081e65d5`.
+The candidate is therefore `ready_for_dual_review`, with the seed registry
+`eligible_for_owner_freeze_if_approved`.
+
+Successful apparatus qualification creates only a freeze candidate. A benchmark freeze still
+requires exact-head engineering and scientific passes, owner approval, and separately authorised
+benchmark-freeze closeout. No model protocol, gate, or scientific result follows.

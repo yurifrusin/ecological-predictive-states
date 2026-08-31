@@ -25,9 +25,11 @@ candidate-qualification roots, in pushed additive commit
 `1a5929307dfcba1d726c650f5e1ce68771f66801`. No selected profile was rendered on those roots before
 the lock was pushed. The complete post-lock Windows/WGL qualification admitted all 160 selected
 cells, with every profile passing 32/32; all 32 legacy controls were retained. Ubuntu/OSMesa
-qualification remains pending exact-head CI, so cross-renderer readiness is not yet established.
-Neither the prospective lock nor apparatus qualification freezes the benchmark: dual independent
-review, owner approval, and a separately authorised benchmark-freeze closeout remain mandatory.
+exact-head CI also admitted all 160 selected cells, with every profile passing 32/32 and all 32
+controls retained. Portable apparatus roots matched, and the cross-renderer readiness root is
+`da9aad546bf6223d1802cf57990779f952d410340e7bd37d1b07c83c081e65d5`. Neither the prospective
+lock nor successful apparatus qualification freezes the benchmark: dual independent review, owner
+approval, and a separately authorised benchmark-freeze closeout remain mandatory.
 
 The path is intentionally short:
 

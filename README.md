@@ -26,10 +26,11 @@ has been frozen. The protocol and locked definitions are documented in
 The Appearance Benchmark Input Freeze v0 work package prospectively locks a candidate role map and
 sixteen public evaluation-only episode roots in pushed commit
 `1a5929307dfcba1d726c650f5e1ce68771f66801`. Only after that lock was pushed, the complete
-Windows/WGL qualification admitted all 160 selected cells, with every selected profile passing
-32/32 cells; Ubuntu/OSMesa and dual-review readiness remain pending. This is an implementation
-candidate, not a benchmark freeze. Its scope, exact identities, policy, and qualification evidence
-are documented in [the freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHMARK_FREEZE_V0.md).
+Windows/WGL and exact-head Ubuntu/OSMesa qualification each admitted all 160 selected cells, with
+every selected profile passing 32/32 cells in each renderer. Portable apparatus roots matched and
+the candidate is `ready_for_dual_review`. This is an implementation candidate, not a benchmark
+freeze. Its scope, exact identities, policy, and qualification evidence are documented in
+[the freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHMARK_FREEZE_V0.md).
 
 **No scientific result exists yet.** The proposed appearance roles and final-evaluation roots are
 prospectively locked inputs to a freeze candidate, but the benchmark is not frozen. Exact-head dual

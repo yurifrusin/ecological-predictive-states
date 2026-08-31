@@ -171,6 +171,30 @@ No WGL threshold failure or near-threshold case was observed. Minimum passing ma
 controlled RGB MAD, `0.07243529411764704`/`0.3672700277464014` for lower/upper visible-surface
 mean luminance, and `0.012713812139223166` for textured-surface luminance standard deviation.
 
-Ubuntu/OSMesa exact-head qualification remains pending CI. Until it completes successfully, the
-candidate is `qualification_incomplete`, the seed set is not yet eligible for owner freeze, the
-benchmark is not frozen, and no scientific result exists.
+Ubuntu/OSMesa exact-head CI also generated and independently validated the complete 192-cell
+packet. All 160 selected cells were admitted; each selected profile passed 32/32 cells. All 32
+legacy controls were generated (16 admitted and 16 rejected). At qualification source head
+`8106c9683bcf921dc2055267da49a411a88b0a8c`, its source-bound complete packet root is
+`868cdd14cf216d5c44cd398b6e05d3269f1be5b9d1b6b1d76517791ac83cc676`.
+
+The four portable apparatus roots matched the WGL receipt exactly. The OSMesa renderer-local
+selected, control, ecological-label, audit, and contact-sheet roots are, respectively:
+
+- `914f30d9b5304b1bd405b3c0fa699998fe53a181b6984db4758990a05044200a`
+- `ea400adfd2176ae3d1b04be02782d437976c6b2f4abcebfeea6b2627ec08ab38`
+- `cd892af14b762e8c1eb6ac9aec0ac8953f09319ec0537d50eeb03bed0b064761`
+- `30265e3d89fec4bea62ef951fd618c8dd2797917b8e6750e2f9be8559bd44c0d`
+- `6ae74dee8a9a594aa6369a27c804ffc117feae1bb9e416cad2d58ff4e087197f`
+
+These roots are reported locally and were not equality-asserted against WGL. No OSMesa threshold
+failure or near-threshold case was observed. Minimum passing margins were `0.10594311261851536`
+for changed controlled-pixel fraction, `0.04123835784313725` for normalized controlled RGB MAD,
+`0.07274100815547455`/`0.36644622087556156` for lower/upper visible-surface mean luminance, and
+`0.009543837563144336` for textured-surface luminance standard deviation.
+
+Every selected profile is apparatus-qualified in both renderers. The portable cross-renderer
+profile-readiness root is
+`da9aad546bf6223d1802cf57990779f952d410340e7bd37d1b07c83c081e65d5`. Therefore the factual
+candidate status is `ready_for_dual_review` and its seed-set disposition is
+`eligible_for_owner_freeze_if_approved`. This is not review, approval, closeout, or freeze:
+`benchmark_frozen` remains false and no scientific result exists.
