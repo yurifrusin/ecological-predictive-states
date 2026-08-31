@@ -2,11 +2,12 @@
 
 ## Authority and status
 
-This work package preserves the canonical Slice 5 apparatus and negative result while adding a
-prospectively locked, versioned candidate revision. It uses review profile `DUAL_REVIEW`, evidence
-class `PUBLIC_REPOSITORY_ONLY`, and closeout boundary `WORK_PACKAGE`. It is candidate evidence only:
-no profile, split, or evaluation seed is frozen; full Gate 0B is incomplete; Gate 0C, Gate 0D, and
-model work remain unauthorised; and no scientific result is claimed.
+This work package is canonical after exact-head dual review and owner-approved closeout. It
+preserves the canonical Slice 5 apparatus and negative result while adding a prospectively locked,
+versioned candidate revision. It uses review profile `DUAL_REVIEW`, evidence class
+`PUBLIC_REPOSITORY_ONLY`, and closeout boundary `WORK_PACKAGE`. It is candidate evidence only: no
+profile, split, or evaluation seed is frozen; full Gate 0B is incomplete; Gate 0C, Gate 0D, and model
+work remain unauthorised; and no scientific result is claimed.
 
 ## Protected canonical baseline
 
@@ -216,10 +217,36 @@ contact sheets. Windows/WGL and Ubuntu/OSMesa each independently apply all crite
 profile disposition differs, the admitted set is the intersection and the disagreement is
 preserved rather than forced to converge.
 
+## Canonical closeout status
+
+The final reviewed implementation head is
+`da37a729bc4af00ea83c9460c3849307171bba69`; exact-head Ubuntu/OSMesa CI run `33315921883`
+passed locked setup, lint, formatting, typing, all 455 tests, both ordinary scene workflows,
+canonical Slice 5 regeneration, failure-analysis and definition-lock validation, complete Revision
+1 qualification, and complete-packet adversarial tests. The immutable definition-lock commit is
+`914550ce4e3a819dcbcd0bd5390e3c6034af5bf6`, and the lock root remains
+`71d2ed7a9f45c55bf17ec518c08b5d0b827a7cf0ae2cc3c339dc09197c55f633`.
+
+The baseline remains `160/44/116` with all ten profiles rejected. Revision 1 remains WGL design
+`99/13`, WGL qualification `100/12`, OSMesa design `97/15`, and OSMesa qualification `100/12`.
+The exact portable design-membership, qualification-membership, and profile-disposition roots are
+`2493674443d31059d737f256415500a3951cd37ad50198fa3ce197cdf6c9fbaf`,
+`24eaee5fdb8f01965ac1091defe3d2bf9e62e66c3e862a86528f857e0041eaa3`, and
+`8496521a261367e4fb1da340fc6a58b007eb9b2955fb8cafa44c2c8db0532d5b`. WGL and OSMesa
+design-cell outcome roots remain the distinct renderer-local values recorded above.
+
+Failure-analysis creation and validation consume the exact immutable `seed_matrix.json` bytes from
+one owned, validated canonical packet/matrix snapshot. They do not reopen a mutable pathname. A
+fully resealed mixed-snapshot substitution is rejected. This final evidence-integrity posture did
+not change any valid serialization, intervention, identity domain, profile, seed, matched control,
+rendering parameter, threshold, admission rule, matrix membership, or outcome after the lock.
+
 ## Remaining work
 
-Independent engineering and scientific re-review and owner approval remain pending. The agreed
-five-profile admitted set only supports a later, separately authorised freeze proposal; it does not
-freeze anything. Final evaluation seeds and a development/OOD split remain open. Full Gate 0B exit
-criteria remain incomplete, and no action in this work package authorises Gate 0C, Gate 0D, a
-model, a tag, a Release, or a scientific claim.
+The five-profile admitted set only supports a later, separately authorised freeze proposal; it does
+not freeze anything. Owner/scientific authority is still required to decide whether the absence of
+an admitted stripe-only and illumination-only profile warrants a separately authorised Candidate
+Revision 2, or whether the present set is sufficient for a later preregistration/freeze proposal.
+Final development/OOD roles and final evaluation seeds remain open. Full Gate 0B exit criteria
+remain incomplete, and no action in this work package authorises Gate 0C, Gate 0D, a model, a tag, a
+Release, machine-readable review automation, a next work package, or a scientific claim.

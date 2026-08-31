@@ -8,19 +8,19 @@ Gate 0A and Gate 0B single-occluder Slice 1, corridor Slice 2, analytic-transpor
 
 Gate 0B procedural appearance-candidate Slice 5 is also canonical after exact-head engineering and scientific review. Its exact reviewed implementation head was `2ea05867e7c8cb04ee4f9d0138394602b6c3e53a`, which received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`. Slice 5 provides a reproducible appearance-candidate audit apparatus and preserved negative evidence: all 160 cells succeeded, 44 cells were admitted, 116 rejected cells were retained, all ten profiles were rejected at profile level, and the admitted-profile set is empty. The strict registry, protected dataset-bound candidate seeds, portable-versus-renderer-local roots, complete audit command, and admission packet are documented in [the Slice 5 candidate contract](docs/GATE_0B_SLICE_5_APPEARANCE_CANDIDATES.md).
 
-Appearance Candidate Revision 1 is an implementation work package pending dual review. It preserves
-the canonical 44/116 result, diagnoses its retained failures, and prospectively locks seven new
-profile IDs plus a disjoint eight-seed qualification partition before any new-profile rendering.
-The complete locked local Windows/WGL run generated all 224 candidate cells and 32 controls. Its
-design partition admitted 99/112 cells and its untouched qualification partition admitted 100/112;
-five profiles passed every local design and qualification cell, while the stripe and illumination
-profiles were retained as rejected negative evidence. Locked Ubuntu/OSMesa evidence admitted
-97/112 design cells and 100/112 qualification cells. Its two additional design failures were in the
-already-rejected stripe profile, so both environments independently produced the same five-profile
-admitted set. Per-cell admission outcomes remain renderer-local; portable comparison binds matrix
-membership and whole-profile disposition. The admitted set supports only a later freeze proposal,
-not a freeze. Exact-head correction review and owner approval remain pending.
-The protocol and locked definitions are documented in
+Appearance Candidate Revision 1 is canonical after exact-head dual review and owner-approved
+closeout. Its exact reviewed implementation head was
+`da37a729bc4af00ea83c9460c3849307171bba69`, and its immutable prospective definition-lock commit
+was `914550ce4e3a819dcbcd0bd5390e3c6034af5bf6`. The canonical Slice 5 baseline remains 160
+successful cells, 44 admitted cells, and 116 retained rejected cells, with all ten baseline profiles
+rejected and an empty admitted-profile set. Revision 1 admits exactly
+`revision1_balanced_reference_v1`, `revision1_colour_shift_v1`,
+`revision1_checker_low_v1`, `revision1_checker_high_v1`, and
+`revision1_combined_stress_v1` across both locked renderers. `revision1_stripes_low_v1` and
+`revision1_illumination_shift_v1` remain rejected, and the WGL/OSMesa design-cell differences remain
+preserved as renderer-local negative evidence. This admitted set is candidate evidence only: no
+profile has been assigned or frozen into a final development/OOD role, and no final evaluation seed
+has been frozen. The protocol and locked definitions are documented in
 [the Revision 1 contract](docs/GATE_0B_APPEARANCE_CANDIDATE_REVISION_1.md).
 
 **No scientific result exists yet.** No appearance profile or final development/OOD split is frozen, and no final evaluation seeds are frozen. Revision 1 candidate qualification cannot itself authorise a benchmark freeze. Full Gate 0B remains incomplete; Gate 0C, Gate 0D, and all model work remain unauthorised.
