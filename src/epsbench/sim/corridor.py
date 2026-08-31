@@ -138,6 +138,7 @@ def build_corridor_scene_xml(
   <worldbody>
     <light name="key" directional="true" castshadow="false" pos="0 -1 6"
            dir="{appearance.light_direction}" diffuse="{appearance.light_diffuse}"
+           ambient="{appearance.light_ambient}"
            specular="0 0 0"/>
     <geom name="corridor_floor" type="box" pos="0 {half_length} -0.05"
           size="{half_width} {half_length} 0.05"

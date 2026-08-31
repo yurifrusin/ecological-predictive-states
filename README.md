@@ -8,7 +8,22 @@ Gate 0A and Gate 0B single-occluder Slice 1, corridor Slice 2, analytic-transpor
 
 Gate 0B procedural appearance-candidate Slice 5 is also canonical after exact-head engineering and scientific review. Its exact reviewed implementation head was `2ea05867e7c8cb04ee4f9d0138394602b6c3e53a`, which received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`. Slice 5 provides a reproducible appearance-candidate audit apparatus and preserved negative evidence: all 160 cells succeeded, 44 cells were admitted, 116 rejected cells were retained, all ten profiles were rejected at profile level, and the admitted-profile set is empty. The strict registry, protected dataset-bound candidate seeds, portable-versus-renderer-local roots, complete audit command, and admission packet are documented in [the Slice 5 candidate contract](docs/GATE_0B_SLICE_5_APPEARANCE_CANDIDATES.md).
 
-**No scientific result exists yet.** No appearance profile or final development/OOD split is frozen, and no final evaluation seeds are frozen. The next appearance work must be a separately authorised, versioned candidate-revision work package before any benchmark-freeze decision. Full Gate 0B remains incomplete; Gate 0C, Gate 0D, and all model work remain unauthorised.
+Appearance Candidate Revision 1 is an implementation work package pending dual review. It preserves
+the canonical 44/116 result, diagnoses its retained failures, and prospectively locks seven new
+profile IDs plus a disjoint eight-seed qualification partition before any new-profile rendering.
+The complete locked local Windows/WGL run generated all 224 candidate cells and 32 controls. Its
+design partition admitted 99/112 cells and its untouched qualification partition admitted 100/112;
+five profiles passed every local design and qualification cell, while the stripe and illumination
+profiles were retained as rejected negative evidence. Locked Ubuntu/OSMesa evidence admitted
+97/112 design cells and 100/112 qualification cells. Its two additional design failures were in the
+already-rejected stripe profile, so both environments independently produced the same five-profile
+admitted set. Per-cell admission outcomes remain renderer-local; portable comparison binds matrix
+membership and whole-profile disposition. The admitted set supports only a later freeze proposal,
+not a freeze. Exact-head correction review and owner approval remain pending.
+The protocol and locked definitions are documented in
+[the Revision 1 contract](docs/GATE_0B_APPEARANCE_CANDIDATE_REVISION_1.md).
+
+**No scientific result exists yet.** No appearance profile or final development/OOD split is frozen, and no final evaluation seeds are frozen. Revision 1 candidate qualification cannot itself authorise a benchmark freeze. Full Gate 0B remains incomplete; Gate 0C, Gate 0D, and all model work remain unauthorised.
 
 The scientific authority is [the Research Charter](docs/RESEARCH_CHARTER.md), followed by [EPS-Bench v0](docs/EPS_BENCH_V0.md) and [Milestone 0](docs/MILESTONE_0.md). Architecture and current limits are recorded in [the implementation notes](docs/IMPLEMENTATION_NOTES.md). Review workflow v2 is canonical after PR #7 and its linked closeout; the exact reviewed implementation head was `741e31882cb484fa5858630be83d2f08e483585f`, which received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`. Active review records remain external to implementation PRs, and final immutable records enter through a separately authorised linked closeout. `MERGE_CONVERGENCE` and the terminal `RECORD_ONLY_CLOSEOUT` path remain distinct. The orchestrator coordinates state without inheriting review authority. This governance closeout has no Gate 0B or Gate 0C effect, implements no machine-readable review automation or next slice, and establishes no scientific result. See [the review protocol](docs/review-protocol.md) and [review-record directory policy](docs/reviews/README.md).
 

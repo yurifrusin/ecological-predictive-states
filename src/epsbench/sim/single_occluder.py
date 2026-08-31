@@ -99,6 +99,7 @@ def build_scene_xml(
   <worldbody>
     <light name="key" directional="true" castshadow="false" pos="-1 -2 5"
            dir="{appearance.light_direction}" diffuse="{appearance.light_diffuse}"
+           ambient="{appearance.light_ambient}"
            specular="0 0 0"/>
     <geom name="support_surface" type="plane" size="4 7 0.1"
           rgba="{support_colour}"{support_material}/>

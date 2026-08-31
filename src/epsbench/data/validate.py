@@ -40,10 +40,10 @@ from epsbench.annotations import (
     derive_visibility,
 )
 from epsbench.appearance import (
-    AppearanceRegistry,
-    EvaluationSeedRegistry,
     appearance_profile_hash,
     appearance_registry_hash,
+    parse_appearance_registry,
+    parse_seed_registry,
     profile_by_id,
     seed_registry_hash,
     validate_appearance_instance,
@@ -1133,9 +1133,7 @@ def validate_dataset(root: Path) -> DatasetManifest:
         resolved_root, manifest.appearance_registry_snapshot, registry
     )
     try:
-        appearance_registry = AppearanceRegistry.model_validate_json(
-            canonical_json_bytes(appearance_registry_payload)
-        )
+        appearance_registry = parse_appearance_registry(appearance_registry_payload)
         validate_axis_isolation(appearance_registry)
     except Exception as error:
         raise DatasetValidationError("appearance registry snapshot is invalid") from error
@@ -1153,9 +1151,7 @@ def validate_dataset(root: Path) -> DatasetManifest:
         registry,
     )
     try:
-        seed_registry = EvaluationSeedRegistry.model_validate_json(
-            canonical_json_bytes(seed_registry_payload)
-        )
+        seed_registry = parse_seed_registry(seed_registry_payload)
     except Exception as error:
         raise DatasetValidationError("evaluation seed registry snapshot is invalid") from error
     if seed_registry_hash(seed_registry) != manifest.evaluation_seed_registry_sha256:

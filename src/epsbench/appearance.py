@@ -31,13 +31,19 @@ RgbBytes = tuple[int, int, int]
 TextureArray = npt.NDArray[np.uint8]
 
 APPEARANCE_REGISTRY_VERSION = "appearance_candidate_registry_v1"
+APPEARANCE_REVISION1_REGISTRY_VERSION = "appearance_candidate_registry_v2"
 EVALUATION_SEED_REGISTRY_VERSION = "evaluation_seed_candidate_registry_v0"
+QUALIFICATION_SEED_REGISTRY_VERSION = "appearance_revision1_qualification_seed_registry_v0"
 APPEARANCE_GENERATOR_VERSION = "repository_procedural_texture_v1"
 APPEARANCE_ASSIGNMENT_VERSION = "balanced_cyclic_permutation_v1"
 LEGACY_ASSIGNMENT_VERSION = "fixed_semantic_regression_v1"
 APPEARANCE_INSTANCE_VERSION: Literal["appearance_instance_v3"] = "appearance_instance_v3"
+APPEARANCE_REVISION1_INSTANCE_VERSION: Literal["appearance_instance_v4"] = "appearance_instance_v4"
 ASSIGNMENT_SCHEDULE_SOURCE: Literal["snapshotted_evaluation_seed_registry_v1"] = (
     "snapshotted_evaluation_seed_registry_v1"
+)
+REVISION1_ASSIGNMENT_SCHEDULE_SOURCE: Literal["snapshotted_revision_partition_seed_registry_v1"] = (
+    "snapshotted_revision_partition_seed_registry_v1"
 )
 TEXTURE_RESOLUTION = 128
 
@@ -52,6 +58,27 @@ CANONICAL_PROFILE_IDS = (
     "balanced_illumination_left_v1",
     "balanced_illumination_right_dim_v1",
     "balanced_combined_stress_v1",
+)
+
+REVISION1_PROFILE_IDS = (
+    "revision1_balanced_reference_v1",
+    "revision1_colour_shift_v1",
+    "revision1_checker_low_v1",
+    "revision1_checker_high_v1",
+    "revision1_stripes_low_v1",
+    "revision1_illumination_shift_v1",
+    "revision1_combined_stress_v1",
+)
+
+CANONICAL_DESIGN_SEEDS = (
+    6594827050443514047,
+    8414348828724831316,
+    12608688243639701226,
+    12500538448662680758,
+    8773669028651797023,
+    13662469654622758661,
+    17452811338195253152,
+    18258777022364122176,
 )
 
 
@@ -175,9 +202,11 @@ class IlluminationDefinition(StrictAppearanceModel):
     camera_exposure_rule: Literal["unchanged_renderer_default_v1"]
 
     @model_validator(mode="after")
-    def non_directional_terms_are_disabled(self) -> IlluminationDefinition:
-        if self.ambient_rgb != (0.0, 0.0, 0.0) or self.specular_rgb != (0.0, 0.0, 0.0):
-            raise ValueError("ambient and specular illumination must be exactly zero")
+    def non_directional_terms_are_explicit_and_finite(self) -> IlluminationDefinition:
+        if not all(math.isfinite(value) and 0.0 <= value <= 1.0 for value in self.ambient_rgb):
+            raise ValueError("ambient illumination must be finite and bounded in [0, 1]")
+        if self.specular_rgb != (0.0, 0.0, 0.0):
+            raise ValueError("specular illumination must remain exactly zero")
         return self
 
 
@@ -193,7 +222,7 @@ class AdmissionThresholds(StrictAppearanceModel):
 
 class AppearanceProfile(StrictAppearanceModel):
     profile_id: str = Field(pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*_v[0-9]+$")
-    profile_version: Literal["appearance_profile_v2"]
+    profile_version: Literal["appearance_profile_v2", "appearance_profile_v3"]
     candidate_class: CandidateClass
     freeze_eligible: bool
     axis_tags: tuple[AxisTag, ...] = Field(min_length=1)
@@ -207,6 +236,12 @@ class AppearanceProfile(StrictAppearanceModel):
 
     @model_validator(mode="after")
     def intent_is_consistent(self) -> AppearanceProfile:
+        if self.profile_version == "appearance_profile_v2" and self.illumination.ambient_rgb != (
+            0.0,
+            0.0,
+            0.0,
+        ):
+            raise ValueError("appearance_profile_v2 requires exactly zero ambient illumination")
         if len(set(self.axis_tags)) != len(self.axis_tags):
             raise ValueError("appearance axis tags must be unique")
         if self.candidate_class == CandidateClass.LEGACY_REGRESSION_CONTROL:
@@ -252,6 +287,31 @@ class AppearanceRegistry(StrictAppearanceModel):
         return self
 
 
+class AppearanceRevision1Registry(StrictAppearanceModel):
+    registry_version: Literal["appearance_candidate_registry_v2"]
+    profiles: tuple[AppearanceProfile, ...] = Field(min_length=1)
+    revision1_admission_profile_ids: tuple[str, str, str, str, str, str, str]
+
+    @model_validator(mode="after")
+    def profiles_are_exact_and_referentially_complete(self) -> AppearanceRevision1Registry:
+        ids = tuple(profile.profile_id for profile in self.profiles)
+        expected = tuple(sorted((*CANONICAL_PROFILE_IDS, *REVISION1_PROFILE_IDS)))
+        if len(ids) != len(set(ids)) or ids != expected:
+            raise ValueError("Revision 1 registry must contain the exact ordered profile set")
+        if self.revision1_admission_profile_ids != REVISION1_PROFILE_IDS:
+            raise ValueError("Revision 1 admission profile IDs are not exact")
+        known = set(ids)
+        if any(profile.matched_control_profile_id not in known for profile in self.profiles):
+            raise ValueError("matched appearance controls must name a registry profile")
+        if any(
+            profile.profile_version != "appearance_profile_v3"
+            for profile in self.profiles
+            if profile.profile_id in REVISION1_PROFILE_IDS
+        ):
+            raise ValueError("Revision 1 profiles require appearance_profile_v3")
+        return self
+
+
 class EvaluationSeedRegistry(StrictAppearanceModel):
     registry_version: Literal["evaluation_seed_candidate_registry_v0"]
     root_seed: Literal[1729]
@@ -272,6 +332,34 @@ class EvaluationSeedRegistry(StrictAppearanceModel):
         if len(set(self.candidate_episode_seeds)) != 8:
             raise ValueError("candidate episode seeds must be unique")
         return self
+
+
+class QualificationSeedRegistry(StrictAppearanceModel):
+    registry_version: Literal["appearance_revision1_qualification_seed_registry_v0"]
+    root_seed: Literal[271828]
+    derivation_rule: Literal["derive_seed_v1"]
+    namespace: Literal["gate0b-appearance-revision1-qualification"]
+    indices: tuple[int, int, int, int, int, int, int, int]
+    candidate_episode_seeds: tuple[int, int, int, int, int, int, int, int]
+
+    @model_validator(mode="after")
+    def seeds_are_exact_untouched_and_disjoint(self) -> QualificationSeedRegistry:
+        if self.indices != tuple(range(8)):
+            raise ValueError("qualification seed indices must be exactly 0 through 7")
+        expected = tuple(
+            derive_seed(self.root_seed, f"{self.namespace}:{index}") for index in self.indices
+        )
+        if self.candidate_episode_seeds != expected:
+            raise ValueError("qualification seeds differ from derive_seed_v1 recomputation")
+        if len(set(self.candidate_episode_seeds)) != 8:
+            raise ValueError("qualification seeds must be unique")
+        if set(self.candidate_episode_seeds) & set(CANONICAL_DESIGN_SEEDS):
+            raise ValueError("qualification seeds collide with canonical design seeds")
+        return self
+
+
+AppearanceRegistryType = AppearanceRegistry | AppearanceRevision1Registry
+SeedRegistryType = EvaluationSeedRegistry | QualificationSeedRegistry
 
 
 class AppearanceSeeds(StrictAppearanceModel):
@@ -302,15 +390,23 @@ class ProceduralTextureRecord(StrictAppearanceModel):
 
 
 class AppearanceInstanceRecord(StrictAppearanceModel):
-    appearance_instance_version: Literal["appearance_instance_v3"]
-    registry_version: Literal["appearance_candidate_registry_v1"]
+    appearance_instance_version: Literal["appearance_instance_v3", "appearance_instance_v4"]
+    registry_version: Literal[
+        "appearance_candidate_registry_v1", "appearance_candidate_registry_v2"
+    ]
     profile: AppearanceProfile
     appearance_registry_sha256: Sha256
     appearance_profile_sha256: Sha256
     appearance_instance_sha256: Sha256
-    evaluation_seed_registry_version: Literal["evaluation_seed_candidate_registry_v0"]
+    evaluation_seed_registry_version: Literal[
+        "evaluation_seed_candidate_registry_v0",
+        "appearance_revision1_qualification_seed_registry_v0",
+    ]
     evaluation_seed_registry_sha256: Sha256
-    assignment_schedule_source: Literal["snapshotted_evaluation_seed_registry_v1"]
+    assignment_schedule_source: Literal[
+        "snapshotted_evaluation_seed_registry_v1",
+        "snapshotted_revision_partition_seed_registry_v1",
+    ]
     assignment_root_seed: int = Field(ge=0)
     assignment_schedule_posture: Literal[
         "candidate_registry_index",
@@ -324,6 +420,18 @@ class AppearanceInstanceRecord(StrictAppearanceModel):
 
     @model_validator(mode="after")
     def assignment_and_textures_are_exact(self) -> AppearanceInstanceRecord:
+        if self.registry_version == APPEARANCE_REGISTRY_VERSION:
+            if (
+                self.appearance_instance_version != APPEARANCE_INSTANCE_VERSION
+                or self.evaluation_seed_registry_version != EVALUATION_SEED_REGISTRY_VERSION
+                or self.assignment_schedule_source != ASSIGNMENT_SCHEDULE_SOURCE
+            ):
+                raise ValueError("canonical v1 appearance instance version binding is inconsistent")
+        elif (
+            self.appearance_instance_version != APPEARANCE_REVISION1_INSTANCE_VERSION
+            or self.assignment_schedule_source != REVISION1_ASSIGNMENT_SCHEDULE_SOURCE
+        ):
+            raise ValueError("Revision 1 appearance instance version binding is inconsistent")
         expected_posture = (
             "candidate_registry_index"
             if self.seeds.candidate_schedule_index is not None
@@ -357,20 +465,67 @@ class AppearanceRenderPlan:
     asset_xml: str
     light_direction: str
     light_diffuse: str
+    light_ambient: str
 
 
-def load_appearance_registry(path: Path) -> AppearanceRegistry:
+def parse_appearance_registry(payload: object) -> AppearanceRegistryType:
+    if not isinstance(payload, dict):
+        raise ValueError("appearance registry must be a mapping")
+    version = payload.get("registry_version")
+    model = (
+        AppearanceRegistry
+        if version == APPEARANCE_REGISTRY_VERSION
+        else AppearanceRevision1Registry
+        if version == APPEARANCE_REVISION1_REGISTRY_VERSION
+        else None
+    )
+    if model is None:
+        raise ValueError(f"unsupported appearance registry version: {version}")
+    return model.model_validate_json(json.dumps(payload))
+
+
+def load_appearance_registry_any(path: Path) -> AppearanceRegistryType:
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("appearance registry must be a YAML mapping")
-    return AppearanceRegistry.model_validate_json(json.dumps(payload))
+    return parse_appearance_registry(payload)
+
+
+def load_appearance_registry(path: Path) -> AppearanceRegistry:
+    registry = load_appearance_registry_any(path)
+    if not isinstance(registry, AppearanceRegistry):
+        raise ValueError("canonical appearance registry v1 required")
+    return registry
+
+
+def parse_seed_registry(payload: object) -> SeedRegistryType:
+    if not isinstance(payload, dict):
+        raise ValueError("appearance seed registry must be a mapping")
+    version = payload.get("registry_version")
+    model = (
+        EvaluationSeedRegistry
+        if version == EVALUATION_SEED_REGISTRY_VERSION
+        else QualificationSeedRegistry
+        if version == QUALIFICATION_SEED_REGISTRY_VERSION
+        else None
+    )
+    if model is None:
+        raise ValueError(f"unsupported appearance seed registry version: {version}")
+    return model.model_validate_json(json.dumps(payload))
+
+
+def load_seed_registry(path: Path) -> SeedRegistryType:
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("appearance seed registry must be a YAML mapping")
+    return parse_seed_registry(payload)
 
 
 def load_evaluation_seed_registry(path: Path) -> EvaluationSeedRegistry:
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("evaluation seed registry must be a YAML mapping")
-    return EvaluationSeedRegistry.model_validate_json(json.dumps(payload))
+    registry = load_seed_registry(path)
+    if not isinstance(registry, EvaluationSeedRegistry):
+        raise ValueError("canonical evaluation seed registry v0 required")
+    return registry
 
 
 def configured_appearance_render_plan(
@@ -398,7 +553,7 @@ def configured_appearance_render_plan(
     )
 
 
-def appearance_registry_hash(registry: AppearanceRegistry) -> str:
+def appearance_registry_hash(registry: AppearanceRegistryType) -> str:
     return sha256_bytes(canonical_json_bytes(registry))
 
 
@@ -406,11 +561,11 @@ def appearance_profile_hash(profile: AppearanceProfile) -> str:
     return sha256_bytes(canonical_json_bytes(profile))
 
 
-def seed_registry_hash(registry: EvaluationSeedRegistry) -> str:
+def seed_registry_hash(registry: SeedRegistryType) -> str:
     return sha256_bytes(canonical_json_bytes(registry))
 
 
-def profile_by_id(registry: AppearanceRegistry, profile_id: str) -> AppearanceProfile:
+def profile_by_id(registry: AppearanceRegistryType, profile_id: str) -> AppearanceProfile:
     try:
         return next(profile for profile in registry.profiles if profile.profile_id == profile_id)
     except StopIteration as error:
@@ -429,7 +584,7 @@ def appearance_seed_namespaces(episode_seed: int) -> AppearanceSeeds:
     )
 
 
-def candidate_schedule_index(root_seed: int, registry: EvaluationSeedRegistry) -> int | None:
+def candidate_schedule_index(root_seed: int, registry: SeedRegistryType) -> int | None:
     try:
         return registry.candidate_episode_seeds.index(root_seed)
     except ValueError:
@@ -525,13 +680,13 @@ def appearance_instance_hash(record: AppearanceInstanceRecord) -> str:
 
 
 def resolve_appearance(
-    registry: AppearanceRegistry,
+    registry: AppearanceRegistryType,
     profile_id: str,
     scene_family: Literal["single_occluder", "corridor"],
     surface_names: tuple[str, ...],
     episode_seed: int,
     root_seed: int,
-    seed_registry: EvaluationSeedRegistry,
+    seed_registry: SeedRegistryType,
 ) -> AppearanceRenderPlan:
     profile = profile_by_id(registry, profile_id)
     seeds = appearance_seed_namespaces(episode_seed)
@@ -591,8 +746,11 @@ def resolve_appearance(
                 source_texture_logical_sha256=source_hash,
             )
         )
+    revision1 = registry.registry_version == APPEARANCE_REVISION1_REGISTRY_VERSION
     provisional = AppearanceInstanceRecord(
-        appearance_instance_version=APPEARANCE_INSTANCE_VERSION,
+        appearance_instance_version=(
+            APPEARANCE_REVISION1_INSTANCE_VERSION if revision1 else APPEARANCE_INSTANCE_VERSION
+        ),
         registry_version=registry.registry_version,
         profile=profile,
         appearance_registry_sha256=appearance_registry_hash(registry),
@@ -600,7 +758,9 @@ def resolve_appearance(
         appearance_instance_sha256="0" * 64,
         evaluation_seed_registry_version=seed_registry.registry_version,
         evaluation_seed_registry_sha256=seed_registry_hash(seed_registry),
-        assignment_schedule_source=ASSIGNMENT_SCHEDULE_SOURCE,
+        assignment_schedule_source=(
+            REVISION1_ASSIGNMENT_SCHEDULE_SOURCE if revision1 else ASSIGNMENT_SCHEDULE_SOURCE
+        ),
         assignment_root_seed=root_seed,
         assignment_schedule_posture=(
             "candidate_registry_index"
@@ -629,17 +789,18 @@ def resolve_appearance(
         asset_xml="\n    ".join(asset_xml),
         light_direction=" ".join(str(value) for value in light.direction),
         light_diffuse=" ".join(str(light.diffuse_intensity) for _ in range(3)),
+        light_ambient=" ".join(str(value) for value in profile.illumination.ambient_rgb),
     )
 
 
 def validate_appearance_instance(
     record: AppearanceInstanceRecord,
-    registry: AppearanceRegistry,
+    registry: AppearanceRegistryType,
     scene_family: Literal["single_occluder", "corridor"],
     surface_names: tuple[str, ...],
     episode_seed: int,
     root_seed: int,
-    seed_registry: EvaluationSeedRegistry,
+    seed_registry: SeedRegistryType,
 ) -> AppearanceRenderPlan:
     expected = resolve_appearance(
         registry,
@@ -655,19 +816,29 @@ def validate_appearance_instance(
     return expected
 
 
-def validate_axis_isolation(registry: AppearanceRegistry) -> None:
+def validate_axis_isolation(registry: AppearanceRegistryType) -> None:
     """Require declared scientific axes to equal independently observed profile changes."""
 
     by_id = {profile.profile_id: profile for profile in registry.profiles}
     for profile in registry.profiles:
         AppearanceProfile.model_validate(profile.model_dump(mode="python"))
-    solid = by_id["balanced_solid_palette_v1"]
-    spatial_introduction_baseline = by_id["balanced_checker_low_v1"].texture
+    canonical_spatial_introduction_baseline = by_id["balanced_checker_low_v1"].texture
+    revision_spatial_introduction_baseline = (
+        by_id["revision1_checker_low_v1"].texture
+        if isinstance(registry, AppearanceRevision1Registry)
+        else canonical_spatial_introduction_baseline
+    )
+    canonical_solid = by_id["balanced_solid_palette_v1"]
 
     def observed_axes(
         profile: AppearanceProfile,
         reference: AppearanceProfile,
     ) -> set[AxisTag]:
+        spatial_introduction_baseline = (
+            revision_spatial_introduction_baseline
+            if profile.profile_id in REVISION1_PROFILE_IDS
+            else canonical_spatial_introduction_baseline
+        )
         if profile.material != reference.material:
             raise ValueError("appearance candidates cannot change the undeclared material domain")
         if profile.non_degeneracy_thresholds != reference.non_degeneracy_thresholds:
@@ -733,8 +904,9 @@ def validate_axis_isolation(registry: AppearanceRegistry) -> None:
                 raise ValueError("legacy controls must match themselves")
             continue
         reference = (
-            solid
-            if profile.candidate_class == CandidateClass.COMBINED_STRESS_CANDIDATE
+            canonical_solid
+            if profile.profile_id in CANONICAL_PROFILE_IDS
+            and profile.candidate_class == CandidateClass.COMBINED_STRESS_CANDIDATE
             else by_id[profile.matched_control_profile_id]
         )
         actual = observed_axes(profile, reference)
@@ -749,17 +921,21 @@ def validate_axis_isolation(registry: AppearanceRegistry) -> None:
                 f"combined declaration differs from actual changes: {profile.profile_id}"
             )
 
-    low = by_id["balanced_checker_low_v1"]
-    high = by_id["balanced_checker_high_v1"]
-    if high.texture.cycles_per_tile < 4 * low.texture.cycles_per_tile:
-        raise ValueError("high-frequency checker is less than four times its low partner")
+    frequency_pairs = [("balanced_checker_low_v1", "balanced_checker_high_v1")]
+    if isinstance(registry, AppearanceRevision1Registry):
+        frequency_pairs.append(("revision1_checker_low_v1", "revision1_checker_high_v1"))
+    for low_id, high_id in frequency_pairs:
+        low = by_id[low_id]
+        high = by_id[high_id]
+        if high.texture.cycles_per_tile < 4 * low.texture.cycles_per_tile:
+            raise ValueError("high-frequency checker is less than four times its low partner")
 
 
 def assignment_balance(
     profile: AppearanceProfile,
     surface_names: tuple[str, ...],
     candidate_seeds: tuple[int, ...],
-    seed_registry: EvaluationSeedRegistry,
+    seed_registry: SeedRegistryType,
 ) -> dict[str, dict[str, int]]:
     counts = {
         surface: {f"style-slot-{slot}": 0 for slot in range(len(surface_names))}

@@ -85,3 +85,50 @@ registry and binds its identity and schedule source into the manifest, dataset l
 appearance-instance identity. Validation is self-contained. This does not promote candidate seeds to
 final evaluation seeds: the unchanged result remains 44 admitted cells, 116 rejected cells, and no
 profile admitted across every scene/seed cell. No freeze or scientific result follows.
+
+## 2026-08-29 — Appearance Candidate Revision 1 prospective lock
+
+The canonical Slice 5 profiles, seeds, thresholds, and 44/116 result remain immutable. Revision 1
+adds new profile IDs rather than editing failed candidates in place.
+
+Revision 1 uses the original eight seeds for diagnosis and a separately derived, prospectively
+locked eight-seed qualification set. Neither set is a final evaluation-seed freeze.
+
+Revision 1 profile definitions are committed before qualification rendering. Qualification
+failures are retained and do not trigger within-work-package parameter tuning. The definition lock
+chooses explicit ambient fill, moderate-luminance palettes, and one-cycle/four-cycle texture partners
+from the baseline surface/normal and minification diagnosis. These are candidate interventions, not
+a benchmark freeze or scientific result.
+
+The immutable definition-lock commit `914550ce4e3a819dcbcd0bd5390e3c6034af5bf6` was pushed
+before any Revision 1 candidate rendering. The complete locked Windows/WGL run subsequently
+generated and validated 224 candidate cells and 32 controls. Design admitted 99/112 and untouched
+qualification admitted 100/112. Balanced reference, colour shift, both checker frequencies, and
+combined stress passed every local cell; stripe and illumination profiles retained their failures.
+No definition, seed, threshold, or admission rule changed after qualification began. Exact-head
+Ubuntu/OSMesa confirmation, dual review, and owner approval remain pending; no freeze or scientific
+result follows.
+
+## 2026-08-29 — Revision 1 portable profile disposition versus renderer-local cells
+
+Scientific review of exact head `679d85fb40288715482f604d1585cdd6a045e0db` found that the
+Revision 1 partition-outcome roots included per-cell RGB, exposure, and rendered-texture admission
+outcomes but were asserted as portable. The red exact-head CI run `33247224228` is retained as
+evidence against that root ontology. Windows/WGL admitted 99/112 design cells; Ubuntu/OSMesa
+admitted 97/112. Both admitted 100/112 qualification cells, and both independently admitted the
+same five profiles. The two additional OSMesa failures remain negative cell evidence in the
+already-rejected stripe profile, not a portable membership disagreement.
+
+Root-domain v1 therefore binds partition membership without renderer evidence, binds only
+whole-profile dispositions for cross-renderer admission comparison, and explicitly labels the
+unchanged per-cell outcome hashes as renderer-local. The portable profile root omits per-cell counts
+and reasons; if a future renderer changes a whole-profile disposition, the disagreement is retained
+and the cross-renderer admitted set becomes the intersection.
+
+The same review found that the portable baseline-analysis root alone did not bind the complete
+prospective diagnosis. Validation now reconstructs both analysis roots, checks the three child-root
+receipts and every lock-facing baseline field, and requires the exact analysis snapshot from the
+immutable definition-lock commit. Neither committed prospective record changes. This evidence
+correction changes no profile, seed, control, threshold, renderer, admission rule, or experimental
+outcome. The agreed admitted set supports only a later freeze proposal. Full Gate 0B, Gate 0C,
+Gate 0D, models, benchmark freeze, and scientific results remain unauthorised.

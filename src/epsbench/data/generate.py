@@ -60,9 +60,11 @@ from epsbench.annotations import (
     derive_visibility,
 )
 from epsbench.appearance import (
+    APPEARANCE_REVISION1_REGISTRY_VERSION,
     ASSIGNMENT_SCHEDULE_SOURCE,
-    AppearanceRegistry,
-    EvaluationSeedRegistry,
+    REVISION1_ASSIGNMENT_SCHEDULE_SOURCE,
+    AppearanceRegistryType,
+    SeedRegistryType,
     appearance_profile_hash,
     appearance_registry_hash,
     load_appearance_registry,
@@ -791,8 +793,8 @@ def _generate_single_occluder_episode(
     root: Path,
     config: SingleOccluderConfig,
     episode_index: int,
-    appearance_registry: AppearanceRegistry,
-    seed_registry: EvaluationSeedRegistry,
+    appearance_registry: AppearanceRegistryType,
+    seed_registry: SeedRegistryType,
 ) -> EpisodeManifest:
     episode_id = f"episode-{episode_index:06d}"
     episode_seed = derive_seed(config.seed, f"episode:{episode_index}")
@@ -941,7 +943,11 @@ def _generate_single_occluder_episode(
     write_canonical_json(transition_path, transition)
 
     instrumentation = SingleOccluderInstrumentation(
-        schema_version="0.1.0-dev.12",
+        schema_version=(
+            "0.1.0-dev.13"
+            if appearance_registry.registry_version == APPEARANCE_REVISION1_REGISTRY_VERSION
+            else "0.1.0-dev.12"
+        ),
         scene_family=SceneFamily.SINGLE_OCCLUDER,
         episode_id=episode_id,
         appearance=appearance.record,
@@ -1004,8 +1010,8 @@ def _generate_corridor_episode(
     root: Path,
     config: CorridorConfig,
     episode_index: int,
-    appearance_registry: AppearanceRegistry,
-    seed_registry: EvaluationSeedRegistry,
+    appearance_registry: AppearanceRegistryType,
+    seed_registry: SeedRegistryType,
 ) -> EpisodeManifest:
     episode_id = f"episode-{episode_index:06d}"
     episode_seed = derive_seed(config.seed, f"episode:{episode_index}")
@@ -1146,7 +1152,11 @@ def _generate_corridor_episode(
             )
         )
     instrumentation = CorridorInstrumentation(
-        schema_version="0.1.0-dev.12",
+        schema_version=(
+            "0.1.0-dev.13"
+            if appearance_registry.registry_version == APPEARANCE_REVISION1_REGISTRY_VERSION
+            else "0.1.0-dev.12"
+        ),
         scene_family=SceneFamily.CORRIDOR,
         episode_id=episode_id,
         appearance=appearance.record,
@@ -1166,7 +1176,11 @@ def _generate_corridor_episode(
         generation_seeds=generation_seeds,
         raw_segmentation_frames=tuple(raw_segmentation_evidence),  # type: ignore[arg-type]
         geometry_sampling_rule="uniform_width_length_v1",
-        appearance_rule="procedural_profile_instance_v1",
+        appearance_rule=(
+            "procedural_profile_instance_v2"
+            if appearance_registry.registry_version == APPEARANCE_REVISION1_REGISTRY_VERSION
+            else "procedural_profile_instance_v1"
+        ),
         analytic_transport_diagnostics=_analytic_transport_diagnostics(
             rendered.analytic_transport,
             rendered.before.raw_geom_segmentation,
@@ -1212,8 +1226,8 @@ def _generate_episode(
     root: Path,
     config: BenchmarkConfig,
     episode_index: int,
-    appearance_registry: AppearanceRegistry,
-    seed_registry: EvaluationSeedRegistry,
+    appearance_registry: AppearanceRegistryType,
+    seed_registry: SeedRegistryType,
 ) -> EpisodeManifest:
     if isinstance(config, SingleOccluderConfig):
         return _generate_single_occluder_episode(
@@ -1244,8 +1258,8 @@ def generate_dataset(
     episodes: int,
     output: Path,
     *,
-    appearance_registry: AppearanceRegistry | None = None,
-    seed_registry: EvaluationSeedRegistry | None = None,
+    appearance_registry: AppearanceRegistryType | None = None,
+    seed_registry: SeedRegistryType | None = None,
 ) -> DatasetManifest:
     """Generate a new dataset directory, refusing to overwrite existing content."""
 
@@ -1306,8 +1320,9 @@ def generate_dataset(
     renderer_execution_provenance_sha256 = compute_renderer_execution_provenance_hash(
         renderer_provenance
     )
+    revision1 = appearance_registry.registry_version == APPEARANCE_REVISION1_REGISTRY_VERSION
     manifest = DatasetManifest(
-        schema_version="0.1.0-dev.7",
+        schema_version="0.1.0-dev.8" if revision1 else "0.1.0-dev.7",
         generator_version="0.1.0",
         scene_family=config.scene_family,
         root_seed=config.seed,
@@ -1318,7 +1333,9 @@ def generate_dataset(
         appearance_registry_snapshot=appearance_registry_artifact,
         evaluation_seed_registry_sha256=evaluation_seed_registry_sha256,
         evaluation_seed_registry_snapshot=evaluation_seed_registry_artifact,
-        appearance_assignment_schedule_source=ASSIGNMENT_SCHEDULE_SOURCE,
+        appearance_assignment_schedule_source=(
+            REVISION1_ASSIGNMENT_SCHEDULE_SOURCE if revision1 else ASSIGNMENT_SCHEDULE_SOURCE
+        ),
         resolved_config=resolved_config_artifact,
         renderer_provenance=renderer_provenance,
         renderer_execution_provenance_sha256=renderer_execution_provenance_sha256,

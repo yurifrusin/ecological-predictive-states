@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +11,11 @@ from typing import Any, TypeVar
 import numpy as np
 import numpy.typing as npt
 
-from epsbench.appearance import AppearanceInstanceRecord, EvaluationSeedRegistry
+from epsbench.appearance import (
+    AppearanceInstanceRecord,
+    SeedRegistryType,
+    parse_seed_registry,
+)
 from epsbench.data.decoding import (
     decode_json_artifact,
     decode_npy_artifact,
@@ -333,14 +338,14 @@ class DatasetLoader:
         self._require(Modality.APPEARANCE_CONTROL, Modality.PRIVILEGED_GENERATION_RECORDS)
         return self._instrumentation(episode_index).appearance.model_copy(deep=True)
 
-    def read_evaluation_seed_registry_snapshot(self) -> EvaluationSeedRegistry:
+    def read_evaluation_seed_registry_snapshot(self) -> SeedRegistryType:
         """Return the dataset-bound assignment registry only with private permissions."""
 
         self._require(Modality.APPEARANCE_CONTROL, Modality.PRIVILEGED_GENERATION_RECORDS)
         artifact = self._manifest.evaluation_seed_registry_snapshot
         return self._load_json(
             artifact,
-            EvaluationSeedRegistry.model_validate_json,
+            lambda snapshot: parse_seed_registry(json.loads(snapshot.decode("utf-8"))),
         )
 
     def read_raw_mujoco_geom_ids(self, episode_index: int) -> dict[str, int]:

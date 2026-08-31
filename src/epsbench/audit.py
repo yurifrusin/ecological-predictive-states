@@ -15,6 +15,7 @@ import time
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -24,11 +25,14 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from epsbench.appearance import (
+    APPEARANCE_REGISTRY_VERSION,
     AppearanceInstanceRecord,
     AppearanceProfile,
     AppearanceRegistry,
+    AppearanceRegistryType,
     CandidateClass,
     EvaluationSeedRegistry,
+    SeedRegistryType,
     TextureFamily,
     appearance_profile_hash,
     appearance_registry_hash,
@@ -47,6 +51,7 @@ from epsbench.data.paths import (
     UnsafeOwnedFileError,
     open_owned_regular_file,
     sha256_open_file,
+    validate_exact_owned_file_tree,
 )
 from epsbench.data.provenance import collect_source_provenance
 from epsbench.data.validate import validate_dataset
@@ -80,6 +85,26 @@ GOVERNING_DOCUMENTS = (
 
 class AppearanceAuditError(ValueError):
     """Raised when an audit packet or publication operation is invalid."""
+
+
+@dataclass(frozen=True, slots=True)
+class _ValidatedAppearanceAudit:
+    """Immutable packet evidence retained from one complete validation snapshot."""
+
+    packet_payload: bytes
+    seed_matrix_payload: bytes
+
+    def packet(self) -> dict[str, Any]:
+        payload = json.loads(self.packet_payload)
+        if not isinstance(payload, dict):
+            raise AppearanceAuditError("validated candidate packet is not an object")
+        return payload
+
+    def seed_matrix(self) -> dict[str, Any]:
+        payload = json.loads(self.seed_matrix_payload)
+        if not isinstance(payload, dict):
+            raise AppearanceAuditError("validated seed matrix is not an object")
+        return payload
 
 
 PACKET_LOGICAL_FIELDS = (
@@ -206,7 +231,12 @@ class _PacketArtifactRegistry:
             self.root = root.resolve(strict=True)
         except OSError as error:
             raise AppearanceAuditError("candidate packet root does not exist") from error
-        if root.is_symlink() or not stat.S_ISDIR(root_stat.st_mode):
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        if (
+            stat.S_ISLNK(root_stat.st_mode)
+            or bool(getattr(root_stat, "st_file_attributes", 0) & reparse_flag)
+            or not stat.S_ISDIR(root_stat.st_mode)
+        ):
             raise AppearanceAuditError("candidate packet root must be a non-link directory")
         self.roles: set[str] = set()
         self.paths: set[str] = set()
@@ -248,6 +278,14 @@ class _PacketArtifactRegistry:
                 self.resolved_paths.add(owned.path)
                 self.file_identities.add(identity)
                 yield owned
+        except UnsafeOwnedFileError as error:
+            raise AppearanceAuditError(str(error)) from error
+
+    def assert_exact_tree(self) -> None:
+        """Reject every unclaimed path, link, special file, and aliased identity."""
+
+        try:
+            validate_exact_owned_file_tree(self.root, self.paths)
         except UnsafeOwnedFileError as error:
             raise AppearanceAuditError(str(error)) from error
 
@@ -560,14 +598,22 @@ def _validate_cell_schema(cell: dict[str, Any]) -> None:
 
 
 def _profile_config(
-    config: BenchmarkConfig, profile: AppearanceProfile, candidate_seed: int
+    config: BenchmarkConfig,
+    profile: AppearanceProfile,
+    candidate_seed: int,
+    registry_version: str = APPEARANCE_REGISTRY_VERSION,
 ) -> BenchmarkConfig:
     return type(config).model_validate(
         {
             **config.model_dump(mode="python"),
+            "schema_version": (
+                "0.1.0-dev.5"
+                if registry_version == "appearance_candidate_registry_v2"
+                else "0.1.0-dev.4"
+            ),
             "seed": candidate_seed,
             "appearance": {
-                "registry_version": "appearance_candidate_registry_v1",
+                "registry_version": registry_version,
                 "profile_id": profile.profile_id,
             },
         }
@@ -998,11 +1044,14 @@ def _dataset_cell(
     profile: AppearanceProfile,
     seed_index: int,
     candidate_seed: int,
-    registry: AppearanceRegistry,
-    seeds: EvaluationSeedRegistry,
+    registry: AppearanceRegistryType,
+    seeds: SeedRegistryType,
+    *,
+    cell_id_prefix: str | None = None,
 ) -> dict[str, Any]:
     scene = config.scene_family.value
-    cell_id = _cell_id(scene, profile.profile_id, seed_index)
+    base_cell_id = _cell_id(scene, profile.profile_id, seed_index)
+    cell_id = f"{cell_id_prefix}--{base_cell_id}" if cell_id_prefix else base_cell_id
     cell: dict[str, Any] = {
         "cell_id": cell_id,
         "scene_family": scene,
@@ -1015,7 +1064,7 @@ def _dataset_cell(
         "rejection_reasons": [],
     }
     try:
-        selected = _profile_config(config, profile, candidate_seed)
+        selected = _profile_config(config, profile, candidate_seed, registry.registry_version)
         manifest = generate_dataset(
             selected,
             1,
@@ -1361,8 +1410,8 @@ def _validate_contact_sheet_manifest(
 
 
 def _roots(
-    registry: AppearanceRegistry,
-    seeds: EvaluationSeedRegistry,
+    registry: AppearanceRegistryType,
+    seeds: SeedRegistryType,
     cells: list[dict[str, Any]],
 ) -> dict[str, str]:
     successful = [cell for cell in cells if cell["generation_status"] == "success"]
@@ -1526,13 +1575,18 @@ def _write_packet_reports(
     return packet
 
 
-def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
-    """Independently recompute matrix, metrics, balance, and packet roots."""
+def _validate_appearance_audit_evidence(
+    packet_root: Path,
+    *,
+    verify_current_source_provenance: bool = True,
+) -> _ValidatedAppearanceAudit:
+    """Validate one packet snapshot and retain its exact seed-matrix bytes."""
 
     artifact_registry = _PacketArtifactRegistry(packet_root)
     with artifact_registry.claim("candidate_packet.json", "candidate-packet") as owned:
+        packet_payload = owned.payload
         try:
-            packet = json.loads(owned.payload.decode("utf-8"))
+            packet = json.loads(packet_payload.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as error:
             raise AppearanceAuditError("candidate packet JSON is invalid") from error
     expected_packet_fields = set(PACKET_LOGICAL_FIELDS) | {"packet_logical_root_sha256"}
@@ -1569,18 +1623,21 @@ def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
     except Exception as error:
         raise AppearanceAuditError("candidate packet registry snapshot is invalid") from error
     report_payloads: dict[str, dict[str, Any]] = {}
+    report_bytes: dict[str, bytes] = {}
     for name in report_names:
         with artifact_registry.claim(
             name,
             f"report:{name}",
             expected_file_sha256=report_hashes[name],
         ) as owned:
+            raw = owned.payload
             try:
-                payload = json.loads(owned.payload.decode("utf-8"))
+                payload = json.loads(raw.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError) as error:
                 raise AppearanceAuditError(f"candidate packet report is invalid: {name}") from error
             if not isinstance(payload, dict):
                 raise AppearanceAuditError(f"candidate packet report must be an object: {name}")
+            report_bytes[name] = raw
             report_payloads[name] = payload
     validate_axis_isolation(registry)
     matrix = report_payloads["seed_matrix.json"]
@@ -1831,9 +1888,30 @@ def validate_appearance_audit(packet_root: Path) -> dict[str, Any]:
     current_governing_hashes = {path: sha256_file(Path(path)) for path in GOVERNING_DOCUMENTS}
     if current_governing_hashes != packet["governing_document_hashes"]:
         raise AppearanceAuditError("governing-document hash mismatch")
-    if collect_source_provenance(Path.cwd()).model_dump(mode="json") != packet["source_provenance"]:
+    if (
+        verify_current_source_provenance
+        and collect_source_provenance(Path.cwd()).model_dump(mode="json")
+        != packet["source_provenance"]
+    ):
         raise AppearanceAuditError("packet source provenance is not truthful for this source tree")
-    return packet
+    return _ValidatedAppearanceAudit(
+        packet_payload=packet_payload,
+        seed_matrix_payload=report_bytes["seed_matrix.json"],
+    )
+
+
+def validate_appearance_audit(
+    packet_root: Path,
+    *,
+    verify_current_source_provenance: bool = True,
+) -> dict[str, Any]:
+    """Independently recompute matrix, metrics, balance, and packet roots."""
+
+    evidence = _validate_appearance_audit_evidence(
+        packet_root,
+        verify_current_source_provenance=verify_current_source_provenance,
+    )
+    return evidence.packet()
 
 
 def create_appearance_audit(
@@ -1853,6 +1931,10 @@ def create_appearance_audit(
         output.rmdir()
     registry = load_appearance_registry(registry_path)
     seeds = load_evaluation_seed_registry(seeds_path)
+    if not isinstance(registry, AppearanceRegistry) or not isinstance(
+        seeds, EvaluationSeedRegistry
+    ):
+        raise AppearanceAuditError("canonical audit requires the v1 registry and design seeds")
     validate_axis_isolation(registry)
     configs = (load_config(single_config_path), load_config(corridor_config_path))
     if tuple(config.scene_family.value for config in configs) != SCENE_FAMILIES:

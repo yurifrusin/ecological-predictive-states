@@ -4,6 +4,19 @@
 
 This implementation completes the repository foundation in Gate 0A and preserves the canonical single-occluder Gate 0B Slice 1, corridor Slice 2, analytic optical-transport Slice 3, and oriented-boundary and ecological visibility-event Slice 4. Slice 4 became canonical after exact-head dual independent review and owner approval at `24deb074d4ba0cf3e1044e466ecbbb6e0b2a4cc4`. Slice 5 procedural appearance-candidate apparatus is also canonical after exact-head engineering and scientific review and owner approval at `2ea05867e7c8cb04ee4f9d0138394602b6c3e53a`; its empty admitted-profile set remains preserved negative evidence. This does not satisfy the full Gate 0B deliverable list in `MILESTONE_0.md` and makes no scientific claim.
 
+Appearance Candidate Revision 1 adds a separate v2 registry, a prospective qualification-seed
+registry, deterministic baseline failure analysis, and a two-partition revision packet. The
+canonical v1 registry, design seeds, thresholds, and 44/116 result remain immutable. Revision 1 is
+pending independent correction review and owner approval and has no freeze or gate effect. The
+complete locked Windows/WGL run generated all 256 candidate/control records: the design partition
+admitted 99/112 candidate cells and the untouched qualification partition admitted 100/112.
+Ubuntu/OSMesa admitted 97/112 and 100/112 respectively. The two extra OSMesa failures are retained
+renderer-local stripe evidence; both environments independently admit the same five profiles and
+reject stripe and illumination. Root-domain v1 binds portable matrix membership and whole-profile
+disposition separately from renderer-local cell outcomes. The exact baseline diagnosis snapshot,
+both of its recomputed roots, its three child-root receipts, and its lock bindings are validated
+against the immutable definition-lock commit.
+
 The path is intentionally short:
 
 ```text
