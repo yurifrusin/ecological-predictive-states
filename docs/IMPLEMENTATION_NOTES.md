@@ -7,15 +7,16 @@ This implementation completes the repository foundation in Gate 0A and preserves
 Appearance Candidate Revision 1 adds a separate v2 registry, a prospective qualification-seed
 registry, deterministic baseline failure analysis, and a two-partition revision packet. The
 canonical v1 registry, design seeds, thresholds, and 44/116 result remain immutable. Revision 1 is
-pending independent correction review and owner approval and has no freeze or gate effect. The
-complete locked Windows/WGL run generated all 256 candidate/control records: the design partition
-admitted 99/112 candidate cells and the untouched qualification partition admitted 100/112.
-Ubuntu/OSMesa admitted 97/112 and 100/112 respectively. The two extra OSMesa failures are retained
-renderer-local stripe evidence; both environments independently admit the same five profiles and
-reject stripe and illumination. Root-domain v1 binds portable matrix membership and whole-profile
-disposition separately from renderer-local cell outcomes. The exact baseline diagnosis snapshot,
-both of its recomputed roots, its three child-root receipts, and its lock bindings are validated
-against the immutable definition-lock commit.
+canonical after exact-head dual review and owner-approved closeout at
+`da37a729bc4af00ea83c9460c3849307171bba69`; it has no freeze or gate effect. The complete locked
+Windows/WGL run generated all 256 candidate/control records: the design partition admitted 99/112
+candidate cells and the untouched qualification partition admitted 100/112. Ubuntu/OSMesa admitted
+97/112 and 100/112 respectively. The two extra OSMesa failures are retained renderer-local stripe
+evidence; both environments independently admit the same five profiles and reject stripe and
+illumination. Root-domain v1 binds portable matrix membership and whole-profile disposition
+separately from renderer-local cell outcomes. The exact baseline diagnosis snapshot, both of its
+recomputed roots, its three child-root receipts, and its lock bindings are validated against the
+immutable definition-lock commit.
 
 The path is intentionally short:
 
@@ -280,12 +281,44 @@ not admitted or freeze-ready; the admitted-profile set is empty. Final developme
 selection, final evaluation-seed selection, benchmark freeze, and the remaining Gate 0B exit
 criteria remain absent. Gate 0C, Gate 0D, and model work remain unauthorised.
 
+## PR #15 Appearance Candidate Revision 1 closeout evidence
+
+The final exact reviewed implementation head is
+`da37a729bc4af00ea83c9460c3849307171bba69`; it received `ENGINEERING_PASS` and
+`SCIENTIFIC_PASS`. Exact-head Ubuntu/OSMesa CI run `33315921883` passed locked installation, lint,
+formatting, typing, all 455 tests, both ordinary workflows, canonical Slice 5 regeneration,
+failure-analysis and definition-lock validation, complete Revision 1 qualification, and the
+complete-packet adversarial harness. Local Windows/WGL evidence recorded 445 passed with 10
+platform skips and coherent inspection composites.
+
+The immutable definition-lock commit is
+`914550ce4e3a819dcbcd0bd5390e3c6034af5bf6`, and its root remains
+`71d2ed7a9f45c55bf17ec518c08b5d0b827a7cf0ae2cc3c339dc09197c55f633`. The final
+active Revision 1 versions remain registry `appearance_candidate_registry_v2`, profile
+`appearance_profile_v3`, audit `appearance_candidate_revision_audit_v0`, and root domains
+`appearance_candidate_revision_root_domains_v1`. Portable matrix membership and whole-profile
+dispositions remain separate from renderer-local cell outcomes. Failure-analysis creation and
+validation consume one owned, validated packet/matrix byte snapshot; a fully resealed mixed-snapshot
+substitution is rejected.
+
+The canonical baseline remains 160 successful, 44 admitted, and 116 rejected cells with an empty
+admitted-profile set. Revision 1 remains WGL `99/13` design and `100/12` qualification and OSMesa
+`97/15` design and `100/12` qualification. Both locked renderers admit exactly
+`revision1_balanced_reference_v1`, `revision1_colour_shift_v1`,
+`revision1_checker_low_v1`, `revision1_checker_high_v1`, and
+`revision1_combined_stress_v1`; `revision1_stripes_low_v1` and
+`revision1_illumination_shift_v1` remain rejected. The scientific reviews at `6eb70d34`,
+`f2929236`, and `da37a729` were exact-head dispositions; later commits invalidated earlier passes.
+Engineering findings `EPS-ER15-0001` through `EPS-ER15-0004` were all verified only at the final
+head. No profile, split, seed, benchmark, or gate was frozen or advanced, and full Gate 0B remains
+incomplete.
+
 ## Remaining Gate 0B work
 
 - Complete the remaining Gate 0B exit-criterion evidence and obtain separate owner authority before any full Gate 0B completion decision.
 - Decide whether later authorised work should define component topology, continuous boundary-component attribution, or broader scene geometry. Slice 4 deliberately leaves these unavailable.
 - Extend the reviewed cross-platform posture beyond the locked Windows/WGL and Ubuntu/OSMesa environments.
-- Use a separately authorised, versioned candidate-revision work package and complete prospective audit to obtain at least one admitted profile before any separately authorised development/OOD role or final-seed freeze decision.
+- Decide under separate owner/scientific authority whether the five-profile Revision 1 admitted set is sufficient for a later freeze proposal or whether a separately authorised Candidate Revision 2 should seek isolated stripe and illumination candidates.
 
 Gate 0B completion is therefore not claimed. Gate 0C should not begin until these items and every Gate 0B exit criterion have owner-reviewed evidence.
 
