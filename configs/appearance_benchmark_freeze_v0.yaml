@@ -1,0 +1,202 @@
+schema_version: appearance_benchmark_input_definition_v0
+canonical_base_sha: 08179fbdce909e9a0d6dbb2939c58f7ab5d0d8a7
+review_profile: DUAL_REVIEW
+evidence_class: PUBLIC_REPOSITORY_ONLY
+closeout_boundary: BENCHMARK_OR_PREREGISTRATION_FREEZE
+revision1_authority:
+  approved_implementation_head: da37a729bc4af00ea83c9460c3849307171bba69
+  definition_lock_commit: 914550ce4e3a819dcbcd0bd5390e3c6034af5bf6
+  definition_lock_sha256: 71d2ed7a9f45c55bf17ec518c08b5d0b827a7cf0ae2cc3c339dc09197c55f633
+  registry_sha256: 81da1bb9414e7c53e42bbf65b198aa61d8bb7ed3f81eb2bf5813a1edff245ac4
+  profile_admission_root_sha256: 8496521a261367e4fb1da340fc6a58b007eb9b2955fb8cafa44c2c8db0532d5b
+profiles:
+  - profile_id: revision1_balanced_reference_v1
+    profile_sha256: b2b64c03236ace288190fca68b702a6b09e6e156c0f43852dfa5db6ab24b9e52
+    role: development_reference
+    selection_status: selected
+    primary_id_reference: true
+    training_appearance_eligible: true
+    held_out_appearance_ood: false
+    benchmark_primary_reference_profile_id: revision1_balanced_reference_v1
+    candidate_admission_matched_control_profile_id: legacy_solid_base_v1
+    secondary_diagnostic_control_profile_id: null
+    canonical_revision1_admitted: true
+  - profile_id: revision1_colour_shift_v1
+    profile_sha256: 3788b17e388c9e1d5805d0d518137f2ea8538629484cca0d8c5ed3e12693e658
+    role: held_out_colour_ood
+    selection_status: selected
+    primary_id_reference: false
+    training_appearance_eligible: false
+    held_out_appearance_ood: true
+    benchmark_primary_reference_profile_id: revision1_balanced_reference_v1
+    candidate_admission_matched_control_profile_id: revision1_balanced_reference_v1
+    secondary_diagnostic_control_profile_id: null
+    canonical_revision1_admitted: true
+  - profile_id: revision1_checker_low_v1
+    profile_sha256: 82f051903058f26a72ae68f9a6e0f0833c8c36505c1789353daf078487c35173
+    role: held_out_texture_presence_ood
+    selection_status: selected
+    primary_id_reference: false
+    training_appearance_eligible: false
+    held_out_appearance_ood: true
+    benchmark_primary_reference_profile_id: revision1_balanced_reference_v1
+    candidate_admission_matched_control_profile_id: revision1_balanced_reference_v1
+    secondary_diagnostic_control_profile_id: null
+    canonical_revision1_admitted: true
+  - profile_id: revision1_checker_high_v1
+    profile_sha256: 2b04eeb523d597778e89535cc0901209f0d2aaf1ef3c026e392e9a6b11595b71
+    role: held_out_high_frequency_checker_ood
+    selection_status: selected
+    primary_id_reference: false
+    training_appearance_eligible: false
+    held_out_appearance_ood: true
+    benchmark_primary_reference_profile_id: revision1_balanced_reference_v1
+    candidate_admission_matched_control_profile_id: revision1_checker_low_v1
+    secondary_diagnostic_control_profile_id: revision1_checker_low_v1
+    canonical_revision1_admitted: true
+  - profile_id: revision1_combined_stress_v1
+    profile_sha256: e4cd4c7e268dd2cd354b5093e6895105843f1ea079d7c845a48b18aebde2606e
+    role: held_out_combined_appearance_ood
+    selection_status: selected
+    primary_id_reference: false
+    training_appearance_eligible: false
+    held_out_appearance_ood: true
+    benchmark_primary_reference_profile_id: revision1_balanced_reference_v1
+    candidate_admission_matched_control_profile_id: revision1_balanced_reference_v1
+    secondary_diagnostic_control_profile_id: null
+    canonical_revision1_admitted: true
+  - profile_id: revision1_stripes_low_v1
+    profile_sha256: c2ed57abf5a4b411c5d93b08e5ce78cf188a623ec77b6bb5d3ade187641c2dcd
+    role: excluded_rejected_candidate
+    selection_status: excluded_negative_evidence
+    primary_id_reference: false
+    training_appearance_eligible: false
+    held_out_appearance_ood: false
+    benchmark_primary_reference_profile_id: null
+    candidate_admission_matched_control_profile_id: revision1_checker_low_v1
+    secondary_diagnostic_control_profile_id: null
+    canonical_revision1_admitted: false
+  - profile_id: revision1_illumination_shift_v1
+    profile_sha256: 6d0e18dffc77f2c48590ba42c7129b49c32601aaa150e4915fdc07c70fa76caa
+    role: excluded_rejected_candidate
+    selection_status: excluded_negative_evidence
+    primary_id_reference: false
+    training_appearance_eligible: false
+    held_out_appearance_ood: false
+    benchmark_primary_reference_profile_id: null
+    candidate_admission_matched_control_profile_id: revision1_balanced_reference_v1
+    secondary_diagnostic_control_profile_id: null
+    canonical_revision1_admitted: false
+primary_benchmark_reference_profile_id: revision1_balanced_reference_v1
+secondary_checker_frequency_diagnostic:
+  candidate_profile_id: revision1_checker_high_v1
+  control_profile_id: revision1_checker_low_v1
+  interpretation: frequency_only_relative_to_checker_low
+scene_families:
+  - scene_family: single_occluder
+    config_path: configs/benchmark_v0.yaml
+    config_logical_sha256: 656eda0f17cc1c8e2959e36f39ed16aa33d55d1a0fd99380363e4ec48a1c2a29
+  - scene_family: corridor
+    config_path: configs/corridor_v0.yaml
+    config_logical_sha256: 6d3840824e22c2656e3188cbcb74108a1beb0bdac27a25c4cfd75a81793e10a2
+admission_thresholds:
+  changed_controlled_pixel_fraction_minimum: 0.2
+  normalized_controlled_rgb_mad_minimum: 0.025
+  visible_surface_mean_luminance_minimum: 0.05
+  visible_surface_mean_luminance_maximum: 0.95
+  textured_surface_minimum_pixels: 100
+  textured_surface_luminance_std_minimum: 0.025
+  frequency_partner_minimum_ratio: 4.0
+pairing_policy:
+  pair_key_fields: [scene_family, evaluation_episode_root]
+  identical_apparatus_fields:
+    - sampled_geometry
+    - camera_trajectory
+    - executed_action
+    - surface_remapping
+    - scene_content_identity
+    - analytic_transport
+    - oriented_boundary_ownership
+    - visibility_events
+    - public_occlusion_relation
+  primary_reference_rule: every_selected_ood_uses_balanced_reference_same_scene_and_root
+  candidate_admission_control_rule: preserve_revision1_matched_control_same_scene_and_root
+  secondary_diagnostic_rule: checker_high_versus_checker_low_same_scene_and_root
+evaluation_use_policy:
+  public_evaluation_roots_are_evaluation_only: true
+  public_does_not_mean_development_eligible: true
+  held_out_ood_profiles_are_evaluation_only: true
+  development_reference_is_sole_training_appearance_eligible_profile: true
+  training_on_final_evaluation_roots_prohibited: true
+  tuning_on_final_evaluation_roots_prohibited: true
+  checkpoint_selection_from_final_evaluation_results_prohibited: true
+  held_out_ood_training_or_tuning_prohibited: true
+  post_result_role_changes_prohibited: true
+  difficult_root_replacement_prohibited: true
+  original_design_roots_posture: apparatus_design_evidence_not_automatically_training
+  revision1_qualification_roots_posture: candidate_qualification_evidence_not_automatically_training
+  training_episode_roots: null
+  validation_episode_roots: null
+  model_random_seeds: null
+renderer_policy:
+  supported_apparatus_environments:
+    - environment_id: windows_wgl_locked
+      fingerprint:
+        mujoco_version: 3.12.0
+        numpy_version: 2.4.6
+        renderer: mujoco.Renderer
+        backend: wgl-default
+        operating_system: Windows
+    - environment_id: ubuntu_osmesa_locked
+      fingerprint:
+        mujoco_version: 3.12.0
+        numpy_version: 2.4.6
+        renderer: mujoco.Renderer
+        backend: osmesa
+        operating_system: Linux
+  every_selected_profile_all_cells_both_environments_required: true
+  portable_apparatus_roots_must_match: true
+  renderer_local_roots_are_reported_not_compared: true
+  renderer_specific_profiles_or_thresholds_prohibited: true
+  portable_identity_backend_dispatch_prohibited: true
+  primary_model_result_renderer: null
+  primary_model_result_renderer_posture: deferred_to_gate_0d_0e
+failure_policy:
+  selected_profile_set_is_indivisible: true
+  any_selected_cell_failure_makes_candidate_not_ready: true
+  any_locked_renderer_failure_makes_candidate_not_ready: true
+  failed_seed_set_disposition: retired_after_failed_freeze_qualification
+  successful_seed_set_disposition: eligible_for_owner_freeze_if_approved
+  failed_roots_may_not_be_reused_for_revised_profiles: true
+  future_revised_profile_set_requires_owner_authorised_root_and_namespace: true
+freeze_scope:
+  checkpoint_fields:
+    - appearance_profile_roles
+    - selected_and_excluded_profile_identities
+    - evaluation_episode_roots
+    - scene_families
+    - pairing_rules
+    - appearance_admission_criteria
+    - training_evaluation_exclusion_policy
+    - supported_apparatus_renderer_environments
+    - portable_and_renderer_local_identity_posture
+  deferred_gate_0d_0e_fields:
+    - normative_primary_model_result_renderer
+    - model_families_and_implementations
+    - model_random_seeds
+    - training_episode_roots
+    - validation_episode_roots
+    - training_set_size
+    - optimiser_and_learning_rate_schedule
+    - parameter_and_compute_budgets
+    - checkpoint_selection
+    - statistical_and_bootstrap_implementation
+    - stopping_rules
+    - empirical_gate_decision
+  complete_experimental_preregistration: false
+  benchmark_frozen: false
+  model_protocol_frozen: false
+  full_gate_0b_complete: false
+  gate_0c_authorised: false
+  gate_0d_authorised: false
+  scientific_result: null
