@@ -23,7 +23,18 @@ profile has been assigned or frozen into a final development/OOD role, and no fi
 has been frozen. The protocol and locked definitions are documented in
 [the Revision 1 contract](docs/GATE_0B_APPEARANCE_CANDIDATE_REVISION_1.md).
 
-**No scientific result exists yet.** No appearance profile or final development/OOD split is frozen, and no final evaluation seeds are frozen. Revision 1 candidate qualification cannot itself authorise a benchmark freeze. Full Gate 0B remains incomplete; Gate 0C, Gate 0D, and all model work remain unauthorised.
+The Appearance Benchmark Input Freeze v0 work package prospectively locks a candidate role map and
+sixteen public evaluation-only episode roots in pushed commit
+`1a5929307dfcba1d726c650f5e1ce68771f66801`. Only after that lock was pushed, the complete
+Windows/WGL qualification admitted all 160 selected cells, with every selected profile passing
+32/32 cells; Ubuntu/OSMesa and dual-review readiness remain pending. This is an implementation
+candidate, not a benchmark freeze. Its scope, exact identities, policy, and qualification evidence
+are documented in [the freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHMARK_FREEZE_V0.md).
+
+**No scientific result exists yet.** The proposed appearance roles and final-evaluation roots are
+prospectively locked inputs to a freeze candidate, but the benchmark is not frozen. Exact-head dual
+review, owner approval, and a separately authorised closeout remain required. Full Gate 0B remains
+incomplete; Gate 0C, Gate 0D, and all model work remain unauthorised.
 
 The scientific authority is [the Research Charter](docs/RESEARCH_CHARTER.md), followed by [EPS-Bench v0](docs/EPS_BENCH_V0.md) and [Milestone 0](docs/MILESTONE_0.md). Architecture and current limits are recorded in [the implementation notes](docs/IMPLEMENTATION_NOTES.md). Review workflow v2 is canonical after PR #7 and its linked closeout; the exact reviewed implementation head was `741e31882cb484fa5858630be83d2f08e483585f`, which received `ENGINEERING_PASS` and `SCIENTIFIC_PASS`. Active review records remain external to implementation PRs, and final immutable records enter through a separately authorised linked closeout. `MERGE_CONVERGENCE` and the terminal `RECORD_ONLY_CLOSEOUT` path remain distinct. The orchestrator coordinates state without inheriting review authority. This governance closeout has no Gate 0B or Gate 0C effect, implements no machine-readable review automation or next slice, and establishes no scientific result. See [the review protocol](docs/review-protocol.md) and [review-record directory policy](docs/reviews/README.md).
 

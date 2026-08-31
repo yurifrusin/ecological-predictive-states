@@ -132,3 +132,23 @@ immutable definition-lock commit. Neither committed prospective record changes. 
 correction changes no profile, seed, control, threshold, renderer, admission rule, or experimental
 outcome. The agreed admitted set supports only a later freeze proposal. Full Gate 0B, Gate 0C,
 Gate 0D, models, benchmark freeze, and scientific results remain unauthorised.
+
+## 2026-08-31 — Appearance Benchmark Input Freeze v0 candidate
+
+The five cross-renderer admitted Revision 1 profiles are proposed as one development reference and
+four held-out Appearance-OOD profiles. The rejected stripe-only and illumination-only candidates
+remain excluded negative evidence and explicit coverage limitations; they are not silently removed
+or evidence against the EPS hypothesis.
+
+Sixteen new public evaluation-only episode roots were deterministically derived and prospectively
+locked before any selected profile was rendered on them. They are distinct from apparatus-design,
+candidate-qualification, training, validation, and model-randomness roots. If any selected profile
+fails on either locked renderer, the entire sixteen-root registry is retired from future final
+evaluation use for a revised profile set.
+
+The pushed immutable lock commit is `1a5929307dfcba1d726c650f5e1ce68771f66801`. The subsequent
+complete Windows/WGL audit admitted all 160 selected cells, with every selected profile passing
+32/32 cells; all 32 legacy controls were retained. Ubuntu/OSMesa exact-head qualification remains
+pending. Successful apparatus qualification creates only a freeze candidate. A benchmark freeze
+still requires exact-head engineering and scientific passes, owner approval, and separately
+authorised benchmark-freeze closeout. No model protocol, gate, or scientific result follows.

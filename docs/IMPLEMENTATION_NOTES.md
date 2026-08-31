@@ -18,6 +18,17 @@ separately from renderer-local cell outcomes. The exact baseline diagnosis snaps
 recomputed roots, its three child-root receipts, and its lock bindings are validated against the
 immutable definition-lock commit.
 
+Appearance Benchmark Input Freeze v0 proposes the five cross-renderer admitted Revision 1
+profiles as one development reference and four public evaluation-only Appearance-OOD roles. It
+prospectively locks sixteen new final-evaluation episode roots, disjoint from apparatus-design and
+candidate-qualification roots, in pushed additive commit
+`1a5929307dfcba1d726c650f5e1ce68771f66801`. No selected profile was rendered on those roots before
+the lock was pushed. The complete post-lock Windows/WGL qualification admitted all 160 selected
+cells, with every profile passing 32/32; all 32 legacy controls were retained. Ubuntu/OSMesa
+qualification remains pending exact-head CI, so cross-renderer readiness is not yet established.
+Neither the prospective lock nor apparatus qualification freezes the benchmark: dual independent
+review, owner approval, and a separately authorised benchmark-freeze closeout remain mandatory.
+
 The path is intentionally short:
 
 ```text

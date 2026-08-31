@@ -105,11 +105,17 @@ The prospective definition identities are:
 
 - benchmark definition: `a655a0e12cfe771a735145fb9d104119ce4160ba0039197f57bcb17c9dfa31fa`
 - profile-role root: `0ebd33fd0a84b4bc980073709cc491622a852455aabf80685b12c0917f6abc4f`
-- selected membership root: `1e114d28102a6ff284498bd53d537120d328342a06a0edd5662e863b0928f28d`
+- selected-profile-set root: `16a77b2617c44b9106f69afb15d8cc73d6611310548eae927ef67cff02d17460`
+- excluded-candidate-set root: `cf1b36c408f766d72ba15acba66e83573803187a360d239fcbccd3d74d74e678`
+- scene-family-membership root: `b1d22557512b5a764c0ed601d01f2e23d812926257cf4b353817e9ca19ab4922`
+- selected-matrix-membership root: `1e114d28102a6ff284498bd53d537120d328342a06a0edd5662e863b0928f28d`
+- legacy-control-membership root: `88887c69f9a9abaeb70b203a962dde27c94fad41f5bcea57c5f5ea293abc47b6`
+- training/evaluation-policy root: `2a9efc513dab27bca20737e7538ba716b3ddf23e245b5be5c24f05b3ed369898`
 - freeze definition lock: `a373a4742a6b5a3057b820b7d925c2e19fbddc0a83cc45384b8b81ea4e8b1464`
 
-The additive lock commit is recorded after Stage A validation and pushed before any selected
-profile is rendered on any new root. Qualification must not change the role map, roots, scenes,
+The unique additive lock commit is
+`1a5929307dfcba1d726c650f5e1ce68771f66801`. It was validated and pushed before any selected
+profile was rendered on any new root. Qualification must not change the role map, roots, scenes,
 pairing, thresholds, renderer posture, policies, membership, or readiness rule.
 
 Each renderer must contain exactly 160 selected cells (five profiles × two scenes × sixteen
@@ -136,6 +142,35 @@ selection, statistical and bootstrap implementations, stopping rules, and empiri
 
 ## Qualification outcome
 
-Windows/WGL and Ubuntu/OSMesa final-root outcomes are recorded only after the immutable lock commit
-has been pushed. Until both complete, the candidate is `qualification_incomplete`, not frozen, and
-not a scientific result.
+After the immutable lock commit was pushed, Windows/WGL generated and independently validated the
+complete 192-cell packet. All 160 selected cells were admitted; each of the five selected profiles
+passed 32/32 cells. All 32 legacy controls were generated (16 admitted and 16 rejected under the
+unchanged candidate-admission criteria). The complete WGL packet root is
+`b2d593f3aea5b68fefff4130a1f466e9d24a320c99d344ff5fc634e5b3396a69`; its committed receipt root
+is `003c7e28318f67febb754a91dfa814c1f7e6530ddd08035e4814d6757974ae0a`.
+
+The WGL portable apparatus roots are:
+
+- procedural assets: `e3bf5fb73d80ee537db8935e042c0ba7cae837f3f3955095053f69decf63602d`
+- appearance assignment: `feaeb12c0c811c8ee9c60efd6c747b6d42f1490504b9a6c83bff22d33029d88f`
+- analytic identity: `4cb7076a54bbaaa04a4045f35edb64b3d39440bda7c06fc8800ac575379f32a5`
+- within-renderer invariance outcomes:
+  `d6fe9e63549128877ec1d73997c0b4e0ae0c27cf5c19460f87856f6acab07617`
+
+The WGL renderer-local selected, control, ecological-label, audit, and contact-sheet roots are,
+respectively:
+
+- `914f30d9b5304b1bd405b3c0fa699998fe53a181b6984db4758990a05044200a`
+- `ea400adfd2176ae3d1b04be02782d437976c6b2f4abcebfeea6b2627ec08ab38`
+- `aa2880b1db2d1c8aa2c8ce60e70d0987a4d3d60623371905251016b31a80d453`
+- `8770115c3ea36b8d4a5e6671f2a74cea78da45fcdbaebe01ea6fbf41e2de41db`
+- `3da26b945679c86a5c99a89a811f197aad5be103f0dc41bdeb3a587cb7f0e8d8`
+
+No WGL threshold failure or near-threshold case was observed. Minimum passing margins were
+`0.105866029445772` for changed controlled-pixel fraction, `0.04111574074074074` for normalized
+controlled RGB MAD, `0.07243529411764704`/`0.3672700277464014` for lower/upper visible-surface
+mean luminance, and `0.012713812139223166` for textured-surface luminance standard deviation.
+
+Ubuntu/OSMesa exact-head qualification remains pending CI. Until it completes successfully, the
+candidate is `qualification_incomplete`, the seed set is not yet eligible for owner freeze, the
+benchmark is not frozen, and no scientific result exists.
