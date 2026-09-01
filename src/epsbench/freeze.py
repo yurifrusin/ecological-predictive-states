@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import platform
 import shutil
 import socket
+import stat
 import subprocess
 import tempfile
 import time
@@ -20,7 +22,7 @@ from typing import Annotated, Any, Literal, cast
 import numpy as np
 import yaml
 from PIL import Image
-from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from epsbench.appearance import (
     REVISION1_PROFILE_IDS,
@@ -47,16 +49,33 @@ from epsbench.audit import (
     _contact_sheet_image,
     _dataset_cell,
     _evaluate_cell,
-    _hash_json,
     _load_frame,
     _PacketArtifactRegistry,
-    _portable_analytic_identity_domain,
     _source_texture_diagnostics,
     _validate_cell_schema,
 )
 from epsbench.config import BenchmarkConfig, load_config, parse_config
+from epsbench.data.identity import (
+    analytic_transport_domain,
+    corridor_scene_content_domain,
+    oriented_boundary_domain,
+    single_occluder_scene_content_domain,
+    visibility_event_domain,
+)
+from epsbench.data.paths import open_owned_regular_file
 from epsbench.data.provenance import collect_source_provenance
-from epsbench.schema import RendererProvenance, SourceProvenance
+from epsbench.data.validate import validate_dataset
+from epsbench.schema import (
+    AvailableDenseOpticalTransport,
+    AvailableEcologicalVisibilityEvents,
+    AvailableOrientedBoundaryOwnership,
+    CorridorSampledGeometry,
+    DatasetManifest,
+    RendererProvenance,
+    SourceProvenance,
+    TransitionRecord,
+    parse_privileged_instrumentation_json,
+)
 from epsbench.utils.canonical import (
     canonical_json_bytes,
     logical_array_hash,
@@ -66,14 +85,22 @@ from epsbench.utils.canonical import (
 )
 
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+GitObject = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 
-BENCHMARK_DEFINITION_VERSION = "appearance_benchmark_input_definition_v0"
-FREEZE_LOCK_VERSION = "appearance_benchmark_freeze_definition_lock_v0"
-FREEZE_PACKET_VERSION = "appearance_benchmark_freeze_candidate_v0"
-FREEZE_ROOT_VERSION = "appearance_benchmark_freeze_root_domains_v0"
-FREEZE_CONTACT_SHEET_VERSION = "appearance_benchmark_freeze_contact_sheet_manifest_v0"
-RENDERER_RECEIPT_VERSION = "appearance_benchmark_renderer_qualification_receipt_v0"
+BENCHMARK_DEFINITION_VERSION = "appearance_benchmark_input_definition_v1"
+FREEZE_LOCK_VERSION = "appearance_benchmark_freeze_definition_lock_v1"
+FREEZE_PACKET_VERSION = "appearance_benchmark_freeze_candidate_v1"
+FREEZE_ROOT_VERSION = "appearance_benchmark_freeze_root_domains_v1"
+FREEZE_CONTACT_SHEET_VERSION = "appearance_benchmark_freeze_contact_sheet_manifest_v1"
+RENDERER_RECEIPT_VERSION = "appearance_benchmark_renderer_qualification_receipt_v1"
+SOURCE_IDENTITY_VERSION = "appearance_benchmark_source_identity_v1"
+THRESHOLD_MARGIN_VERSION = "appearance_benchmark_threshold_margin_summary_v1"
+RENDERER_SELECTION_DEPENDENCY_VERSION = "model_result_renderer_selection_dependency_v1"
+DOMAIN_ENVELOPE_VERSION = "epsbench_logical_domain_envelope_v1"
 CANONICAL_BASE = "08179fbdce909e9a0d6dbb2939c58f7ab5d0d8a7"
+REVIEWED_IMPLEMENTATION_HEAD = "8b34b78d5488af7103119697a286cfb8757cc125"
+SUPERSEDED_FREEZE_LOCK_COMMIT = "1a5929307dfcba1d726c650f5e1ce68771f66801"
+SUPERSEDED_FREEZE_LOCK_ROOT = "a373a4742a6b5a3057b820b7d925c2e19fbddc0a83cc45384b8b81ea4e8b1464"
 REVISION1_APPROVED_HEAD = "da37a729bc4af00ea83c9460c3849307171bba69"
 REVISION1_LOCK_COMMIT = "914550ce4e3a819dcbcd0bd5390e3c6034af5bf6"
 REVISION1_LOCK_ROOT = "71d2ed7a9f45c55bf17ec518c08b5d0b827a7cf0ae2cc3c339dc09197c55f633"
@@ -93,6 +120,64 @@ EXCLUDED_PROFILE_IDS = (
 )
 LEGACY_CONTROL_PROFILE_ID = "legacy_solid_base_v1"
 LOCK_PATH = Path("configs/appearance_benchmark_freeze_v0_lock.json")
+
+LOGICAL_DOMAINS = {
+    "benchmark_definition": "epsbench.appearance_benchmark.v1.benchmark_definition",
+    "profile_roles": "epsbench.appearance_benchmark.v1.profile_roles",
+    "selected_profile_set": "epsbench.appearance_benchmark.v1.selected_profile_set",
+    "excluded_candidate_set": "epsbench.appearance_benchmark.v1.excluded_candidate_set",
+    "evaluation_seed_registry": "epsbench.appearance_benchmark.v1.evaluation_seed_registry",
+    "admission_thresholds": "epsbench.appearance_benchmark.v1.admission_thresholds",
+    "training_evaluation_policy": "epsbench.appearance_benchmark.v1.training_evaluation_policy",
+    "renderer_selection_dependency": (
+        "epsbench.appearance_benchmark.v1.renderer_selection_dependency"
+    ),
+    "selected_matrix_membership": ("epsbench.appearance_benchmark.v1.selected_matrix_membership"),
+    "legacy_control_membership": ("epsbench.appearance_benchmark.v1.legacy_control_membership"),
+    "scene_family_membership": "epsbench.appearance_benchmark.v1.scene_family_membership",
+    "definition_lock": "epsbench.appearance_benchmark.v1.definition_lock",
+    "procedural_assets": "epsbench.appearance_benchmark.v1.procedural_assets",
+    "appearance_assignments": "epsbench.appearance_benchmark.v1.appearance_assignments",
+    "portable_source_identities": ("epsbench.appearance_benchmark.v1.portable_source_identities"),
+    "within_renderer_invariance": ("epsbench.appearance_benchmark.v1.within_renderer_invariance"),
+    "selected_outcomes": "epsbench.appearance_benchmark.v1.selected_outcomes",
+    "control_outcomes": "epsbench.appearance_benchmark.v1.control_outcomes",
+    "renderer_ecological_labels": ("epsbench.appearance_benchmark.v1.renderer_ecological_labels"),
+    "renderer_audit": "epsbench.appearance_benchmark.v1.renderer_audit",
+    "renderer_contact_sheets": "epsbench.appearance_benchmark.v1.renderer_contact_sheets",
+    "renderer_source_evidence": "epsbench.appearance_benchmark.v1.renderer_source_evidence",
+    "profile_readiness": "epsbench.appearance_benchmark.v1.profile_readiness",
+    "threshold_margins": "epsbench.appearance_benchmark.v1.threshold_margins",
+    "complete_packet": "epsbench.appearance_benchmark.v1.complete_packet",
+    "renderer_receipt": "epsbench.appearance_benchmark.v1.renderer_receipt",
+    "public_packet_tree": "epsbench.appearance_benchmark.v1.public_packet_tree",
+    "source_identity_root": "epsbench.appearance_benchmark.v1.source_identity_root",
+    "sampled_geometry": "epsbench.appearance_benchmark.v1.sampled_geometry",
+    "camera_trajectory": "epsbench.appearance_benchmark.v1.camera_trajectory",
+    "executed_action": "epsbench.appearance_benchmark.v1.executed_action",
+    "surface_remapping": "epsbench.appearance_benchmark.v1.surface_remapping",
+    "scene_content": "epsbench.appearance_benchmark.v1.scene_content",
+    "analytic_transport": "epsbench.appearance_benchmark.v1.analytic_transport",
+    "oriented_boundary_ownership": ("epsbench.appearance_benchmark.v1.oriented_boundary_ownership"),
+    "visibility_events": "epsbench.appearance_benchmark.v1.visibility_events",
+    "public_occlusion_relation": ("epsbench.appearance_benchmark.v1.public_occlusion_relation"),
+}
+
+
+def _domain_envelope(domain_key: str, payload: Any) -> dict[str, Any]:
+    try:
+        domain = LOGICAL_DOMAINS[domain_key]
+    except KeyError as error:
+        raise FreezeError(f"unknown logical domain: {domain_key}") from error
+    return {
+        "schema_version": DOMAIN_ENVELOPE_VERSION,
+        "domain": domain,
+        "payload": payload,
+    }
+
+
+def _domain_hash(domain_key: str, payload: Any) -> str:
+    return sha256_bytes(canonical_json_bytes(_domain_envelope(domain_key, payload)))
 
 
 class FreezeError(ValueError):
@@ -255,6 +340,36 @@ class RendererEnvironment(StrictFreezeModel):
         return self
 
 
+class RendererSelectionDependency(StrictFreezeModel):
+    schema_version: Literal["model_result_renderer_selection_dependency_v1"]
+    selection_required_before_comparative_model_result_access: Literal[True]
+    primary_model_result_renderer: None
+    other_renderer_model_result_classification: None
+    permitted_other_renderer_classifications: tuple[
+        Literal["replication"],
+        Literal["robustness"],
+        Literal["sensitivity"],
+        Literal["unsupported"],
+    ]
+    selection_may_not_depend_on_observed_comparative_results: Literal[True]
+    averaging_or_aggregation_may_not_depend_on_observed_results: Literal[True]
+    aggregation_rule_must_be_preregistered_prospectively: Literal[True]
+    aggregation_rule: None
+    comparative_model_result_access_authorised: Literal[False]
+    dependency_status: Literal["required_not_yet_satisfied"]
+
+    @model_validator(mode="after")
+    def classification_domain_is_exact(self) -> RendererSelectionDependency:
+        if self.permitted_other_renderer_classifications != (
+            "replication",
+            "robustness",
+            "sensitivity",
+            "unsupported",
+        ):
+            raise ValueError("model-result renderer classification domain differs")
+        return self
+
+
 class RendererPolicy(StrictFreezeModel):
     supported_apparatus_environments: tuple[RendererEnvironment, RendererEnvironment]
     every_selected_profile_all_cells_both_environments_required: Literal[True]
@@ -262,8 +377,7 @@ class RendererPolicy(StrictFreezeModel):
     renderer_local_roots_are_reported_not_compared: Literal[True]
     renderer_specific_profiles_or_thresholds_prohibited: Literal[True]
     portable_identity_backend_dispatch_prohibited: Literal[True]
-    primary_model_result_renderer: None
-    primary_model_result_renderer_posture: Literal["deferred_to_gate_0d_0e"]
+    model_result_renderer_selection_dependency: RendererSelectionDependency
 
     @model_validator(mode="after")
     def environments_are_exact_and_ordered(self) -> RendererPolicy:
@@ -298,7 +412,7 @@ class FreezeScope(StrictFreezeModel):
 
 
 class BenchmarkDefinition(StrictFreezeModel):
-    schema_version: Literal["appearance_benchmark_input_definition_v0"]
+    schema_version: Literal["appearance_benchmark_input_definition_v1"]
     canonical_base_sha: Literal["08179fbdce909e9a0d6dbb2939c58f7ab5d0d8a7"]
     review_profile: Literal["DUAL_REVIEW"]
     evidence_class: Literal["PUBLIC_REPOSITORY_ONLY"]
@@ -341,8 +455,17 @@ class BenchmarkDefinition(StrictFreezeModel):
 
 
 class FreezeDefinitionLock(StrictFreezeModel):
-    schema_version: Literal["appearance_benchmark_freeze_definition_lock_v0"]
+    schema_version: Literal["appearance_benchmark_freeze_definition_lock_v1"]
     canonical_base_sha: Literal["08179fbdce909e9a0d6dbb2939c58f7ab5d0d8a7"]
+    reviewed_implementation_head: Literal["8b34b78d5488af7103119697a286cfb8757cc125"]
+    superseded_definition_lock_commit: Literal["1a5929307dfcba1d726c650f5e1ce68771f66801"]
+    superseded_definition_lock_sha256: Literal[
+        "a373a4742a6b5a3057b820b7d925c2e19fbddc0a83cc45384b8b81ea4e8b1464"
+    ]
+    supersession_finding_id: Literal["EPS-ER17-0004"]
+    supersession_posture: Literal[
+        "historical_lock_preserved_replacement_lock_authoritative_for_corrected_candidate"
+    ]
     revision1_approved_implementation_head: Literal["da37a729bc4af00ea83c9460c3849307171bba69"]
     revision1_definition_lock_commit: Literal["914550ce4e3a819dcbcd0bd5390e3c6034af5bf6"]
     revision1_definition_lock_sha256: Literal[
@@ -372,6 +495,7 @@ class FreezeDefinitionLock(StrictFreezeModel):
     supported_renderer_environment_policy: RendererPolicy
     training_evaluation_exclusion_policy: EvaluationUsePolicy
     training_evaluation_policy_root_sha256: Sha256
+    renderer_selection_dependency_root_sha256: Sha256
     selected_matrix_membership_root_sha256: Sha256
     legacy_control_membership_root_sha256: Sha256
     expected_unique_selected_cell_count: Literal[160]
@@ -391,6 +515,131 @@ class FreezeDefinitionLock(StrictFreezeModel):
     gate_0d_authorised: Literal[False]
     scientific_result: None
     definition_lock_sha256: Sha256
+
+
+class RendererOutcomeRow(StrictFreezeModel):
+    cell_id: str
+    profile_id: str
+    benchmark_role: str
+    scene_family: Literal["single_occluder", "corridor"]
+    seed_index: int = Field(ge=0, le=15)
+    evaluation_episode_root: int = Field(ge=0, lt=2**64)
+    admission_status: Literal["admitted", "rejected"]
+
+
+class RendererReadinessRow(StrictFreezeModel):
+    profile_id: str
+    profile_sha256: Sha256
+    benchmark_role: str
+    expected_cell_count: Literal[32]
+    observed_cell_count: Literal[32]
+    cell_counts: dict[str, int]
+    renderer_apparatus_qualified: bool
+
+    @model_validator(mode="after")
+    def counts_are_exact(self) -> RendererReadinessRow:
+        if (
+            not self.cell_counts
+            or set(self.cell_counts) - {"admitted", "rejected"}
+            or sum(self.cell_counts.values()) != self.observed_cell_count
+            or any(type(value) is not int or value < 0 for value in self.cell_counts.values())
+        ):
+            raise ValueError("renderer readiness counts are not exact")
+        return self
+
+
+class ThresholdMarginMetric(StrictFreezeModel):
+    count: int = Field(ge=0)
+    failure_count: int = Field(ge=0)
+    near_threshold_count_abs_margin_le_0_005: int = Field(ge=0)
+    minimum_margin: float | None
+    maximum_margin: float | None
+
+    @model_validator(mode="after")
+    def values_are_finite_and_ordered(self) -> ThresholdMarginMetric:
+        values = (self.minimum_margin, self.maximum_margin)
+        if any(value is not None and not math.isfinite(value) for value in values):
+            raise ValueError("threshold margins must be finite")
+        if self.count == 0:
+            if values != (None, None):
+                raise ValueError("empty threshold margin cannot report extrema")
+        elif (
+            self.minimum_margin is None
+            or self.maximum_margin is None
+            or self.minimum_margin > self.maximum_margin
+            or self.failure_count > self.count
+            or self.near_threshold_count_abs_margin_le_0_005 > self.count
+        ):
+            raise ValueError("threshold margin values are inconsistent")
+        return self
+
+
+class ThresholdMarginSummary(StrictFreezeModel):
+    schema_version: Literal["appearance_benchmark_threshold_margin_summary_v1"]
+    metrics: dict[str, ThresholdMarginMetric]
+    threshold_margin_root_sha256: Sha256
+
+    @model_validator(mode="after")
+    def metric_domain_is_exact(self) -> ThresholdMarginSummary:
+        expected = {
+            "changed_controlled_pixel_fraction",
+            "normalized_controlled_rgb_mad",
+            "visible_surface_mean_luminance_lower",
+            "visible_surface_mean_luminance_upper",
+            "textured_surface_luminance_standard_deviation",
+        }
+        dumped = {name: value.model_dump(mode="json") for name, value in self.metrics.items()}
+        if set(self.metrics) != expected or self.threshold_margin_root_sha256 != _domain_hash(
+            "threshold_margins", dumped
+        ):
+            raise ValueError("threshold margin schema or identity differs")
+        return self
+
+
+class PublicQualificationEvidence(StrictFreezeModel):
+    evidence_class: Literal["PUBLIC_REPOSITORY_ONLY"]
+    availability: Literal["repository_or_ci_artifact"]
+    packet_schema_version: Literal["appearance_benchmark_freeze_candidate_v1"]
+    packet_root_schema_version: Literal["appearance_benchmark_freeze_root_domains_v1"]
+    packet_file_sha256: Sha256
+    packet_tree_root_sha256: Sha256
+    packet_artifact_count: int = Field(gt=0)
+
+
+class RendererQualificationReceipt(StrictFreezeModel):
+    schema_version: Literal["appearance_benchmark_renderer_qualification_receipt_v1"]
+    environment_id: Literal["windows_wgl_locked", "ubuntu_osmesa_locked"]
+    renderer_fingerprint: RendererProvenance
+    qualification_source_provenance: SourceProvenance
+    qualification_source_commit: GitObject
+    qualification_source_tree: GitObject
+    replacement_definition_lock_commit: GitObject
+    replacement_definition_lock_sha256: Sha256
+    benchmark_definition_sha256: Sha256
+    evaluation_episode_seed_registry_sha256: Sha256
+    complete_packet_root_sha256: Sha256
+    selected_cell_count: Literal[160]
+    control_cell_count: Literal[32]
+    total_cell_count: Literal[192]
+    selected_matrix_counts: dict[str, int]
+    control_matrix_counts: dict[str, int]
+    selected_outcome_map: tuple[RendererOutcomeRow, ...]
+    control_outcome_map: tuple[RendererOutcomeRow, ...]
+    profiles: tuple[
+        RendererReadinessRow,
+        RendererReadinessRow,
+        RendererReadinessRow,
+        RendererReadinessRow,
+        RendererReadinessRow,
+    ]
+    portable_definition_roots: dict[str, Sha256]
+    portable_apparatus_roots: dict[str, Sha256]
+    renderer_local_roots: dict[str, Sha256]
+    threshold_margin_summary: ThresholdMarginSummary
+    public_qualification_evidence: PublicQualificationEvidence
+    benchmark_frozen: Literal[False]
+    scientific_result: None
+    receipt_sha256: Sha256
 
 
 def _parse_yaml(path: Path) -> dict[str, Any]:
@@ -418,7 +667,11 @@ def load_final_evaluation_seeds(path: Path) -> FinalEvaluationSeedRegistry:
 
 
 def benchmark_definition_hash(definition: BenchmarkDefinition) -> str:
-    return sha256_bytes(canonical_json_bytes(definition))
+    return _domain_hash("benchmark_definition", definition.model_dump(mode="json"))
+
+
+def evaluation_seed_registry_hash(seeds: FinalEvaluationSeedRegistry) -> str:
+    return seed_registry_hash(seeds)
 
 
 def _role_domain(definition: BenchmarkDefinition) -> list[dict[str, Any]]:
@@ -548,15 +801,22 @@ def create_definition_lock_payload(
     domain: dict[str, Any] = {
         "schema_version": FREEZE_LOCK_VERSION,
         "canonical_base_sha": CANONICAL_BASE,
+        "reviewed_implementation_head": REVIEWED_IMPLEMENTATION_HEAD,
+        "superseded_definition_lock_commit": SUPERSEDED_FREEZE_LOCK_COMMIT,
+        "superseded_definition_lock_sha256": SUPERSEDED_FREEZE_LOCK_ROOT,
+        "supersession_finding_id": "EPS-ER17-0004",
+        "supersession_posture": (
+            "historical_lock_preserved_replacement_lock_authoritative_for_corrected_candidate"
+        ),
         "revision1_approved_implementation_head": REVISION1_APPROVED_HEAD,
         "revision1_definition_lock_commit": REVISION1_LOCK_COMMIT,
         "revision1_definition_lock_sha256": REVISION1_LOCK_ROOT,
         "revision1_registry_sha256": REVISION1_REGISTRY_ROOT,
         "revision1_profile_admission_root_sha256": REVISION1_ADMISSION_ROOT,
         "benchmark_definition_sha256": benchmark_definition_hash(definition),
-        "profile_role_root_sha256": _hash_json(_role_domain(definition)),
-        "selected_profile_set_root_sha256": _hash_json(selected),
-        "excluded_candidate_set_root_sha256": _hash_json(excluded),
+        "profile_role_root_sha256": _domain_hash("profile_roles", _role_domain(definition)),
+        "selected_profile_set_root_sha256": _domain_hash("selected_profile_set", selected),
+        "excluded_candidate_set_root_sha256": _domain_hash("excluded_candidate_set", excluded),
         "selected_profiles": selected,
         "excluded_profiles": excluded,
         "primary_reference_profile_id": PRIMARY_REFERENCE,
@@ -568,24 +828,30 @@ def create_definition_lock_payload(
             scene.scene_family: scene.config_logical_sha256 for scene in definition.scene_families
         },
         "evaluation_episode_roots": list(seeds.candidate_episode_seeds),
-        "evaluation_episode_seed_registry_sha256": seed_registry_hash(seeds),
+        "evaluation_episode_seed_registry_sha256": evaluation_seed_registry_hash(seeds),
         "admission_thresholds": definition.admission_thresholds.model_dump(mode="json"),
-        "admission_threshold_identity_sha256": _hash_json(
-            definition.admission_thresholds.model_dump(mode="json")
+        "admission_threshold_identity_sha256": _domain_hash(
+            "admission_thresholds", definition.admission_thresholds.model_dump(mode="json")
         ),
         "paired_geometry_action_generation_rule": definition.pairing_policy.model_dump(mode="json"),
         "supported_renderer_environment_policy": definition.renderer_policy.model_dump(mode="json"),
         "training_evaluation_exclusion_policy": definition.evaluation_use_policy.model_dump(
             mode="json"
         ),
-        "training_evaluation_policy_root_sha256": _hash_json(
-            definition.evaluation_use_policy.model_dump(mode="json")
+        "training_evaluation_policy_root_sha256": _domain_hash(
+            "training_evaluation_policy", definition.evaluation_use_policy.model_dump(mode="json")
         ),
-        "selected_matrix_membership_root_sha256": _hash_json(
-            _selected_membership_domain(definition, seeds)
+        "renderer_selection_dependency_root_sha256": _domain_hash(
+            "renderer_selection_dependency",
+            definition.renderer_policy.model_result_renderer_selection_dependency.model_dump(
+                mode="json"
+            ),
         ),
-        "legacy_control_membership_root_sha256": _hash_json(
-            _legacy_control_membership_domain(definition, seeds)
+        "selected_matrix_membership_root_sha256": _domain_hash(
+            "selected_matrix_membership", _selected_membership_domain(definition, seeds)
+        ),
+        "legacy_control_membership_root_sha256": _domain_hash(
+            "legacy_control_membership", _legacy_control_membership_domain(definition, seeds)
         ),
         "expected_unique_selected_cell_count": 160,
         "expected_unique_control_cell_count": 32,
@@ -599,6 +865,10 @@ def create_definition_lock_payload(
             "freeze_candidate_packet": FREEZE_PACKET_VERSION,
             "freeze_root_domains": FREEZE_ROOT_VERSION,
             "contact_sheet_manifest": FREEZE_CONTACT_SHEET_VERSION,
+            "renderer_receipt": RENDERER_RECEIPT_VERSION,
+            "source_identity": SOURCE_IDENTITY_VERSION,
+            "threshold_margin_summary": THRESHOLD_MARGIN_VERSION,
+            "logical_domain_envelope": DOMAIN_ENVELOPE_VERSION,
             "appearance_registry": "appearance_candidate_registry_v2",
             "appearance_profile": "appearance_profile_v3",
             "configuration": "0.1.0-dev.5",
@@ -611,8 +881,8 @@ def create_definition_lock_payload(
             "style_assignment": "balanced_cyclic_permutation_v1",
             "surface_repeat": "mujoco_geom_local_uv_repeat_v1",
             "assignment_schedule_source": "snapshotted_revision_partition_seed_registry_v1",
-            "pairing": "same_scene_same_evaluation_episode_root_v1",
-            "readiness": "all_cells_both_locked_renderers_v1",
+            "pairing": "independent_source_evidence_same_scene_same_root_v2",
+            "readiness": "all_cells_both_locked_renderers_v2",
             "seed_retirement": "entire_registry_after_any_failed_cell_v1",
         },
         "qualification_started": False,
@@ -625,7 +895,7 @@ def create_definition_lock_payload(
         "gate_0d_authorised": False,
         "scientific_result": None,
     }
-    payload = {**domain, "definition_lock_sha256": _hash_json(domain)}
+    payload = {**domain, "definition_lock_sha256": _domain_hash("definition_lock", domain)}
     FreezeDefinitionLock.model_validate_json(canonical_json_bytes(payload))
     return payload
 
@@ -661,7 +931,10 @@ def validate_definition_lock(
         FreezeDefinitionLock.model_validate_json(canonical_json_bytes(actual))
     except Exception as error:
         raise FreezeError("freeze definition lock schema is invalid") from error
-    if actual != expected or _hash_json(_lock_domain(actual)) != actual["definition_lock_sha256"]:
+    if (
+        actual != expected
+        or _domain_hash("definition_lock", _lock_domain(actual)) != actual["definition_lock_sha256"]
+    ):
         raise FreezeError("freeze definition lock differs from independent recomputation")
     return actual
 
@@ -669,14 +942,14 @@ def validate_definition_lock(
 def _definition_lock_commit(path: Path = LOCK_PATH) -> str:
     relative = path.resolve().relative_to(Path.cwd().resolve()).as_posix()
     result = subprocess.run(
-        ["git", "log", "--diff-filter=A", "--format=%H", "--reverse", "--", relative],
+        ["git", "log", "-1", "--format=%H", "--", relative],
         capture_output=True,
         text=True,
         check=True,
     )
     commits = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     if len(commits) != 1:
-        raise FreezeError("freeze definition lock must have one unique additive Git commit")
+        raise FreezeError("replacement freeze definition lock commit is unavailable")
     commit = commits[0]
     subject = subprocess.run(
         ["git", "show", "-s", "--format=%s", commit],
@@ -684,14 +957,22 @@ def _definition_lock_commit(path: Path = LOCK_PATH) -> str:
         text=True,
         check=True,
     ).stdout.strip()
-    if subject != "feat: lock appearance benchmark freeze v0 inputs":
-        raise FreezeError("freeze definition lock additive commit subject is not exact")
+    if subject != "feat: replace appearance benchmark freeze v0 lock domains":
+        raise FreezeError("replacement freeze definition lock commit subject is not exact")
+    if commit == SUPERSEDED_FREEZE_LOCK_COMMIT:
+        raise FreezeError("historical freeze lock cannot serve as the replacement lock")
     if subprocess.run(
         ["git", "merge-base", "--is-ancestor", commit, "HEAD"],
         capture_output=True,
         check=False,
     ).returncode:
-        raise FreezeError("freeze definition lock commit is not an ancestor of HEAD")
+        raise FreezeError("replacement freeze definition lock commit is not an ancestor of HEAD")
+    if subprocess.run(
+        ["git", "merge-base", "--is-ancestor", SUPERSEDED_FREEZE_LOCK_COMMIT, commit],
+        capture_output=True,
+        check=False,
+    ).returncode:
+        raise FreezeError("replacement lock does not preserve the historical lock in ancestry")
     return commit
 
 
@@ -706,11 +987,12 @@ PORTABLE_DEFINITION_ROOT_FIELDS = (
     "legacy_control_membership_root_sha256",
     "freeze_definition_lock_sha256",
     "training_evaluation_policy_root_sha256",
+    "renderer_selection_dependency_root_sha256",
 )
 PORTABLE_APPARATUS_ROOT_FIELDS = (
     "procedural_asset_root_sha256",
     "appearance_assignment_root_sha256",
-    "portable_analytic_identity_root_sha256",
+    "portable_source_identity_root_sha256",
     "within_renderer_invariance_outcome_root_sha256",
 )
 RENDERER_LOCAL_ROOT_FIELDS = (
@@ -719,6 +1001,7 @@ RENDERER_LOCAL_ROOT_FIELDS = (
     "renderer_local_ecological_label_root_sha256",
     "renderer_specific_audit_root_sha256",
     "renderer_specific_contact_sheet_root_sha256",
+    "renderer_local_source_evidence_root_sha256",
 )
 SNAPSHOT_FILES = (
     "benchmark_definition_snapshot.json",
@@ -736,6 +1019,193 @@ REPORT_FILES = (
     "contact_sheet_manifest.json",
 )
 
+SOURCE_IDENTITY_FIELDS = (
+    "sampled_geometry_identity_sha256",
+    "camera_trajectory_identity_sha256",
+    "executed_action_identity_sha256",
+    "surface_remapping_identity_sha256",
+    "scene_content_identity_sha256",
+    "analytic_transport_identity_sha256",
+    "oriented_boundary_ownership_identity_sha256",
+    "visibility_event_identity_sha256",
+    "public_occlusion_relation_identity_sha256",
+)
+
+
+def _git_tree(commit: str) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", f"{commit}^{{tree}}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    if len(result) != 40 or any(character not in "0123456789abcdef" for character in result):
+        raise FreezeError("qualification source tree is not a canonical Git tree identity")
+    return result
+
+
+def _source_identity_from_dataset(
+    source_root: Path,
+    config: BenchmarkConfig,
+) -> tuple[dict[str, Any], DatasetManifest]:
+    """Reconstruct every portable pairing identity from retained immutable source evidence."""
+
+    validate_dataset(source_root)
+    try:
+        manifest = DatasetManifest.model_validate_json((source_root / "manifest.json").read_bytes())
+    except Exception as error:
+        raise FreezeError("retained source-evidence manifest is invalid") from error
+    if len(manifest.episodes) != 1:
+        raise FreezeError("retained source evidence must contain exactly one episode")
+    episode = manifest.episodes[0]
+    try:
+        transition = TransitionRecord.model_validate_json(
+            (source_root / episode.transition.path).read_bytes()
+        )
+        instrumentation = parse_privileged_instrumentation_json(
+            (source_root / episode.privileged_instrumentation.path).read_bytes()
+        )
+    except Exception as error:
+        raise FreezeError("retained typed source evidence is invalid") from error
+    if not isinstance(transition.analytic_optical_transport, AvailableDenseOpticalTransport):
+        raise FreezeError("retained analytic transport evidence is unavailable")
+    if not isinstance(
+        transition.oriented_boundary_ownership, AvailableOrientedBoundaryOwnership
+    ) or not isinstance(
+        transition.ecological_visibility_events, AvailableEcologicalVisibilityEvents
+    ):
+        raise FreezeError("retained boundary or visibility evidence is unavailable")
+    camera_records = [
+        _read_canonical_json(source_root / frame.camera_world_transform.path)
+        for frame in (transition.before, transition.after)
+    ]
+    sampled_geometry = getattr(instrumentation, "sampled_geometry", None)
+    sampled_geometry_domain = {
+        "positions": instrumentation.raw_geom_world_positions,
+        "sizes": instrumentation.raw_geom_compiled_sizes,
+        "types": instrumentation.raw_geom_types,
+        "rotations": instrumentation.raw_geom_world_rotations_row_major,
+        "sampled_geometry": (
+            sampled_geometry.model_dump(mode="json") if sampled_geometry is not None else None
+        ),
+    }
+    if config.scene_family.value == "single_occluder":
+        scene_content = single_occluder_scene_content_domain(config)  # type: ignore[arg-type]
+    else:
+        if not isinstance(sampled_geometry, CorridorSampledGeometry):
+            raise FreezeError("corridor source evidence lacks sampled geometry")
+        scene_content = corridor_scene_content_domain(config, sampled_geometry)  # type: ignore[arg-type]
+    roots = {
+        "sampled_geometry_identity_sha256": _domain_hash(
+            "sampled_geometry", sampled_geometry_domain
+        ),
+        "camera_trajectory_identity_sha256": _domain_hash("camera_trajectory", camera_records),
+        "executed_action_identity_sha256": _domain_hash(
+            "executed_action", transition.action.model_dump(mode="json")
+        ),
+        "surface_remapping_identity_sha256": _domain_hash(
+            "surface_remapping", instrumentation.raw_to_opaque_surface_ids
+        ),
+        "scene_content_identity_sha256": _domain_hash("scene_content", scene_content),
+        "analytic_transport_identity_sha256": _domain_hash(
+            "analytic_transport", analytic_transport_domain(transition.analytic_optical_transport)
+        ),
+        "oriented_boundary_ownership_identity_sha256": _domain_hash(
+            "oriented_boundary_ownership",
+            oriented_boundary_domain(transition.oriented_boundary_ownership),
+        ),
+        "visibility_event_identity_sha256": _domain_hash(
+            "visibility_events",
+            visibility_event_domain(transition.ecological_visibility_events),
+        ),
+        "public_occlusion_relation_identity_sha256": _domain_hash(
+            "public_occlusion_relation", transition.occlusion.model_dump(mode="json")
+        ),
+    }
+    identity = {
+        "schema_version": SOURCE_IDENTITY_VERSION,
+        "dataset_logical_sha256": manifest.dataset_logical_sha256,
+        **roots,
+        "source_identity_root_sha256": _domain_hash("source_identity_root", roots),
+    }
+    return identity, manifest
+
+
+def _validate_source_evidence(
+    packet_root: Path,
+    cell: dict[str, Any],
+    config: BenchmarkConfig,
+    artifacts: _PacketArtifactRegistry,
+) -> dict[str, Any]:
+    record = cell.get("source_evidence")
+    expected_record_fields = {
+        "schema_version",
+        "dataset_path",
+        "manifest_file_sha256",
+        "dataset_logical_sha256",
+        "file_count",
+        "file_manifest",
+    }
+    if (
+        type(record) is not dict
+        or set(record) != expected_record_fields
+        or record["schema_version"] != "appearance_benchmark_source_dataset_evidence_v1"
+        or type(record["dataset_path"]) is not str
+        or type(record["file_count"]) is not int
+        or record["file_count"] <= 0
+        or type(record["file_manifest"]) is not list
+    ):
+        raise FreezeError("freeze retained source-evidence declaration is not strict")
+    expected_path = f"source_evidence/{cell['cell_id']}"
+    if record["dataset_path"] != expected_path:
+        raise FreezeError("freeze retained source-evidence path differs")
+    source_root = packet_root / expected_path
+    identity, manifest = _source_identity_from_dataset(source_root, config)
+    expected_config = type(config).model_validate(
+        {
+            **config.model_dump(mode="python"),
+            "schema_version": "0.1.0-dev.5",
+            "seed": cell["candidate_seed"],
+            "appearance": {
+                "registry_version": "appearance_candidate_registry_v2",
+                "profile_id": cell["profile_id"],
+            },
+        }
+    )
+    retained_config = parse_config(
+        _read_canonical_json(source_root / manifest.resolved_config.path)
+    )
+    if (
+        sha256_file(source_root / "manifest.json") != record["manifest_file_sha256"]
+        or manifest.dataset_logical_sha256 != record["dataset_logical_sha256"]
+        or manifest.dataset_logical_sha256 != identity["dataset_logical_sha256"]
+        or manifest.root_seed != cell["candidate_seed"]
+        or manifest.scene_family.value != cell["scene_family"]
+        or manifest.appearance_profile_id != cell["profile_id"]
+        or retained_config != expected_config
+        or manifest.config_logical_sha256 != sha256_bytes(canonical_json_bytes(expected_config))
+    ):
+        raise FreezeError("freeze retained source-evidence binding differs")
+    files = sorted(path for path in source_root.rglob("*") if path.is_file())
+    if len(files) != record["file_count"]:
+        raise FreezeError("freeze retained source-evidence file count differs")
+    actual_manifest = []
+    for path in files:
+        relative = path.relative_to(packet_root).as_posix()
+        with artifacts.claim(relative, f"source-evidence:{cell['cell_id']}:{relative}") as owned:
+            actual_manifest.append(
+                {
+                    "path": path.relative_to(source_root).as_posix(),
+                    "file_sha256": sha256_bytes(owned.payload),
+                    "byte_count": owned.byte_count,
+                }
+            )
+    if record["file_manifest"] != actual_manifest:
+        raise FreezeError("freeze retained source-evidence file manifest differs")
+    if cell.get("source_identity") != identity:
+        raise FreezeError("freeze source identity differs from independent reconstruction")
+    return identity
+
 
 def _freeze_cell_without_fields(cell: dict[str, Any]) -> dict[str, Any]:
     payload = json.loads(json.dumps(cell))
@@ -746,6 +1216,8 @@ def _freeze_cell_without_fields(cell: dict[str, Any]) -> dict[str, Any]:
         "benchmark_reference_cell_id",
         "candidate_admission_control_cell_id",
         "benchmark_pair_checks",
+        "source_evidence",
+        "source_identity",
     ):
         payload.pop(field, None)
     return payload
@@ -754,44 +1226,61 @@ def _freeze_cell_without_fields(cell: dict[str, Any]) -> dict[str, Any]:
 def _pair_checks(cell: dict[str, Any], reference: dict[str, Any]) -> dict[str, bool]:
     names = (
         "same_scene_and_evaluation_root",
-        "scene_content_equality",
-        "analytic_transport_equality",
-        "oriented_boundary_equality",
-        "visibility_event_equality",
-        "public_occlusion_equality",
-        "action_equality",
+        "sampled_geometry_equality",
         "camera_trajectory_equality",
-        "geometry_equality",
-        "opaque_remapping_equality",
+        "executed_action_equality",
+        "surface_remapping_equality",
+        "scene_content_identity_equality",
+        "analytic_transport_identity_equality",
+        "oriented_boundary_ownership_identity_equality",
+        "visibility_event_identity_equality",
+        "public_occlusion_relation_identity_equality",
         "ecological_label_equality_within_renderer",
         "depth_equality_within_renderer",
         "segmentation_equality_within_renderer",
     )
     if cell["generation_status"] != "success" or reference["generation_status"] != "success":
         return dict.fromkeys(names, False)
+    identity = cell["source_identity"]
+    reference_identity = reference["source_identity"]
     return {
         "same_scene_and_evaluation_root": cell["scene_family"] == reference["scene_family"]
         and cell["candidate_seed"] == reference["candidate_seed"],
-        "scene_content_equality": cell["scene_content_sha256"] == reference["scene_content_sha256"],
-        "analytic_transport_equality": cell["analytic_transport_sha256"]
-        == reference["analytic_transport_sha256"],
-        "oriented_boundary_equality": cell["oriented_boundary_sha256"]
-        == reference["oriented_boundary_sha256"],
-        "visibility_event_equality": cell["visibility_event_sha256"]
-        == reference["visibility_event_sha256"],
-        "public_occlusion_equality": cell["occlusion_sha256"] == reference["occlusion_sha256"],
-        "action_equality": cell["action_sha256"] == reference["action_sha256"],
-        "camera_trajectory_equality": cell["camera_trajectory_sha256"]
-        == reference["camera_trajectory_sha256"],
-        "geometry_equality": cell["geometry_sha256"] == reference["geometry_sha256"],
-        "opaque_remapping_equality": cell["opaque_remapping_sha256"]
-        == reference["opaque_remapping_sha256"],
+        **{
+            check_name: identity[field_name] == reference_identity[field_name]
+            for check_name, field_name in (
+                ("sampled_geometry_equality", "sampled_geometry_identity_sha256"),
+                ("camera_trajectory_equality", "camera_trajectory_identity_sha256"),
+                ("executed_action_equality", "executed_action_identity_sha256"),
+                ("surface_remapping_equality", "surface_remapping_identity_sha256"),
+                ("scene_content_identity_equality", "scene_content_identity_sha256"),
+                ("analytic_transport_identity_equality", "analytic_transport_identity_sha256"),
+                (
+                    "oriented_boundary_ownership_identity_equality",
+                    "oriented_boundary_ownership_identity_sha256",
+                ),
+                ("visibility_event_identity_equality", "visibility_event_identity_sha256"),
+                (
+                    "public_occlusion_relation_identity_equality",
+                    "public_occlusion_relation_identity_sha256",
+                ),
+            )
+        },
         "ecological_label_equality_within_renderer": cell["ecological_label_sha256"]
         == reference["ecological_label_sha256"],
         "depth_equality_within_renderer": cell["depth_logical_sha256"]
         == reference["depth_logical_sha256"],
         "segmentation_equality_within_renderer": cell["segmentation_logical_sha256"]
         == reference["segmentation_logical_sha256"],
+    }
+
+
+def _portable_source_identity(cell: dict[str, Any]) -> dict[str, Any]:
+    identity = cell["source_identity"]
+    return {
+        "schema_version": identity["schema_version"],
+        **{field: identity[field] for field in SOURCE_IDENTITY_FIELDS},
+        "source_identity_root_sha256": identity["source_identity_root_sha256"],
     }
 
 
@@ -988,7 +1477,7 @@ def _threshold_margin_summary(
                         surface["luminance_standard_deviation"]
                         - threshold.textured_surface_luminance_std_minimum
                     )
-    return {
+    metrics = {
         name: {
             "count": len(values),
             "failure_count": sum(value < 0 for value in values),
@@ -999,6 +1488,11 @@ def _threshold_margin_summary(
             "maximum_margin": max(values) if values else None,
         }
         for name, values in margins.items()
+    }
+    return {
+        "schema_version": THRESHOLD_MARGIN_VERSION,
+        "metrics": metrics,
+        "threshold_margin_root_sha256": _domain_hash("threshold_margins", metrics),
     }
 
 
@@ -1044,22 +1538,33 @@ def _root_domains(
     successful = [cell for cell in [*controls, *selected] if cell["generation_status"] == "success"]
     definition_roots = {
         "benchmark_definition_sha256": benchmark_definition_hash(definition),
-        "profile_role_root_sha256": _hash_json(_role_domain(definition)),
-        "selected_profile_set_root_sha256": _hash_json(_selected_set_domain(definition)),
-        "excluded_candidate_set_root_sha256": _hash_json(_excluded_set_domain(definition)),
-        "evaluation_episode_seed_registry_sha256": seed_registry_hash(seeds),
-        "scene_family_membership_root_sha256": _hash_json(
-            [scene.model_dump(mode="json") for scene in definition.scene_families]
+        "profile_role_root_sha256": _domain_hash("profile_roles", _role_domain(definition)),
+        "selected_profile_set_root_sha256": _domain_hash(
+            "selected_profile_set", _selected_set_domain(definition)
         ),
-        "selected_matrix_membership_root_sha256": _hash_json(
-            _selected_membership_domain(definition, seeds)
+        "excluded_candidate_set_root_sha256": _domain_hash(
+            "excluded_candidate_set", _excluded_set_domain(definition)
         ),
-        "legacy_control_membership_root_sha256": _hash_json(
-            _legacy_control_membership_domain(definition, seeds)
+        "evaluation_episode_seed_registry_sha256": evaluation_seed_registry_hash(seeds),
+        "scene_family_membership_root_sha256": _domain_hash(
+            "scene_family_membership",
+            [scene.model_dump(mode="json") for scene in definition.scene_families],
+        ),
+        "selected_matrix_membership_root_sha256": _domain_hash(
+            "selected_matrix_membership", _selected_membership_domain(definition, seeds)
+        ),
+        "legacy_control_membership_root_sha256": _domain_hash(
+            "legacy_control_membership", _legacy_control_membership_domain(definition, seeds)
         ),
         "freeze_definition_lock_sha256": lock["definition_lock_sha256"],
-        "training_evaluation_policy_root_sha256": _hash_json(
-            definition.evaluation_use_policy.model_dump(mode="json")
+        "training_evaluation_policy_root_sha256": _domain_hash(
+            "training_evaluation_policy", definition.evaluation_use_policy.model_dump(mode="json")
+        ),
+        "renderer_selection_dependency_root_sha256": _domain_hash(
+            "renderer_selection_dependency",
+            definition.renderer_policy.model_result_renderer_selection_dependency.model_dump(
+                mode="json"
+            ),
         ),
     }
     procedural = [
@@ -1082,13 +1587,12 @@ def _root_domains(
         for cell in successful
     ]
     portable = [
-        {"cell_id": cell["cell_id"], **_portable_analytic_identity_domain(cell)}
-        for cell in successful
+        {"cell_id": cell["cell_id"], **_portable_source_identity(cell)} for cell in successful
     ]
     invariance = [
         {
             "cell_id": cell["cell_id"],
-            **_portable_analytic_identity_domain(cell),
+            **_portable_source_identity(cell),
             "candidate_control_invariance": {
                 name: cell["admission_checks"][name]
                 for name in (
@@ -1105,10 +1609,14 @@ def _root_domains(
         if cell["generation_status"] == "success"
     ]
     apparatus_roots = {
-        "procedural_asset_root_sha256": _hash_json(procedural),
-        "appearance_assignment_root_sha256": _hash_json(assignments),
-        "portable_analytic_identity_root_sha256": _hash_json(portable),
-        "within_renderer_invariance_outcome_root_sha256": _hash_json(invariance),
+        "procedural_asset_root_sha256": _domain_hash("procedural_assets", procedural),
+        "appearance_assignment_root_sha256": _domain_hash("appearance_assignments", assignments),
+        "portable_source_identity_root_sha256": _domain_hash(
+            "portable_source_identities", portable
+        ),
+        "within_renderer_invariance_outcome_root_sha256": _domain_hash(
+            "within_renderer_invariance", invariance
+        ),
     }
     selected_outcomes = [
         {
@@ -1153,11 +1661,30 @@ def _root_domains(
         for cell in successful
     ]
     renderer_roots = {
-        "renderer_local_selected_cell_outcome_root_sha256": _hash_json(selected_outcomes),
-        "renderer_local_control_cell_outcome_root_sha256": _hash_json(control_outcomes),
-        "renderer_local_ecological_label_root_sha256": _hash_json(renderer_labels),
-        "renderer_specific_audit_root_sha256": _hash_json(renderer_evidence),
-        "renderer_specific_contact_sheet_root_sha256": _hash_json(contact_manifest),
+        "renderer_local_selected_cell_outcome_root_sha256": _domain_hash(
+            "selected_outcomes", selected_outcomes
+        ),
+        "renderer_local_control_cell_outcome_root_sha256": _domain_hash(
+            "control_outcomes", control_outcomes
+        ),
+        "renderer_local_ecological_label_root_sha256": _domain_hash(
+            "renderer_ecological_labels", renderer_labels
+        ),
+        "renderer_specific_audit_root_sha256": _domain_hash("renderer_audit", renderer_evidence),
+        "renderer_specific_contact_sheet_root_sha256": _domain_hash(
+            "renderer_contact_sheets", contact_manifest
+        ),
+        "renderer_local_source_evidence_root_sha256": _domain_hash(
+            "renderer_source_evidence",
+            [
+                {
+                    "cell_id": cell["cell_id"],
+                    "source_evidence": cell["source_evidence"],
+                    "source_identity": cell["source_identity"],
+                }
+                for cell in successful
+            ],
+        ),
     }
     return definition_roots, apparatus_roots, renderer_roots
 
@@ -1170,7 +1697,22 @@ def _validate_lock_commit_snapshots(
     source_provenance: dict[str, Any],
 ) -> None:
     if commit != _definition_lock_commit():
-        raise FreezeError("packet lock commit is not the unique additive commit")
+        raise FreezeError("packet lock commit is not the prospective replacement lock")
+    historical_raw = subprocess.run(
+        [
+            "git",
+            "show",
+            f"{SUPERSEDED_FREEZE_LOCK_COMMIT}:configs/appearance_benchmark_freeze_v0_lock.json",
+        ],
+        capture_output=True,
+        check=True,
+    ).stdout
+    historical = json.loads(historical_raw.decode("utf-8"))
+    if (
+        historical_raw != canonical_json_bytes(historical) + b"\n"
+        or historical.get("definition_lock_sha256") != SUPERSEDED_FREEZE_LOCK_ROOT
+    ):
+        raise FreezeError("historical freeze lock was not preserved exactly")
     expected = {
         "configs/appearance_benchmark_freeze_v0.yaml": definition.model_dump(mode="json"),
         "configs/appearance_benchmark_v0_evaluation_episode_seeds.yaml": seeds.model_dump(
@@ -1195,7 +1737,7 @@ def _validate_lock_commit_snapshots(
         provenance = SourceProvenance.model_validate_json(canonical_json_bytes(source_provenance))
     except Exception as error:
         raise FreezeError("qualification source provenance is invalid") from error
-    if provenance.git_commit is None:
+    if provenance.git_commit is None or provenance.git_dirty is not False:
         raise FreezeError("qualification requires exact Git source provenance")
     if source_provenance != collect_source_provenance(Path.cwd()).model_dump(mode="json"):
         raise FreezeError("qualification source provenance is not truthful")
@@ -1205,63 +1747,163 @@ def _validate_lock_commit_snapshots(
         check=False,
     ).returncode:
         raise FreezeError("qualification source predates the immutable freeze lock")
+    _git_tree(provenance.git_commit)
 
 
-def validate_renderer_receipt_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    fields = {
-        "schema_version",
-        "environment_id",
-        "renderer_fingerprint",
-        "freeze_definition_lock_commit",
-        "freeze_definition_lock_sha256",
-        "qualification_source_commit",
-        "complete_packet_root_sha256",
-        "selected_cell_count",
-        "control_cell_count",
-        "selected_matrix_counts",
-        "control_matrix_counts",
-        "profiles",
-        "portable_definition_roots",
-        "portable_apparatus_roots",
-        "renderer_local_roots",
-        "threshold_margin_summary",
-        "benchmark_frozen",
-        "scientific_result",
-        "receipt_sha256",
-    }
-    if type(payload) is not dict or set(payload) != fields:
-        raise FreezeError("renderer receipt schema is not strict")
-    domain = dict(payload)
+def _outcome_rows(
+    cells: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "cell_id": cell["cell_id"],
+            "profile_id": cell["profile_id"],
+            "benchmark_role": cell["benchmark_role"],
+            "scene_family": cell["scene_family"],
+            "seed_index": cell["seed_index"],
+            "evaluation_episode_root": cell["candidate_seed"],
+            "admission_status": cell["admission_status"],
+        }
+        for cell in cells
+    ]
+
+
+def _validate_receipt_outcome_membership(
+    payload: dict[str, Any],
+    definition: BenchmarkDefinition,
+    seeds: FinalEvaluationSeedRegistry,
+) -> None:
+    selected_expected = _selected_membership_domain(definition, seeds)
+    control_expected = _legacy_control_membership_domain(definition, seeds)
+    selected = payload["selected_outcome_map"]
+    controls = payload["control_outcome_map"]
+    if len(selected) != 160 or len(controls) != 32:
+        raise FreezeError("renderer receipt outcome maps are incomplete")
+    for actual, expected in zip(selected, selected_expected, strict=True):
+        if (
+            actual["cell_id"] != expected["cell_id"]
+            or actual["profile_id"] != expected["profile_id"]
+            or actual["benchmark_role"] != expected["benchmark_role"]
+            or actual["scene_family"] != expected["scene_family"]
+            or actual["seed_index"] != expected["seed_index"]
+            or actual["evaluation_episode_root"] != expected["evaluation_episode_root"]
+        ):
+            raise FreezeError("renderer receipt selected outcome membership differs")
+    for actual, expected in zip(controls, control_expected, strict=True):
+        if (
+            actual["cell_id"] != expected["cell_id"]
+            or actual["profile_id"] != LEGACY_CONTROL_PROFILE_ID
+            or actual["benchmark_role"] != "legacy_apparatus_control"
+            or actual["scene_family"] != expected["scene_family"]
+            or actual["seed_index"] != expected["seed_index"]
+            or actual["evaluation_episode_root"] != expected["evaluation_episode_root"]
+        ):
+            raise FreezeError("renderer receipt control outcome membership differs")
+
+
+def validate_renderer_receipt_payload(
+    payload: dict[str, Any],
+    definition: BenchmarkDefinition,
+    seeds: FinalEvaluationSeedRegistry,
+    lock: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate one typed receipt against independent prospective definition evidence."""
+
+    try:
+        model = RendererQualificationReceipt.model_validate_json(canonical_json_bytes(payload))
+    except Exception as error:
+        raise FreezeError("renderer receipt schema is not strict and typed") from error
+    validated = model.model_dump(mode="json")
+    domain = dict(validated)
     declared = domain.pop("receipt_sha256")
-    if payload["schema_version"] != RENDERER_RECEIPT_VERSION or _hash_json(domain) != declared:
+    if _domain_hash("renderer_receipt", domain) != declared:
         raise FreezeError("renderer receipt identity differs")
-    if payload["environment_id"] not in {"windows_wgl_locked", "ubuntu_osmesa_locked"}:
-        raise FreezeError("renderer receipt environment is unknown")
+    expected_environment = next(
+        environment
+        for environment in definition.renderer_policy.supported_apparatus_environments
+        if environment.environment_id == validated["environment_id"]
+    )
+    if validated["renderer_fingerprint"] != expected_environment.fingerprint.model_dump(
+        mode="json"
+    ):
+        raise FreezeError("renderer receipt fingerprint differs from its exact environment")
+    provenance = validated["qualification_source_provenance"]
     if (
-        payload["selected_cell_count"] != 160
-        or payload["control_cell_count"] != 32
-        or [row.get("profile_id") for row in payload["profiles"]] != list(SELECTED_PROFILE_IDS)
+        provenance["git_commit"] != validated["qualification_source_commit"]
+        or provenance["git_dirty"] is not False
+        or provenance["dirty_diff_sha256"] is not None
+        or _git_tree(validated["qualification_source_commit"])
+        != validated["qualification_source_tree"]
+    ):
+        raise FreezeError("renderer receipt source revision or tree binding differs")
+    if subprocess.run(
+        [
+            "git",
+            "merge-base",
+            "--is-ancestor",
+            validated["replacement_definition_lock_commit"],
+            validated["qualification_source_commit"],
+        ],
+        capture_output=True,
+        check=False,
+    ).returncode:
+        raise FreezeError("renderer qualification source predates the replacement lock")
+    if (
+        validated["replacement_definition_lock_commit"] != _definition_lock_commit()
+        or validated["replacement_definition_lock_sha256"] != lock["definition_lock_sha256"]
+        or validated["benchmark_definition_sha256"] != benchmark_definition_hash(definition)
+        or validated["evaluation_episode_seed_registry_sha256"]
+        != evaluation_seed_registry_hash(seeds)
+        or validated["portable_definition_roots"]["benchmark_definition_sha256"]
+        != benchmark_definition_hash(definition)
+        or validated["portable_definition_roots"]["evaluation_episode_seed_registry_sha256"]
+        != evaluation_seed_registry_hash(seeds)
+        or validated["portable_definition_roots"]["freeze_definition_lock_sha256"]
+        != lock["definition_lock_sha256"]
+    ):
+        raise FreezeError("renderer receipt prospective definition binding differs")
+    if set(validated["portable_definition_roots"]) != set(PORTABLE_DEFINITION_ROOT_FIELDS):
+        raise FreezeError("renderer receipt definition root schema differs")
+    if set(validated["portable_apparatus_roots"]) != set(PORTABLE_APPARATUS_ROOT_FIELDS):
+        raise FreezeError("renderer receipt apparatus root schema differs")
+    if set(validated["renderer_local_roots"]) != set(RENDERER_LOCAL_ROOT_FIELDS):
+        raise FreezeError("renderer receipt local root schema differs")
+    _validate_receipt_outcome_membership(validated, definition, seeds)
+    selected_counts = dict(
+        Counter(row["admission_status"] for row in validated["selected_outcome_map"])
+    )
+    control_counts = dict(
+        Counter(row["admission_status"] for row in validated["control_outcome_map"])
+    )
+    roles = {profile.profile_id: profile for profile in definition.profiles}
+    if (
+        validated["selected_matrix_counts"] != selected_counts
+        or validated["control_matrix_counts"] != control_counts
+        or [row["profile_id"] for row in validated["profiles"]] != list(SELECTED_PROFILE_IDS)
         or any(
-            row.get("expected_cell_count") != 32
-            or row.get("observed_cell_count") != 32
-            or type(row.get("renderer_apparatus_qualified")) is not bool
-            for row in payload["profiles"]
+            row["profile_sha256"] != roles[row["profile_id"]].profile_sha256
+            or row["benchmark_role"] != roles[row["profile_id"]].role.value
+            or row["cell_counts"]
+            != dict(
+                Counter(
+                    outcome["admission_status"]
+                    for outcome in validated["selected_outcome_map"]
+                    if outcome["profile_id"] == row["profile_id"]
+                )
+            )
+            for row in validated["profiles"]
         )
     ):
-        raise FreezeError("renderer receipt matrix is incomplete")
-    if set(payload["portable_definition_roots"]) != set(PORTABLE_DEFINITION_ROOT_FIELDS):
-        raise FreezeError("renderer receipt definition roots differ")
-    if set(payload["portable_apparatus_roots"]) != set(PORTABLE_APPARATUS_ROOT_FIELDS):
-        raise FreezeError("renderer receipt apparatus roots differ")
-    if set(payload["renderer_local_roots"]) != set(RENDERER_LOCAL_ROOT_FIELDS):
-        raise FreezeError("renderer receipt local roots differ")
-    if payload["benchmark_frozen"] is not False or payload["scientific_result"] is not None:
-        raise FreezeError("renderer receipt exceeds implementation authority")
-    return payload
+        raise FreezeError("renderer receipt outcomes, roles, counts, or readiness differ")
+    return validated
 
 
-def load_renderer_receipt(path: Path) -> dict[str, Any]:
-    return validate_renderer_receipt_payload(_read_canonical_json(path))
+def load_renderer_receipt(
+    path: Path,
+    definition: BenchmarkDefinition,
+    seeds: FinalEvaluationSeedRegistry,
+    lock: dict[str, Any],
+) -> dict[str, Any]:
+    return validate_renderer_receipt_payload(_read_canonical_json(path), definition, seeds, lock)
 
 
 def create_freeze_audit(
@@ -1296,7 +1938,7 @@ def create_freeze_audit(
         raise FreezeError("freeze audit requires the exact Revision 1 registry")
     configs = (load_config(single_config_path), load_config(corridor_config_path))
     counterpart = (
-        load_renderer_receipt(counterpart_receipt_path)
+        load_renderer_receipt(counterpart_receipt_path, definition, seeds, lock)
         if counterpart_receipt_path is not None
         else None
     )
@@ -1337,7 +1979,13 @@ def create_freeze_audit(
                         revision,
                         seeds,
                         cell_id_prefix="final-evaluation",
+                        retain_source_evidence=True,
                     )
+                    if cell["generation_status"] == "success":
+                        source_root = staging / cell["source_evidence"]["dataset_path"]
+                        cell["source_identity"], _ = _source_identity_from_dataset(
+                            source_root, config
+                        )
                     cell["benchmark_role"] = (
                         "legacy_apparatus_control"
                         if profile_id == LEGACY_CONTROL_PROFILE_ID
@@ -1379,6 +2027,7 @@ def create_freeze_audit(
             "legacy_control_membership_root_sha256",
             "freeze_definition_lock_sha256",
             "training_evaluation_policy_root_sha256",
+            "renderer_selection_dependency_root_sha256",
         ):
             lock_field = (
                 "definition_lock_sha256" if field.startswith("freeze_definition") else field
@@ -1395,9 +2044,9 @@ def create_freeze_audit(
             raise FreezeError("freeze packet mixes renderer environments")
         environment_id = _renderer_environment_id(definition, renderer)
         if counterpart is not None:
-            if counterpart["freeze_definition_lock_commit"] != lock_commit:
+            if counterpart["replacement_definition_lock_commit"] != lock_commit:
                 raise FreezeError("counterpart receipt uses another lock commit")
-            if counterpart["freeze_definition_lock_sha256"] != lock["definition_lock_sha256"]:
+            if counterpart["replacement_definition_lock_sha256"] != lock["definition_lock_sha256"]:
                 raise FreezeError("counterpart receipt uses another lock root")
             if counterpart["portable_definition_roots"] != definition_roots:
                 raise FreezeError("counterpart definition roots differ")
@@ -1428,14 +2077,16 @@ def create_freeze_audit(
         logical_domain = {
             "schema_version": FREEZE_PACKET_VERSION,
             "root_schema_version": FREEZE_ROOT_VERSION,
-            "freeze_definition_lock_commit": lock_commit,
+            "replacement_definition_lock_commit": lock_commit,
             "source_provenance": collect_source_provenance(Path.cwd()).model_dump(mode="json"),
             "renderer_environment_id": environment_id,
             "renderer_fingerprint": renderer,
             "portable_definition_roots": definition_roots,
             "portable_apparatus_roots": apparatus_roots,
             "portable_profile_readiness_root_sha256": (
-                _hash_json(portable_readiness) if portable_readiness is not None else None
+                _domain_hash("profile_readiness", portable_readiness)
+                if portable_readiness is not None
+                else None
             ),
             "renderer_local_roots": renderer_roots,
             "snapshot_file_sha256": {name: sha256_file(staging / name) for name in snapshot_names},
@@ -1459,7 +2110,10 @@ def create_freeze_audit(
             "gate_0d_authorised": False,
             "scientific_result": None,
         }
-        packet = {**logical_domain, "complete_packet_root_sha256": _hash_json(logical_domain)}
+        packet = {
+            **logical_domain,
+            "complete_packet_root_sha256": _domain_hash("complete_packet", logical_domain),
+        }
         write_canonical_json(staging / "freeze_candidate_packet.json", packet)
         (staging / "run.json").write_bytes(
             (
@@ -1484,36 +2138,211 @@ def create_freeze_audit(
         raise
 
 
-def create_renderer_receipt(packet_root: Path, output: Path) -> dict[str, Any]:
-    packet = validate_freeze_audit(packet_root)
-    domain = {
-        "schema_version": RENDERER_RECEIPT_VERSION,
+def _public_packet_evidence(packet_root: Path, packet: dict[str, Any]) -> dict[str, Any]:
+    files = sorted(
+        path for path in packet_root.rglob("*") if path.is_file() and path.name != "run.json"
+    )
+    manifest = [
+        {
+            "path": path.relative_to(packet_root).as_posix(),
+            "file_sha256": sha256_file(path),
+            "byte_count": path.stat().st_size,
+        }
+        for path in files
+    ]
+    packet_path = packet_root / "freeze_candidate_packet.json"
+    return {
+        "evidence_class": "PUBLIC_REPOSITORY_ONLY",
+        "availability": "repository_or_ci_artifact",
+        "packet_schema_version": packet["schema_version"],
+        "packet_root_schema_version": packet["root_schema_version"],
+        "packet_file_sha256": sha256_file(packet_path),
+        "packet_tree_root_sha256": _domain_hash("public_packet_tree", manifest),
+        "packet_artifact_count": len(files),
+    }
+
+
+def _receipt_context(
+    packet_root: Path,
+) -> tuple[BenchmarkDefinition, FinalEvaluationSeedRegistry, dict[str, Any]]:
+    definition = BenchmarkDefinition.model_validate_json(
+        (packet_root / "benchmark_definition_snapshot.json").read_bytes()
+    )
+    seeds = parse_seed_registry(
+        _read_canonical_json(packet_root / "evaluation_episode_seed_registry_snapshot.json")
+    )
+    if not isinstance(seeds, FinalEvaluationSeedRegistry):
+        raise FreezeError("renderer receipt packet has the wrong seed registry")
+    lock = FreezeDefinitionLock.model_validate_json(
+        (packet_root / "freeze_definition_lock.json").read_bytes()
+    ).model_dump(mode="json")
+    return definition, seeds, lock
+
+
+def _validate_receipt_against_packet(
+    receipt: dict[str, Any],
+    packet_root: Path,
+    packet: dict[str, Any],
+    definition: BenchmarkDefinition,
+    seeds: FinalEvaluationSeedRegistry,
+    lock: dict[str, Any],
+) -> dict[str, Any]:
+    validated = validate_renderer_receipt_payload(receipt, definition, seeds, lock)
+    selected = _read_canonical_json(packet_root / "selected_profile_matrix.json")["cells"]
+    controls = _read_canonical_json(packet_root / "legacy_control_matrix.json")["cells"]
+    exact = {
         "environment_id": packet["renderer_environment_id"],
         "renderer_fingerprint": packet["renderer_fingerprint"],
-        "freeze_definition_lock_commit": packet["freeze_definition_lock_commit"],
-        "freeze_definition_lock_sha256": packet["portable_definition_roots"][
+        "qualification_source_provenance": packet["source_provenance"],
+        "qualification_source_commit": packet["source_provenance"]["git_commit"],
+        "qualification_source_tree": _git_tree(packet["source_provenance"]["git_commit"]),
+        "replacement_definition_lock_commit": packet["replacement_definition_lock_commit"],
+        "replacement_definition_lock_sha256": packet["portable_definition_roots"][
             "freeze_definition_lock_sha256"
         ],
-        "qualification_source_commit": packet["source_provenance"]["git_commit"],
+        "benchmark_definition_sha256": packet["portable_definition_roots"][
+            "benchmark_definition_sha256"
+        ],
+        "evaluation_episode_seed_registry_sha256": packet["portable_definition_roots"][
+            "evaluation_episode_seed_registry_sha256"
+        ],
         "complete_packet_root_sha256": packet["complete_packet_root_sha256"],
         "selected_cell_count": packet["selected_cell_count"],
         "control_cell_count": packet["control_cell_count"],
+        "total_cell_count": packet["total_cell_count"],
         "selected_matrix_counts": packet["selected_matrix_counts"],
         "control_matrix_counts": packet["control_matrix_counts"],
+        "selected_outcome_map": _outcome_rows(selected),
+        "control_outcome_map": _outcome_rows(controls),
         "profiles": packet["local_profile_readiness"],
         "portable_definition_roots": packet["portable_definition_roots"],
         "portable_apparatus_roots": packet["portable_apparatus_roots"],
         "renderer_local_roots": packet["renderer_local_roots"],
         "threshold_margin_summary": packet["threshold_margin_summary"],
+        "public_qualification_evidence": _public_packet_evidence(packet_root, packet),
+    }
+    if any(validated[field] != value for field, value in exact.items()):
+        raise FreezeError("renderer receipt differs from independently validated packet evidence")
+    return validated
+
+
+def _reject_aliased_publication_parent(parent: Path) -> Path:
+    try:
+        unresolved = parent.absolute()
+        parent_stat = unresolved.lstat()
+    except OSError as error:
+        raise FreezeError("renderer receipt publication parent must already exist") from error
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if (
+        stat.S_ISLNK(parent_stat.st_mode)
+        or bool(getattr(parent_stat, "st_file_attributes", 0) & reparse_flag)
+        or not stat.S_ISDIR(parent_stat.st_mode)
+    ):
+        raise FreezeError("renderer receipt publication parent must be a non-alias directory")
+    resolved = unresolved.resolve(strict=True)
+    cursor = resolved
+    while cursor != cursor.parent:
+        current = cursor.lstat()
+        if stat.S_ISLNK(current.st_mode) or bool(
+            getattr(current, "st_file_attributes", 0) & reparse_flag
+        ):
+            raise FreezeError("renderer receipt publication path contains an alias")
+        cursor = cursor.parent
+    return resolved
+
+
+def _atomic_publish_receipt(payload: bytes, output: Path, packet_root: Path) -> None:
+    parent = _reject_aliased_publication_parent(output.parent)
+    destination = parent / output.name
+    resolved_packet = packet_root.resolve(strict=True)
+    if destination.resolve(strict=False).is_relative_to(resolved_packet):
+        raise FreezeError("renderer receipt may not be published inside its source packet")
+    try:
+        destination.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        raise FileExistsError(f"renderer receipt already exists: {destination}")
+    descriptor, staging_name = tempfile.mkstemp(prefix=f".{output.name}.staging-", dir=parent)
+    staging = Path(staging_name)
+    published = False
+    staging_identity: tuple[int, int] | None = None
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        staging_stat = staging.stat()
+        staging_identity = (staging_stat.st_dev, staging_stat.st_ino)
+        os.link(staging, destination)
+        published = True
+        staging.unlink()
+        with open_owned_regular_file(parent, output.name) as owned:
+            if owned.payload != payload:
+                raise FreezeError("published renderer receipt bytes differ")
+    except Exception:
+        if published:
+            try:
+                destination_stat = destination.stat()
+                if (destination_stat.st_dev, destination_stat.st_ino) == staging_identity:
+                    destination.unlink()
+            except OSError:
+                pass
+        raise
+    finally:
+        try:
+            staging.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def create_renderer_receipt(packet_root: Path, output: Path) -> dict[str, Any]:
+    packet = validate_freeze_audit(packet_root)
+    definition, seeds, lock = _receipt_context(packet_root)
+    selected = _read_canonical_json(packet_root / "selected_profile_matrix.json")["cells"]
+    controls = _read_canonical_json(packet_root / "legacy_control_matrix.json")["cells"]
+    source_commit = packet["source_provenance"]["git_commit"]
+    domain = {
+        "schema_version": RENDERER_RECEIPT_VERSION,
+        "environment_id": packet["renderer_environment_id"],
+        "renderer_fingerprint": packet["renderer_fingerprint"],
+        "qualification_source_provenance": packet["source_provenance"],
+        "qualification_source_commit": source_commit,
+        "qualification_source_tree": _git_tree(source_commit),
+        "replacement_definition_lock_commit": packet["replacement_definition_lock_commit"],
+        "replacement_definition_lock_sha256": packet["portable_definition_roots"][
+            "freeze_definition_lock_sha256"
+        ],
+        "benchmark_definition_sha256": packet["portable_definition_roots"][
+            "benchmark_definition_sha256"
+        ],
+        "evaluation_episode_seed_registry_sha256": packet["portable_definition_roots"][
+            "evaluation_episode_seed_registry_sha256"
+        ],
+        "complete_packet_root_sha256": packet["complete_packet_root_sha256"],
+        "selected_cell_count": packet["selected_cell_count"],
+        "control_cell_count": packet["control_cell_count"],
+        "total_cell_count": packet["total_cell_count"],
+        "selected_matrix_counts": packet["selected_matrix_counts"],
+        "control_matrix_counts": packet["control_matrix_counts"],
+        "selected_outcome_map": _outcome_rows(selected),
+        "control_outcome_map": _outcome_rows(controls),
+        "profiles": packet["local_profile_readiness"],
+        "portable_definition_roots": packet["portable_definition_roots"],
+        "portable_apparatus_roots": packet["portable_apparatus_roots"],
+        "renderer_local_roots": packet["renderer_local_roots"],
+        "threshold_margin_summary": packet["threshold_margin_summary"],
+        "public_qualification_evidence": _public_packet_evidence(packet_root, packet),
         "benchmark_frozen": False,
         "scientific_result": None,
     }
-    receipt = {**domain, "receipt_sha256": _hash_json(domain)}
-    validate_renderer_receipt_payload(receipt)
-    if output.exists():
-        raise FileExistsError(f"renderer receipt already exists: {output}")
-    write_canonical_json(output, receipt)
-    return receipt
+    receipt = {**domain, "receipt_sha256": _domain_hash("renderer_receipt", domain)}
+    _validate_receipt_against_packet(receipt, packet_root, packet, definition, seeds, lock)
+    encoded = canonical_json_bytes(receipt) + b"\n"
+    _atomic_publish_receipt(encoded, output, packet_root)
+    published = _read_canonical_json(output)
+    _validate_receipt_against_packet(published, packet_root, packet, definition, seeds, lock)
+    return published
 
 
 def _decode_canonical_object(payload: bytes, role: str) -> dict[str, Any]:
@@ -1637,7 +2466,7 @@ def validate_freeze_audit(packet_root: Path) -> dict[str, Any]:
     logical_fields = {
         "schema_version",
         "root_schema_version",
-        "freeze_definition_lock_commit",
+        "replacement_definition_lock_commit",
         "source_provenance",
         "renderer_environment_id",
         "renderer_fingerprint",
@@ -1751,14 +2580,16 @@ def validate_freeze_audit(packet_root: Path) -> dict[str, Any]:
     if lock != create_definition_lock_payload(definition, seeds, revision, configs):
         raise FreezeError("freeze packet lock differs from recomputation")
     _validate_lock_commit_snapshots(
-        packet["freeze_definition_lock_commit"],
+        packet["replacement_definition_lock_commit"],
         definition,
         seeds,
         lock,
         packet["source_provenance"],
     )
     counterpart = (
-        validate_renderer_receipt_payload(snapshots["counterpart_renderer_receipt.json"])
+        validate_renderer_receipt_payload(
+            snapshots["counterpart_renderer_receipt.json"], definition, seeds, lock
+        )
         if has_counterpart
         else None
     )
@@ -1805,7 +2636,15 @@ def validate_freeze_audit(packet_root: Path) -> dict[str, Any]:
             raise FreezeError("legacy control cell identity differs")
     all_cells = [*controls, *selected]
     expected_check_names = set(_pair_checks(all_cells[0], all_cells[0]))
+    config_by_scene = {config.scene_family.value: config for config in configs}
     for cell in all_cells:
+        if cell["generation_status"] == "success":
+            _validate_source_evidence(
+                packet_root,
+                cell,
+                config_by_scene[cell["scene_family"]],
+                artifacts,
+            )
         _validate_cell_schema(_freeze_cell_without_fields(cell))
         checks = cell.get("benchmark_pair_checks")
         if (
@@ -1948,8 +2787,9 @@ def validate_freeze_audit(packet_root: Path) -> dict[str, Any]:
         raise FreezeError("freeze renderer claim differs")
     if counterpart is not None:
         if (
-            counterpart["freeze_definition_lock_commit"] != packet["freeze_definition_lock_commit"]
-            or counterpart["freeze_definition_lock_sha256"]
+            counterpart["replacement_definition_lock_commit"]
+            != packet["replacement_definition_lock_commit"]
+            or counterpart["replacement_definition_lock_sha256"]
             != expected_definition["freeze_definition_lock_sha256"]
             or counterpart["portable_definition_roots"] != expected_definition
         ):
@@ -1966,7 +2806,9 @@ def validate_freeze_audit(packet_root: Path) -> dict[str, Any]:
         raise FreezeError("freeze local profile readiness differs")
     portable_readiness = _portable_readiness_domain(readiness)
     expected_readiness_root = (
-        _hash_json(portable_readiness) if portable_readiness is not None else None
+        _domain_hash("profile_readiness", portable_readiness)
+        if portable_readiness is not None
+        else None
     )
     if packet["portable_profile_readiness_root_sha256"] != expected_readiness_root:
         raise FreezeError("freeze portable readiness root differs")
@@ -1978,7 +2820,7 @@ def validate_freeze_audit(packet_root: Path) -> dict[str, Any]:
         raise FreezeError("freeze disposition or threshold evidence differs")
     _validate_contact_sheets(packet_root, selected, contact_manifest, artifacts, frame_cache)
     logical = {field: packet[field] for field in logical_fields}
-    if _hash_json(logical) != packet["complete_packet_root_sha256"]:
+    if _domain_hash("complete_packet", logical) != packet["complete_packet_root_sha256"]:
         raise FreezeError("freeze complete packet root differs")
     _claim_run_metadata(artifacts)
     artifacts.assert_exact_tree()

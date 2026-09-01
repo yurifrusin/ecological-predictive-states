@@ -1,6 +1,7 @@
 """Prospective, non-rendering tests for Appearance Benchmark Input Freeze v0."""
 
 import json
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -20,14 +21,19 @@ from epsbench.appearance import (
 from epsbench.config import load_config
 from epsbench.freeze import (
     EXCLUDED_PROFILE_IDS,
+    LOGICAL_DOMAINS,
     SELECTED_PROFILE_IDS,
     BenchmarkDefinition,
     FreezeDefinitionLock,
+    _atomic_publish_receipt,
+    _domain_hash,
     _legacy_control_membership_domain,
     _readiness_summary,
     _selected_membership_domain,
+    _source_identity_from_dataset,
     benchmark_definition_hash,
     create_definition_lock_payload,
+    evaluation_seed_registry_hash,
     load_benchmark_definition,
     load_final_evaluation_seeds,
     validate_definition_lock,
@@ -159,10 +165,10 @@ def test_final_evaluation_seed_registry_is_exact_unique_disjoint_and_locked() ->
     assert seeds.indices == tuple(range(16))
     assert len(set(seeds.candidate_episode_seeds)) == 16
     assert seed_registry_hash(seeds) == (
-        "eb3ca6083af203b325a16612590f0f2e56efdf4b99f1019148f01bd2caab94b2"
+        "6747d234aa5e843e1a09013b978c0e8ce55b4c71c0f3bb820cee46176b618652"
     )
     lock = validate_definition_lock(DEFINITION, SEEDS, LOCK, REVISION, SINGLE, CORRIDOR)
-    assert lock["evaluation_episode_seed_registry_sha256"] == seed_registry_hash(seeds)
+    assert lock["evaluation_episode_seed_registry_sha256"] == evaluation_seed_registry_hash(seeds)
 
 
 @pytest.mark.parametrize(
@@ -211,6 +217,123 @@ def test_definition_lock_and_membership_are_independently_recomputed() -> None:
     assert len(_selected_membership_domain(definition, seeds)) == 160
     assert len(_legacy_control_membership_domain(definition, seeds)) == 32
     assert benchmark_definition_hash(definition) == actual["benchmark_definition_sha256"]
+
+
+def test_replacement_lock_preserves_and_supersedes_exact_historical_lock() -> None:
+    lock = validate_definition_lock(DEFINITION, SEEDS, LOCK, REVISION, SINGLE, CORRIDOR)
+    assert lock["schema_version"] == "appearance_benchmark_freeze_definition_lock_v1"
+    assert lock["reviewed_implementation_head"] == ("8b34b78d5488af7103119697a286cfb8757cc125")
+    assert lock["superseded_definition_lock_commit"] == ("1a5929307dfcba1d726c650f5e1ce68771f66801")
+    assert lock["superseded_definition_lock_sha256"] == (
+        "a373a4742a6b5a3057b820b7d925c2e19fbddc0a83cc45384b8b81ea4e8b1464"
+    )
+    assert lock["supersession_finding_id"] == "EPS-ER17-0004"
+
+
+def test_every_corrected_logical_domain_is_unique_and_domain_separated() -> None:
+    assert len(LOGICAL_DOMAINS) == len(set(LOGICAL_DOMAINS.values()))
+    payload = {"same": "payload"}
+    roots = {_domain_hash(name, payload) for name in LOGICAL_DOMAINS}
+    assert len(roots) == len(LOGICAL_DOMAINS)
+
+
+def test_model_result_renderer_selection_dependency_is_normative_and_unsatisfied() -> None:
+    dependency = load_benchmark_definition(
+        DEFINITION
+    ).renderer_policy.model_result_renderer_selection_dependency
+    assert dependency.selection_required_before_comparative_model_result_access is True
+    assert dependency.primary_model_result_renderer is None
+    assert dependency.other_renderer_model_result_classification is None
+    assert dependency.permitted_other_renderer_classifications == (
+        "replication",
+        "robustness",
+        "sensitivity",
+        "unsupported",
+    )
+    assert dependency.selection_may_not_depend_on_observed_comparative_results is True
+    assert dependency.averaging_or_aggregation_may_not_depend_on_observed_results is True
+    assert dependency.aggregation_rule_must_be_preregistered_prospectively is True
+    assert dependency.comparative_model_result_access_authorised is False
+
+
+def test_source_pairing_identity_is_reconstructed_and_appearance_invariant(
+    appearance_datasets: tuple[Path, Path], benchmark_config: Any
+) -> None:
+    base, alternate = appearance_datasets
+    base_identity, _ = _source_identity_from_dataset(base, benchmark_config)
+    alternate_identity, _ = _source_identity_from_dataset(alternate, benchmark_config)
+    assert base_identity["schema_version"] == "appearance_benchmark_source_identity_v1"
+    assert (
+        base_identity["source_identity_root_sha256"]
+        == (alternate_identity["source_identity_root_sha256"])
+    )
+    assert base_identity["dataset_logical_sha256"] != alternate_identity["dataset_logical_sha256"]
+
+
+def test_renderer_selection_dependency_mutations_fail_closed() -> None:
+    payload = deepcopy(_definition_payload())
+    renderer = payload["renderer_policy"]
+    assert isinstance(renderer, dict)
+    dependency = renderer["model_result_renderer_selection_dependency"]
+    assert isinstance(dependency, dict)
+    dependency["selection_may_not_depend_on_observed_comparative_results"] = False
+    with pytest.raises(ValueError):
+        BenchmarkDefinition.model_validate_json(json.dumps(payload))
+
+
+def test_receipt_publication_is_atomic_exclusive_and_outside_packet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    packet = tmp_path / "packet"
+    packet.mkdir()
+    publication = tmp_path / "publication"
+    publication.mkdir()
+    payload = b'{"canonical":true}\n'
+
+    destination = publication / "receipt.json"
+    _atomic_publish_receipt(payload, destination, packet)
+    assert destination.read_bytes() == payload
+    assert destination.stat().st_nlink == 1
+
+    existing = publication / "existing.json"
+    existing.write_bytes(b"existing")
+    with pytest.raises(FileExistsError):
+        _atomic_publish_receipt(payload, existing, packet)
+    assert existing.read_bytes() == b"existing"
+
+    hardlink_source = publication / "hardlink-source.json"
+    hardlink_source.write_bytes(b"alias")
+    hardlink_target = publication / "hardlink-target.json"
+    os.link(hardlink_source, hardlink_target)
+    with pytest.raises(FileExistsError):
+        _atomic_publish_receipt(payload, hardlink_target, packet)
+    assert hardlink_target.read_bytes() == b"alias"
+
+    inside = packet / "receipt.json"
+    with pytest.raises(ValueError, match="inside its source packet"):
+        _atomic_publish_receipt(payload, inside, packet)
+    assert not inside.exists()
+
+    alias = tmp_path / "packet-alias"
+    try:
+        alias.symlink_to(packet, target_is_directory=True)
+    except OSError:
+        pass
+    else:
+        with pytest.raises(ValueError, match="non-alias directory"):
+            _atomic_publish_receipt(payload, alias / "receipt.json", packet)
+
+    racing = publication / "racing.json"
+    real_link = os.link
+
+    def concurrent_creator(source: Any, target: Any, *args: Any, **kwargs: Any) -> None:
+        Path(target).write_bytes(b"racing-winner")
+        real_link(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "link", concurrent_creator)
+    with pytest.raises(FileExistsError):
+        _atomic_publish_receipt(payload, racing, packet)
+    assert racing.read_bytes() == b"racing-winner"
 
 
 def test_all_cells_both_renderers_readiness_is_indivisible() -> None:

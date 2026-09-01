@@ -1,77 +1,54 @@
-# Gate 0B Appearance Benchmark Input Freeze v0 candidate
+# Gate 0B Appearance Benchmark Input Freeze v0 correction candidate
 
 ## Authority and status
 
-This work package starts from canonical base
-`08179fbdce909e9a0d6dbb2939c58f7ab5d0d8a7` under review profile `DUAL_REVIEW`,
-evidence class `PUBLIC_REPOSITORY_ONLY`, and closeout boundary
-`BENCHMARK_OR_PREREGISTRATION_FREEZE`. It creates an implementation candidate only. It does not
-freeze the benchmark, select a primary model-result renderer, freeze a model protocol, complete
-Gate 0B, authorise Gate 0C or Gate 0D, or establish a scientific result.
+This PR #17 correction wave is bounded to `EPS-SR17-0001` and `EPS-ER17-0001` through
+`EPS-ER17-0004`. Its review profile is `DUAL_REVIEW`, evidence class is
+`PUBLIC_REPOSITORY_ONLY`, and closeout boundary is `BENCHMARK_OR_PREREGISTRATION_FREEZE`.
+It starts from canonical base `08179fbdce909e9a0d6dbb2939c58f7ab5d0d8a7` and preserves the
+reviewed request-changes head `8b34b78d5488af7103119697a286cfb8757cc125` as historical evidence.
 
-Benchmark freeze requires exact-head `ENGINEERING_PASS`, exact-head `SCIENTIFIC_PASS`, `OWNER_PI`
-approval, and a separately authorised benchmark-or-preregistration-freeze closeout. No active
-`docs/reviews/pr-*` record belongs in this implementation pull request.
+This remains an implementation candidate. It does not freeze the benchmark, approve an exact
+head, authorise merge or closeout, complete Gate 0B, advance Gate 0C or Gate 0D, authorise model
+work, or establish a scientific result. A corrected head requires renewed independent engineering
+and scientific review naming the same exact SHA.
 
-## Protected canonical evidence
+## Lock supersession and preserved scientific content
 
-The unchanged Slice 5 apparatus reproduces 160 successful cells, 44 admitted cells, 116 rejected
-cells, and rejection of all ten original profiles. Its protected registry and seed roots are
-`f90feb3cf9d798ab61c3adbb8d2b276c5d2cb131b95c5a9187df151f9b801d60` and
-`6c6816ae1f6657a710631f08a435cca4c623e81efc71ac4e6330a44338313482`.
+The original prospective lock commit
+`1a5929307dfcba1d726c650f5e1ce68771f66801` and its lock root
+`a373a4742a6b5a3057b820b7d925c2e19fbddc0a83cc45384b8b81ea4e8b1464` remain immutable in
+history. They are superseded for the corrected candidate because `EPS-ER17-0004` requires unique,
+versioned domain envelopes. They are not amended or retrospectively represented as corrected.
 
-The unchanged Revision 1 evidence is WGL design `99/13`, WGL qualification `100/12`, OSMesa
-design `97/15`, and OSMesa qualification `100/12`. The protected Revision 1 registry,
-definition-lock, qualification-seed, and cross-renderer profile-admission roots are respectively:
+The replacement lock uses `appearance_benchmark_freeze_definition_lock_v1`, explicitly binds that
+supersession, and has root
+`28acd2c340b3ef1e2b8b2b7b31ca69356cd9baa35b94ff8a598e020099883435`. The commit that most
+recently changes the lock file is required by validation to have subject
+`feat: replace appearance benchmark freeze v0 lock domains`, to descend from the historical lock,
+and to contain the exact definition, seed registry, and replacement-lock snapshots. No corrected
+qualification may begin until that commit is pushed and its remote readback is verified.
 
-- `81da1bb9414e7c53e42bbf65b198aa61d8bb7ed3f81eb2bf5813a1edff245ac4`
-- `71d2ed7a9f45c55bf17ec518c08b5d0b827a7cf0ae2cc3c339dc09197c55f633`
-- `247db21c869703f5604e63678f0cf614f0b88040a05ce42c61629ddf712cefd5`
-- `8496521a261367e4fb1da340fc6a58b007eb9b2955fb8cafa44c2c8db0532d5b`
+The correction does not change the five selected profile identities or roles, the two excluded
+negative-evidence profiles, the sixteen episode roots or order, the two scene families, the primary
+or secondary pairing relationships, appearance thresholds, supported renderer environments,
+all-cells/both-renderers readiness rule, failure and root-retirement policy, or training/evaluation
+exclusions. The selected profiles remain:
 
-Existing profiles, matched controls, design and qualification roots, rendering parameters,
-admission thresholds, and retained negative evidence are unchanged.
+- `revision1_balanced_reference_v1` — `development_reference`
+- `revision1_colour_shift_v1` — `held_out_colour_ood`
+- `revision1_checker_low_v1` — `held_out_texture_presence_ood`
+- `revision1_checker_high_v1` — `held_out_high_frequency_checker_ood`
+- `revision1_combined_stress_v1` — `held_out_combined_appearance_ood`
 
-## Proposed profile roles
+`revision1_stripes_low_v1` and `revision1_illumination_shift_v1` remain excluded negative evidence.
+Every primary OOD comparison uses the balanced reference at the same scene and episode root.
+Checker-high versus checker-low remains the secondary frequency-only diagnostic.
 
-The sole development reference and sole appearance eligible for later training or development on
-separately authorised non-evaluation roots is:
+## Public evaluation roots and exclusions
 
-- `revision1_balanced_reference_v1` — `development_reference` —
-  `b2b64c03236ace288190fca68b702a6b09e6e156c0f43852dfa5db6ab24b9e52`
-
-The four public but evaluation-only Appearance-OOD profiles are:
-
-- `revision1_colour_shift_v1` — `held_out_colour_ood` —
-  `3788b17e388c9e1d5805d0d518137f2ea8538629484cca0d8c5ed3e12693e658`
-- `revision1_checker_low_v1` — `held_out_texture_presence_ood` —
-  `82f051903058f26a72ae68f9a6e0f0833c8c36505c1789353daf078487c35173`
-- `revision1_checker_high_v1` — `held_out_high_frequency_checker_ood` —
-  `2b04eeb523d597778e89535cc0901209f0d2aaf1ef3c026e392e9a6b11595b71`
-- `revision1_combined_stress_v1` — `held_out_combined_appearance_ood` —
-  `e4cd4c7e268dd2cd354b5093e6895105843f1ea079d7c845a48b18aebde2606e`
-
-Every primary OOD comparison uses the balanced reference at the same scene and evaluation episode
-root. This benchmark relationship remains distinct from the candidate-admission matched control.
-Checker-high retains checker-low as a secondary frequency-only diagnostic; it is not
-frequency-only relative to the solid reference. Combined stress is a compound colour,
-checker-frequency, and illumination shift, not an illumination-only condition.
-
-The following rejected Revision 1 candidates remain excluded negative evidence:
-
-- `revision1_stripes_low_v1` —
-  `c2ed57abf5a4b411c5d93b08e5ce78cf188a623ec77b6bb5d3ade187641c2dcd`
-- `revision1_illumination_shift_v1` —
-  `6d0e18dffc77f2c48590ba42c7129b49c32601aaa150e4915fdc07c70fa76caa`
-
-This leaves two explicit limitations: there is no admitted stripe-family-only condition and no
-admitted illumination-only condition. Their rejection is not evidence against the EPS hypothesis.
-
-## Public evaluation episode roots
-
-The registry uses root `314159`, `derive_seed_v1`, namespace
-`gate0b-appearance-benchmark-v0-final-evaluation`, and indices 0 through 15. In canonical order,
-the roots are:
+The registry retains root seed `314159`, `derive_seed_v1`, namespace
+`gate0b-appearance-benchmark-v0-final-evaluation`, indices 0 through 15, and these canonical roots:
 
 1. `988775886542458411`
 2. `6042662804173454446`
@@ -90,111 +67,85 @@ the roots are:
 15. `7775037187548969617`
 16. `2012889273669341920`
 
-They are unsigned, unique, deterministically recomputed, and disjoint from both protected
-eight-root sets. Registry root:
-`eb3ca6083af203b325a16612590f0f2e56efdf4b99f1019148f01bd2caab94b2`.
+The versioned registry root is
+`6747d234aa5e843e1a09013b978c0e8ce55b4c71c0f3bb820cee46176b618652`.
+Public does not mean development-eligible. These roots remain prohibited for training, validation,
+tuning, preprocessing or architecture selection, hyperparameter or checkpoint selection, and
+difficult-root replacement. Held-out OOD appearances remain prohibited for training or tuning.
 
-Public does not mean development-eligible. These roots may not be used for training, validation,
-tuning, preprocessing selection, architecture selection, hyperparameter selection, checkpoint
-selection, or difficult-root replacement. The OOD profiles may not be used for model training or
-tuning. Model-randomness, training, and validation roots remain null and deferred.
+## Renderer-selection dependency
 
-## Definition lock and qualification rule
+Before any comparative model-result access, a future authorised protocol must prospectively:
 
-The prospective definition identities are:
+- select exactly one supported renderer as the primary model-result renderer;
+- classify the other renderer as `replication`, `robustness`, `sensitivity`, or `unsupported` for
+  model-result purposes;
+- make both choices without access to observed comparative results;
+- prohibit renderer averaging or aggregation rules chosen from observed results; and
+- preregister any renderer aggregation rule before comparative-result access.
 
-- benchmark definition: `a655a0e12cfe771a735145fb9d104119ce4160ba0039197f57bcb17c9dfa31fa`
-- profile-role root: `0ebd33fd0a84b4bc980073709cc491622a852455aabf80685b12c0917f6abc4f`
-- selected-profile-set root: `16a77b2617c44b9106f69afb15d8cc73d6611310548eae927ef67cff02d17460`
-- excluded-candidate-set root: `cf1b36c408f766d72ba15acba66e83573803187a360d239fcbccd3d74d74e678`
-- scene-family-membership root: `b1d22557512b5a764c0ed601d01f2e23d812926257cf4b353817e9ca19ab4922`
-- selected-matrix-membership root: `1e114d28102a6ff284498bd53d537120d328342a06a0edd5662e863b0928f28d`
-- legacy-control-membership root: `88887c69f9a9abaeb70b203a962dde27c94fad41f5bcea57c5f5ea293abc47b6`
-- training/evaluation-policy root: `2a9efc513dab27bca20737e7538ba716b3ddf23e245b5be5c24f05b3ed369898`
-- freeze definition lock: `a373a4742a6b5a3057b820b7d925c2e19fbddc0a83cc45384b8b81ea4e8b1464`
+The current dependency is `required_not_yet_satisfied`: both choices and any aggregation rule are
+null, comparative model-result access is false, and no model protocol is frozen. Apparatus
+qualification on both renderers does not satisfy this model-result dependency.
 
-The unique additive lock commit is
-`1a5929307dfcba1d726c650f5e1ce68771f66801`. It was validated and pushed before any selected
-profile was rendered on any new root. Qualification must not change the role map, roots, scenes,
-pairing, thresholds, renderer posture, policies, membership, or readiness rule.
+## Versioned logical domains
 
-Each renderer must contain exactly 160 selected cells (five profiles × two scenes × sixteen
-roots), 32 unique legacy-base controls, and 192 total cells. Each selected profile must pass all 32
-of its cells in both Windows/WGL and Ubuntu/OSMesa. Portable apparatus roots must match and every
-cross-renderer profile readiness Boolean must be true. Renderer-local RGB, complete ecological
-labels, metrics, outcomes, contact sheets, and packet roots are retained but not equality-asserted.
+Every corrected freeze logical root hashes an explicit envelope containing
+`epsbench_logical_domain_envelope_v1`, one unique immutable domain name, and the canonical payload.
+The new definition identities include:
 
-Any selected-cell failure on either locked renderer makes the candidate `not_ready` and retires
-the entire sixteen-root registry from final-evaluation use for a revised profile set. A successful
-qualification yields only `ready_for_dual_review` and
-`eligible_for_owner_freeze_if_approved`; `benchmark_frozen` remains false.
+- benchmark definition: `d4c7d5026344f54dd5f1c5ef1ef60ffa8198595e7d643a5b986bf45a3cc14d07`
+- profile roles: `5e62ecc0f985e99ea97180b35fc5bd9cf676bbb764c14c1f2bba83d72c139284`
+- selected profile set: `b78edf9b099415a09243805de8d4f57c5a6e004a5c8b53a9d770df1645d7f174`
+- excluded candidate set: `f7ba30e3c2ff53680cfef695dcaf9157c6d74c4b0f034900c8dca9860d0c498c`
+- selected matrix membership: `b8f58f16eebed8c4454edfc7534a5d6c783487a3ef6acbb384cf6f1829f85e50`
+- legacy-control membership: `fed7e0bd05f09877b5436e56a2cd0ddb8f72c2d0fdf6f80a81b72372f8ab93b1`
+- training/evaluation policy: `16a4041fb22ee3fc49ee661bdebc121c3435f8d4d91fe0c37d62e22469ee1e27`
+- renderer-selection dependency: `f9a36861cfd99a2993c926d34bbdd62526ca0bec2ba95d5129a5331d5976e4bd`
+- admission thresholds: `b31238d377a04b7b360dae11d05d4082cb8b9ca9d4a3db974464663cd45310ed`
 
-## Frozen scope and deferred protocol
+Prior v0 roots remain historical identities only and are not compared with corrected v1 roots.
 
-If later approved and specially closed out, this checkpoint freezes appearance roles and exact
-profile identities, evaluation roots, scenes, pairing, appearance-admission criteria,
-training/evaluation exclusions, supported apparatus environments, and portable/local identity
-posture. It is not a complete experimental preregistration.
+## Independent source evidence and pairing
 
-Gate 0D/0E must separately specify the primary model-result renderer, models, model seeds, training
-and validation roots, data volume, optimiser, schedule, parameter and compute budgets, checkpoint
-selection, statistical and bootstrap implementations, stopping rules, and empirical gate logic.
+Every successful qualification cell retains its complete validated one-episode generator dataset,
+an exact file manifest, and typed source identity record. Packet validation validates the retained
+dataset and independently reconstructs the sampled/compiled geometry, camera trajectory, executed
+action, raw-to-opaque surface remapping, scene content, analytic transport, oriented boundary
+ownership, visibility events, and public occlusion relation. Each of those identities has a unique
+v1 domain. Pairing checks and portable apparatus roots consume those independently reconstructed
+values, not the top-level cell claims.
 
-## Qualification outcome
+The retained source datasets are privileged apparatus evidence. They are not ecological-loader or
+learner inputs, and their raw simulator identifiers, metric geometry, camera transforms, and
+generation records remain subject to the existing typed modality boundary.
 
-After the immutable lock commit was pushed, Windows/WGL generated and independently validated the
-complete 192-cell packet. All 160 selected cells were admitted; each of the five selected profiles
-passed 32/32 cells. All 32 legacy controls were generated (16 admitted and 16 rejected under the
-unchanged candidate-admission criteria). The complete WGL packet root is
-`b2d593f3aea5b68fefff4130a1f466e9d24a320c99d344ff5fc634e5b3396a69`; its committed receipt root
-is `003c7e28318f67febb754a91dfa814c1f7e6530ddd08035e4814d6757974ae0a`.
+## Receipt and publication contract
 
-The WGL portable apparatus roots are:
+`appearance_benchmark_renderer_qualification_receipt_v1` is strict, typed, and fail-closed. It
+binds the exact renderer environment and fingerprint; clean source revision and Git tree;
+replacement-lock commit and root; benchmark-definition and seed-registry roots; complete packet;
+all 160 selected and 32 control outcome rows; profile identities, roles, counts, and readiness;
+portable and renderer-local roots; versioned threshold margins; and a public packet-tree evidence
+receipt excluding volatile `run.json` metadata.
 
-- procedural assets: `e3bf5fb73d80ee537db8935e042c0ba7cae837f3f3955095053f69decf63602d`
-- appearance assignment: `feaeb12c0c811c8ee9c60efd6c747b6d42f1490504b9a6c83bff22d33029d88f`
-- analytic identity: `4cb7076a54bbaaa04a4045f35edb64b3d39440bda7c06fc8800ac575379f32a5`
-- within-renderer invariance outcomes:
-  `d6fe9e63549128877ec1d73997c0b4e0ae0c27cf5c19460f87856f6acab07617`
+Receipt creation first validates the complete packet, then validates the receipt against that
+packet. Publication is forbidden inside the packet, through a symlink, junction, reparse point,
+hard-link, or other alias, and over any existing or racing target. A complete staged file is
+published with an exclusive hard-link operation on the same filesystem, which is atomic and
+no-replace on Windows and Linux. The published uniquely owned regular file is reopened and
+validated again against the source packet.
 
-The WGL renderer-local selected, control, ecological-label, audit, and contact-sheet roots are,
-respectively:
+## Qualification rule and current state
 
-- `914f30d9b5304b1bd405b3c0fa699998fe53a181b6984db4758990a05044200a`
-- `ea400adfd2176ae3d1b04be02782d437976c6b2f4abcebfeea6b2627ec08ab38`
-- `aa2880b1db2d1c8aa2c8ce60e70d0987a4d3d60623371905251016b31a80d453`
-- `8770115c3ea36b8d4a5e6671f2a74cea78da45fcdbaebe01ea6fbf41e2de41db`
-- `3da26b945679c86a5c99a89a811f197aad5be103f0dc41bdeb3a587cb7f0e8d8`
+Each renderer must produce exactly 160 selected cells, 32 unique retained controls, and 192 total
+cells. Every selected profile must pass all 32 cells in Windows/WGL and Ubuntu/OSMesa. Portable
+apparatus roots must match, while renderer-local outcomes and raster evidence remain reported but
+not equality-asserted. Any selected-cell or locked-renderer failure retires the complete root set
+for a revised profile set.
 
-No WGL threshold failure or near-threshold case was observed. Minimum passing margins were
-`0.105866029445772` for changed controlled-pixel fraction, `0.04111574074074074` for normalized
-controlled RGB MAD, `0.07243529411764704`/`0.3672700277464014` for lower/upper visible-surface
-mean luminance, and `0.012713812139223166` for textured-surface luminance standard deviation.
-
-Ubuntu/OSMesa exact-head CI also generated and independently validated the complete 192-cell
-packet. All 160 selected cells were admitted; each selected profile passed 32/32 cells. All 32
-legacy controls were generated (16 admitted and 16 rejected). At qualification source head
-`8106c9683bcf921dc2055267da49a411a88b0a8c`, its source-bound complete packet root is
-`868cdd14cf216d5c44cd398b6e05d3269f1be5b9d1b6b1d76517791ac83cc676`.
-
-The four portable apparatus roots matched the WGL receipt exactly. The OSMesa renderer-local
-selected, control, ecological-label, audit, and contact-sheet roots are, respectively:
-
-- `914f30d9b5304b1bd405b3c0fa699998fe53a181b6984db4758990a05044200a`
-- `ea400adfd2176ae3d1b04be02782d437976c6b2f4abcebfeea6b2627ec08ab38`
-- `cd892af14b762e8c1eb6ac9aec0ac8953f09319ec0537d50eeb03bed0b064761`
-- `30265e3d89fec4bea62ef951fd618c8dd2797917b8e6750e2f9be8559bd44c0d`
-- `6ae74dee8a9a594aa6369a27c804ffc117feae1bb9e416cad2d58ff4e087197f`
-
-These roots are reported locally and were not equality-asserted against WGL. No OSMesa threshold
-failure or near-threshold case was observed. Minimum passing margins were `0.10594311261851536`
-for changed controlled-pixel fraction, `0.04123835784313725` for normalized controlled RGB MAD,
-`0.07274100815547455`/`0.36644622087556156` for lower/upper visible-surface mean luminance, and
-`0.009543837563144336` for textured-surface luminance standard deviation.
-
-Every selected profile is apparatus-qualified in both renderers. The portable cross-renderer
-profile-readiness root is
-`da9aad546bf6223d1802cf57990779f952d410340e7bd37d1b07c83c081e65d5`. Therefore the factual
-candidate status is `ready_for_dual_review` and its seed-set disposition is
-`eligible_for_owner_freeze_if_approved`. This is not review, approval, closeout, or freeze:
-`benchmark_frozen` remains false and no scientific result exists.
+At this replacement-lock stage, corrected qualification has not started, no corrected receipt is
+present, candidate status is `unqualified`, and benchmark freeze remains false. The CI qualification
+step is gated on the corrected WGL receipt so pushing this replacement lock cannot begin an
+OSMesa qualification before remote lock readback. Later qualification evidence may update this
+section without changing the locked scientific content.

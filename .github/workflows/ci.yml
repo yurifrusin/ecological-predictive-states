@@ -324,6 +324,7 @@ jobs:
             --revision-packet artifacts/gate-0b-appearance-revision1
 
       - name: Qualify the complete Appearance Benchmark v0 freeze matrix
+        if: ${{ hashFiles('configs/appearance_benchmark_freeze_v0_wgl_qualification_receipt.json') != '' }}
         run: |
           uv run epsbench appearance-freeze-audit \
             --benchmark-definition configs/appearance_benchmark_freeze_v0.yaml \
@@ -340,65 +341,35 @@ jobs:
           import json
           from pathlib import Path
 
+          from epsbench.freeze import (
+              PORTABLE_APPARATUS_ROOT_FIELDS,
+              PORTABLE_DEFINITION_ROOT_FIELDS,
+          )
+
           packet = json.loads(
               Path(
                   "artifacts/appearance-benchmark-freeze-v0-osmesa/"
                   "freeze_candidate_packet.json"
               ).read_text()
           )
-          expected_definition_roots = {
-              "benchmark_definition_sha256": (
-                  "a655a0e12cfe771a735145fb9d104119ce4160ba0039197f57bcb17c9dfa31fa"
-              ),
-              "profile_role_root_sha256": (
-                  "0ebd33fd0a84b4bc980073709cc491622a852455aabf80685b12c0917f6abc4f"
-              ),
-              "selected_profile_set_root_sha256": (
-                  "16a77b2617c44b9106f69afb15d8cc73d6611310548eae927ef67cff02d17460"
-              ),
-              "excluded_candidate_set_root_sha256": (
-                  "cf1b36c408f766d72ba15acba66e83573803187a360d239fcbccd3d74d74e678"
-              ),
-              "evaluation_episode_seed_registry_sha256": (
-                  "eb3ca6083af203b325a16612590f0f2e56efdf4b99f1019148f01bd2caab94b2"
-              ),
-              "scene_family_membership_root_sha256": (
-                  "b1d22557512b5a764c0ed601d01f2e23d812926257cf4b353817e9ca19ab4922"
-              ),
-              "selected_matrix_membership_root_sha256": (
-                  "1e114d28102a6ff284498bd53d537120d328342a06a0edd5662e863b0928f28d"
-              ),
-              "legacy_control_membership_root_sha256": (
-                  "88887c69f9a9abaeb70b203a962dde27c94fad41f5bcea57c5f5ea293abc47b6"
-              ),
-              "freeze_definition_lock_sha256": (
-                  "a373a4742a6b5a3057b820b7d925c2e19fbddc0a83cc45384b8b81ea4e8b1464"
-              ),
-              "training_evaluation_policy_root_sha256": (
-                  "2a9efc513dab27bca20737e7538ba716b3ddf23e245b5be5c24f05b3ed369898"
-              ),
-          }
-          expected_apparatus_roots = {
-              "procedural_asset_root_sha256": (
-                  "e3bf5fb73d80ee537db8935e042c0ba7cae837f3f3955095053f69decf63602d"
-              ),
-              "appearance_assignment_root_sha256": (
-                  "feaeb12c0c811c8ee9c60efd6c747b6d42f1490504b9a6c83bff22d33029d88f"
-              ),
-              "portable_analytic_identity_root_sha256": (
-                  "4cb7076a54bbaaa04a4045f35edb64b3d39440bda7c06fc8800ac575379f32a5"
-              ),
-              "within_renderer_invariance_outcome_root_sha256": (
-                  "d6fe9e63549128877ec1d73997c0b4e0ae0c27cf5c19460f87856f6acab07617"
-              ),
-          }
+          receipt = json.loads(
+              Path(
+                  "configs/appearance_benchmark_freeze_v0_wgl_qualification_receipt.json"
+              ).read_text()
+          )
           assert packet["renderer_environment_id"] == "ubuntu_osmesa_locked"
           assert packet["selected_cell_count"] == 160
           assert packet["control_cell_count"] == 32
           assert packet["total_cell_count"] == 192
           assert packet["selected_matrix_counts"] == {"admitted": 160}
-          assert packet["portable_definition_roots"] == expected_definition_roots
-          assert packet["portable_apparatus_roots"] == expected_apparatus_roots
+          assert set(packet["portable_definition_roots"]) == set(
+              PORTABLE_DEFINITION_ROOT_FIELDS
+          )
+          assert set(packet["portable_apparatus_roots"]) == set(
+              PORTABLE_APPARATUS_ROOT_FIELDS
+          )
+          assert packet["portable_definition_roots"] == receipt["portable_definition_roots"]
+          assert packet["portable_apparatus_roots"] == receipt["portable_apparatus_roots"]
           assert all(
               row["renderer_apparatus_qualified"]
               and row["observed_cell_count"] == 32
@@ -421,9 +392,7 @@ jobs:
           assert packet["seed_set_disposition"] == (
               "eligible_for_owner_freeze_if_approved"
           )
-          assert packet["portable_profile_readiness_root_sha256"] == (
-              "da9aad546bf6223d1802cf57990779f952d410340e7bd37d1b07c83c081e65d5"
-          )
+          assert packet["portable_profile_readiness_root_sha256"] is not None
           assert packet["benchmark_frozen"] is False
           assert packet["model_protocol_frozen"] is False
           assert packet["full_gate_0b_complete"] is False

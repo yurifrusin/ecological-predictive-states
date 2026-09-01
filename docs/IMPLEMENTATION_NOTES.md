@@ -19,17 +19,20 @@ recomputed roots, its three child-root receipts, and its lock bindings are valid
 immutable definition-lock commit.
 
 Appearance Benchmark Input Freeze v0 proposes the five cross-renderer admitted Revision 1
-profiles as one development reference and four public evaluation-only Appearance-OOD roles. It
-prospectively locks sixteen new final-evaluation episode roots, disjoint from apparatus-design and
-candidate-qualification roots, in pushed additive commit
-`1a5929307dfcba1d726c650f5e1ce68771f66801`. No selected profile was rendered on those roots before
-the lock was pushed. The complete post-lock Windows/WGL qualification admitted all 160 selected
-cells, with every profile passing 32/32; all 32 legacy controls were retained. Ubuntu/OSMesa
-exact-head CI also admitted all 160 selected cells, with every profile passing 32/32 and all 32
-controls retained. Portable apparatus roots matched, and the cross-renderer readiness root is
-`da9aad546bf6223d1802cf57990779f952d410340e7bd37d1b07c83c081e65d5`. Neither the prospective
-lock nor successful apparatus qualification freezes the benchmark: dual independent review, owner
-approval, and a separately authorised benchmark-freeze closeout remain mandatory.
+profiles as one development reference and four public evaluation-only Appearance-OOD roles, plus
+sixteen final-evaluation episode roots disjoint from apparatus-design and candidate-qualification
+roots. PR #17 head `8b34b78d5488af7103119697a286cfb8757cc125` was not accepted: it received scientific and
+engineering requests for changes. Its original prospective lock
+`1a5929307dfcba1d726c650f5e1ce68771f66801` remains immutable historical evidence.
+
+The owner-authorised correction creates a distinct v1 replacement lock with unique domain
+envelopes, retains complete typed source datasets for independent reconstruction of every pairing
+identity, binds strict renderer receipts to clean source revision/tree and complete packet
+evidence, publishes receipts atomically without replacement or aliases, and requires prospective
+primary/secondary renderer treatment before comparative model-result access. Corrected
+qualification remains `unqualified` until the replacement lock is pushed and remotely read back.
+Neither a replacement lock nor later apparatus qualification freezes the benchmark: renewed dual
+review, exact-head owner approval, and separately authorised closeout remain mandatory.
 
 The path is intentionally short:
 

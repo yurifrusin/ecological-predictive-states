@@ -158,3 +158,25 @@ The candidate is therefore `ready_for_dual_review`, with the seed registry
 Successful apparatus qualification creates only a freeze candidate. A benchmark freeze still
 requires exact-head engineering and scientific passes, owner approval, and separately authorised
 benchmark-freeze closeout. No model protocol, gate, or scientific result follows.
+
+## 2026-09-01 — PR #17 bounded correction and replacement lock
+
+The reviewed head `8b34b78d5488af7103119697a286cfb8757cc125` received immutable
+`SCIENTIFIC_REQUEST_CHANGES` and `ENGINEERING_REQUEST_CHANGES`. The owner accepted
+`EPS-SR17-0001` and `EPS-ER17-0001` through `EPS-ER17-0004` for one bounded correction wave and
+specifically authorised a prospective replacement lock because the prior logical-root domains were
+not unique and versioned.
+
+The earlier lock commit `1a5929307dfcba1d726c650f5e1ce68771f66801` and root
+`a373a4742a6b5a3057b820b7d925c2e19fbddc0a83cc45384b8b81ea4e8b1464` remain immutable
+historical evidence. The corrected v1 replacement-lock root is
+`28acd2c340b3ef1e2b8b2b7b31ca69356cd9baa35b94ff8a598e020099883435`. It retains the exact
+profiles, roles, episode roots, scenes, comparisons, thresholds, renderers, exclusions, and failure
+rules while adding the prospective model-result renderer-selection dependency, unique domain
+envelopes, retained independently reconstructible cell-source evidence, and strict source-bound
+renderer receipts with exclusive no-replace publication.
+
+Corrected qualification remains prohibited until the replacement-lock commit has been pushed and
+read back remotely. The obsolete v0 WGL receipt is removed from the corrected candidate; its
+historical commit remains in Git. No benchmark freeze, model-result access, model work, gate
+advancement, approval, merge, closeout, or scientific result follows from this correction stage.

@@ -653,6 +653,34 @@ def _copy_evidence(
     return evidence
 
 
+def _retain_source_dataset(
+    dataset: Path,
+    manifest: DatasetManifest,
+    packet_root: Path,
+    cell_id: str,
+) -> dict[str, Any]:
+    """Retain the validated generator output needed for independent identity reconstruction."""
+
+    destination = packet_root / "source_evidence" / cell_id
+    shutil.copytree(dataset, destination)
+    files = sorted(path for path in destination.rglob("*") if path.is_file())
+    return {
+        "schema_version": "appearance_benchmark_source_dataset_evidence_v1",
+        "dataset_path": destination.relative_to(packet_root).as_posix(),
+        "manifest_file_sha256": sha256_file(destination / "manifest.json"),
+        "dataset_logical_sha256": manifest.dataset_logical_sha256,
+        "file_count": len(files),
+        "file_manifest": [
+            {
+                "path": path.relative_to(destination).as_posix(),
+                "file_sha256": sha256_file(path),
+                "byte_count": path.stat().st_size,
+            }
+            for path in files
+        ],
+    }
+
+
 def _evidence_record(cell: dict[str, Any], frame: str, role: str) -> dict[str, Any]:
     try:
         record = cell["evidence"][frame][role]
@@ -1048,6 +1076,7 @@ def _dataset_cell(
     seeds: SeedRegistryType,
     *,
     cell_id_prefix: str | None = None,
+    retain_source_evidence: bool = False,
 ) -> dict[str, Any]:
     scene = config.scene_family.value
     base_cell_id = _cell_id(scene, profile.profile_id, seed_index)
@@ -1144,6 +1173,11 @@ def _dataset_cell(
         source_texture_diagnostics = _source_texture_diagnostics(
             profile, scene, instrumentation.appearance
         )
+        source_evidence = (
+            _retain_source_dataset(dataset, manifest, packet_root, cell_id)
+            if retain_source_evidence
+            else None
+        )
         cell.update(
             {
                 "generation_status": "success",
@@ -1181,6 +1215,8 @@ def _dataset_cell(
                 "evidence": evidence,
             }
         )
+        if source_evidence is not None:
+            cell["source_evidence"] = source_evidence
     except Exception as error:
         cell["failure_type"] = type(error).__name__
         cell["failure_message"] = str(error)

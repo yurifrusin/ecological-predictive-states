@@ -1,4 +1,4 @@
-schema_version: appearance_benchmark_input_definition_v0
+schema_version: appearance_benchmark_input_definition_v1
 canonical_base_sha: 08179fbdce909e9a0d6dbb2939c58f7ab5d0d8a7
 review_profile: DUAL_REVIEW
 evidence_class: PUBLIC_REPOSITORY_ONLY
@@ -159,8 +159,22 @@ renderer_policy:
   renderer_local_roots_are_reported_not_compared: true
   renderer_specific_profiles_or_thresholds_prohibited: true
   portable_identity_backend_dispatch_prohibited: true
-  primary_model_result_renderer: null
-  primary_model_result_renderer_posture: deferred_to_gate_0d_0e
+  model_result_renderer_selection_dependency:
+    schema_version: model_result_renderer_selection_dependency_v1
+    selection_required_before_comparative_model_result_access: true
+    primary_model_result_renderer: null
+    other_renderer_model_result_classification: null
+    permitted_other_renderer_classifications:
+      - replication
+      - robustness
+      - sensitivity
+      - unsupported
+    selection_may_not_depend_on_observed_comparative_results: true
+    averaging_or_aggregation_may_not_depend_on_observed_results: true
+    aggregation_rule_must_be_preregistered_prospectively: true
+    aggregation_rule: null
+    comparative_model_result_access_authorised: false
+    dependency_status: required_not_yet_satisfied
 failure_policy:
   selected_profile_set_is_indivisible: true
   any_selected_cell_failure_makes_candidate_not_ready: true
@@ -180,8 +194,11 @@ freeze_scope:
     - training_evaluation_exclusion_policy
     - supported_apparatus_renderer_environments
     - portable_and_renderer_local_identity_posture
+    - model_result_renderer_selection_dependency
   deferred_gate_0d_0e_fields:
-    - normative_primary_model_result_renderer
+    - primary_model_result_renderer_choice
+    - other_renderer_model_result_classification
+    - renderer_aggregation_rule
     - model_families_and_implementations
     - model_random_seeds
     - training_episode_roots

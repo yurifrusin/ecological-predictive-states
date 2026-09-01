@@ -35,7 +35,7 @@ APPEARANCE_REVISION1_REGISTRY_VERSION = "appearance_candidate_registry_v2"
 EVALUATION_SEED_REGISTRY_VERSION = "evaluation_seed_candidate_registry_v0"
 QUALIFICATION_SEED_REGISTRY_VERSION = "appearance_revision1_qualification_seed_registry_v0"
 FINAL_EVALUATION_SEED_REGISTRY_VERSION = (
-    "appearance_benchmark_v0_evaluation_episode_seed_registry_v0"
+    "appearance_benchmark_v0_evaluation_episode_seed_registry_v1"
 )
 APPEARANCE_GENERATOR_VERSION = "repository_procedural_texture_v1"
 APPEARANCE_ASSIGNMENT_VERSION = "balanced_cyclic_permutation_v1"
@@ -364,7 +364,7 @@ class QualificationSeedRegistry(StrictAppearanceModel):
 class FinalEvaluationSeedRegistry(StrictAppearanceModel):
     """Prospectively locked public episode roots for Appearance Benchmark v0."""
 
-    registry_version: Literal["appearance_benchmark_v0_evaluation_episode_seed_registry_v0"]
+    registry_version: Literal["appearance_benchmark_v0_evaluation_episode_seed_registry_v1"]
     root_seed: Literal[314159]
     derivation_rule: Literal["derive_seed_v1"]
     namespace: Literal["gate0b-appearance-benchmark-v0-final-evaluation"]
@@ -443,7 +443,7 @@ class AppearanceInstanceRecord(StrictAppearanceModel):
     evaluation_seed_registry_version: Literal[
         "evaluation_seed_candidate_registry_v0",
         "appearance_revision1_qualification_seed_registry_v0",
-        "appearance_benchmark_v0_evaluation_episode_seed_registry_v0",
+        "appearance_benchmark_v0_evaluation_episode_seed_registry_v1",
     ]
     evaluation_seed_registry_sha256: Sha256
     assignment_schedule_source: Literal[
@@ -607,6 +607,16 @@ def appearance_profile_hash(profile: AppearanceProfile) -> str:
 
 
 def seed_registry_hash(registry: SeedRegistryType) -> str:
+    if isinstance(registry, FinalEvaluationSeedRegistry):
+        return sha256_bytes(
+            canonical_json_bytes(
+                {
+                    "schema_version": "epsbench_logical_domain_envelope_v1",
+                    "domain": "epsbench.appearance_benchmark.v1.evaluation_seed_registry",
+                    "payload": registry.model_dump(mode="json"),
+                }
+            )
+        )
     return sha256_bytes(canonical_json_bytes(registry))
 
 

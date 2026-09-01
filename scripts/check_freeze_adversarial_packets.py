@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from epsbench.freeze import validate_freeze_audit
+from epsbench.freeze import SOURCE_IDENTITY_FIELDS, _domain_hash, validate_freeze_audit
 from epsbench.utils.canonical import canonical_json_bytes, sha256_bytes
 
 
@@ -51,7 +51,7 @@ def _hardlink(path: Path, external: Path) -> Iterator[None]:
 def _rehash_packet(packet: dict[str, Any]) -> None:
     logical = dict(packet)
     logical.pop("complete_packet_root_sha256")
-    packet["complete_packet_root_sha256"] = sha256_bytes(canonical_json_bytes(logical))
+    packet["complete_packet_root_sha256"] = _domain_hash("complete_packet", logical)
 
 
 def _replace_report(
@@ -110,6 +110,21 @@ def main() -> None:
     matrix_bytes, packet_bytes = _replace_report(packet, "selected_profile_matrix.json", matrix)
     with _replace(matrix_path, matrix_bytes), _replace(packet_path, packet_bytes):
         _expect_rejected("fully rehashed pair corruption", lambda: validate_freeze_audit(root))
+
+    matrix = json.loads(json.dumps(original_matrix))
+    matrix["cells"][0]["source_identity"]["sampled_geometry_identity_sha256"] = "0" * 64
+    identity_roots = {
+        field: matrix["cells"][0]["source_identity"][field] for field in SOURCE_IDENTITY_FIELDS
+    }
+    matrix["cells"][0]["source_identity"]["source_identity_root_sha256"] = _domain_hash(
+        "source_identity_root", identity_roots
+    )
+    matrix_bytes, packet_bytes = _replace_report(packet, "selected_profile_matrix.json", matrix)
+    with _replace(matrix_path, matrix_bytes), _replace(packet_path, packet_bytes):
+        _expect_rejected(
+            "fully rehashed mutually consistent source-identity claim",
+            lambda: validate_freeze_audit(root),
+        )
 
     matrix = json.loads(json.dumps(original_matrix))
     matrix["cells"][0]["evidence"]["before"]["depth"]["path"] = "../escaped-depth.npy"

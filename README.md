@@ -23,13 +23,16 @@ profile has been assigned or frozen into a final development/OOD role, and no fi
 has been frozen. The protocol and locked definitions are documented in
 [the Revision 1 contract](docs/GATE_0B_APPEARANCE_CANDIDATE_REVISION_1.md).
 
-The Appearance Benchmark Input Freeze v0 work package prospectively locks a candidate role map and
-sixteen public evaluation-only episode roots in pushed commit
-`1a5929307dfcba1d726c650f5e1ce68771f66801`. Only after that lock was pushed, the complete
-Windows/WGL and exact-head Ubuntu/OSMesa qualification each admitted all 160 selected cells, with
-every selected profile passing 32/32 cells in each renderer. Portable apparatus roots matched and
-the candidate is `ready_for_dual_review`. This is an implementation candidate, not a benchmark
-freeze. Its scope, exact identities, policy, and qualification evidence are documented in
+The Appearance Benchmark Input Freeze v0 work package is under one owner-authorised PR #17
+correction wave after exact reviewed head `8b34b78d5488af7103119697a286cfb8757cc125` received
+scientific and engineering requests for changes. The original pushed lock commit
+`1a5929307dfcba1d726c650f5e1ce68771f66801` remains immutable historical evidence. A distinct v1
+replacement lock preserves the candidate role map, sixteen public evaluation-only roots, scenes,
+thresholds, comparisons, and exclusions while adding unique logical domains, independently
+reconstructible source evidence, strict source-bound receipts, and a prospective model-result
+renderer-selection dependency. Corrected qualification is `unqualified` until the replacement
+lock is pushed and remotely read back. This remains an implementation candidate, not a benchmark
+freeze. Its scope, identities, policies, validation contract, and qualification state are documented in
 [the freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHMARK_FREEZE_V0.md).
 
 **No scientific result exists yet.** The proposed appearance roles and final-evaluation roots are

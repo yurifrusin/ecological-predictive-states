@@ -1,4 +1,4 @@
-registry_version: appearance_benchmark_v0_evaluation_episode_seed_registry_v0
+registry_version: appearance_benchmark_v0_evaluation_episode_seed_registry_v1
 root_seed: 314159
 derivation_rule: derive_seed_v1
 namespace: gate0b-appearance-benchmark-v0-final-evaluation
