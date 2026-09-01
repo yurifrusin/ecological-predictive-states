@@ -671,7 +671,7 @@ def benchmark_definition_hash(definition: BenchmarkDefinition) -> str:
 
 
 def evaluation_seed_registry_hash(seeds: FinalEvaluationSeedRegistry) -> str:
-    return seed_registry_hash(seeds)
+    return _domain_hash("evaluation_seed_registry", seeds.model_dump(mode="json"))
 
 
 def _role_domain(definition: BenchmarkDefinition) -> list[dict[str, Any]]:

@@ -607,16 +607,6 @@ def appearance_profile_hash(profile: AppearanceProfile) -> str:
 
 
 def seed_registry_hash(registry: SeedRegistryType) -> str:
-    if isinstance(registry, FinalEvaluationSeedRegistry):
-        return sha256_bytes(
-            canonical_json_bytes(
-                {
-                    "schema_version": "epsbench_logical_domain_envelope_v1",
-                    "domain": "epsbench.appearance_benchmark.v1.evaluation_seed_registry",
-                    "payload": registry.model_dump(mode="json"),
-                }
-            )
-        )
     return sha256_bytes(canonical_json_bytes(registry))
 
 

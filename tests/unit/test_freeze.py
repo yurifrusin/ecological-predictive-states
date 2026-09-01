@@ -18,6 +18,7 @@ from epsbench.appearance import (
     profile_by_id,
     seed_registry_hash,
 )
+from epsbench.audit import _dataset_cell
 from epsbench.config import load_config
 from epsbench.freeze import (
     EXCLUDED_PROFILE_IDS,
@@ -164,11 +165,43 @@ def test_final_evaluation_seed_registry_is_exact_unique_disjoint_and_locked() ->
     assert isinstance(seeds, FinalEvaluationSeedRegistry)
     assert seeds.indices == tuple(range(16))
     assert len(set(seeds.candidate_episode_seeds)) == 16
-    assert seed_registry_hash(seeds) == (
+    assert evaluation_seed_registry_hash(seeds) == (
         "6747d234aa5e843e1a09013b978c0e8ce55b4c71c0f3bb820cee46176b618652"
     )
+    assert seed_registry_hash(seeds) != evaluation_seed_registry_hash(seeds)
     lock = validate_definition_lock(DEFINITION, SEEDS, LOCK, REVISION, SINGLE, CORRIDOR)
     assert lock["evaluation_episode_seed_registry_sha256"] == evaluation_seed_registry_hash(seeds)
+
+
+def test_final_seed_registry_keeps_distinct_artifact_and_freeze_identities(
+    tmp_path: Path,
+) -> None:
+    seeds = load_final_evaluation_seeds(SEEDS)
+    revision = load_appearance_registry_any(REVISION)
+    assert isinstance(revision, AppearanceRevision1Registry)
+    config = load_config(SINGLE)
+    profile = profile_by_id(revision, "revision1_balanced_reference_v1")
+    packet = tmp_path / "packet"
+    packet.mkdir()
+
+    cell = _dataset_cell(
+        tmp_path / "dataset",
+        tmp_path / "repeat",
+        packet,
+        config,
+        profile,
+        seeds.indices[0],
+        seeds.candidate_episode_seeds[0],
+        revision,
+        seeds,
+        cell_id_prefix="final-evaluation-regression",
+        retain_source_evidence=True,
+    )
+
+    assert cell["generation_status"] == "success"
+    assert cell["evaluation_seed_registry_sha256"] == seed_registry_hash(seeds)
+    assert cell["evaluation_seed_registry_sha256"] != evaluation_seed_registry_hash(seeds)
+    assert (packet / cell["source_evidence"]["dataset_path"]).is_dir()
 
 
 @pytest.mark.parametrize(
