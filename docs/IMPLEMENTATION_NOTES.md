@@ -35,12 +35,35 @@ replacement-lock commit `d4072f912cc58bbc1ca41ceb2652e41783dbf3e1` and root
 pushed and remotely read back before corrected execution. The first execution failed closed on an
 artifact/freeze identity conflation and produced no packet or receipt; source-only correction
 `f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2` separated those identities without changing the lock.
-The complete clean-source WGL rerun admitted 160/160 selected cells, retained 32 controls, passed
-independent and adversarial packet validation, and published receipt root
-`28036d50634b9521b62fa9ceb00d24fe32c3b94d7bb2182d984f2df49c8c76ac`.
-Qualification remains incomplete pending exact-head Ubuntu/OSMesa and cross-renderer evidence.
-Neither a replacement lock nor apparatus qualification freezes the benchmark: renewed dual review,
-exact-head owner approval, and separately authorised closeout remain mandatory.
+Historical exact head `62e09a920c10d50c62643543f6ebcbd26570b1d4` completed WGL and OSMesa
+apparatus execution after the clean-source WGL rerun admitted 160/160 selected cells and retained
+32 controls. That head later received renewed scientific pass and engineering request changes, so
+its apparatus evidence and reviews do not carry forward. The bounded second correction requires
+full exact-head packet publication and requalification after the new source commit. Counterpart
+readiness now requires the complete validated packet, strict receipt, CI publication record, and
+live artifact/run/job resolution; all nine compatibility hashes are independently reconstructed
+from retained source datasets; and receipt publication uses stable directory-handle-relative
+Windows and Linux primitives. The replacement lock and locked scientific inputs remain unchanged.
+
+Post-commit CI evidence cannot be embedded into the exact commit it evaluates. Reviewers must
+resolve the immutable WGL and OSMesa packet artifacts and their 90-day publication records before
+assessing apparatus status. Neither apparatus qualification nor a replacement lock freezes the
+benchmark: renewed dual review, exact-head owner approval, and separately authorised closeout
+remain mandatory.
+
+### Current PR #17 status
+
+| Boundary | Current source-record status |
+| --- | --- |
+| Apparatus status | `EXACT_HEAD_REQUALIFICATION_RESOLVED_FROM_EXTERNAL_CI_EVIDENCE` |
+| Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
+| Implementation status | `SECOND_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
+| Owner status | `SECOND_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Benchmark-freeze status | `NOT_PERFORMED` |
+| Model-protocol status | `NOT_FROZEN` |
+| Gate status | `NOT_ADVANCED` |
+| Scientific result | `NONE` |
 
 The path is intentionally short:
 

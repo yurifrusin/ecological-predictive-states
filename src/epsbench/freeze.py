@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import platform
 import shutil
 import socket
@@ -13,7 +12,7 @@ import subprocess
 import tempfile
 import time
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from io import BytesIO
 from pathlib import Path
@@ -62,8 +61,8 @@ from epsbench.data.identity import (
     single_occluder_scene_content_domain,
     visibility_event_domain,
 )
-from epsbench.data.paths import open_owned_regular_file
 from epsbench.data.provenance import collect_source_provenance
+from epsbench.data.publication import atomic_publish_owned_bytes
 from epsbench.data.validate import validate_dataset
 from epsbench.schema import (
     AvailableDenseOpticalTransport,
@@ -93,6 +92,7 @@ FREEZE_PACKET_VERSION = "appearance_benchmark_freeze_candidate_v1"
 FREEZE_ROOT_VERSION = "appearance_benchmark_freeze_root_domains_v1"
 FREEZE_CONTACT_SHEET_VERSION = "appearance_benchmark_freeze_contact_sheet_manifest_v1"
 RENDERER_RECEIPT_VERSION = "appearance_benchmark_renderer_qualification_receipt_v1"
+PUBLICATION_RECORD_VERSION = "appearance_benchmark_public_ci_packet_record_v1"
 SOURCE_IDENTITY_VERSION = "appearance_benchmark_source_identity_v1"
 THRESHOLD_MARGIN_VERSION = "appearance_benchmark_threshold_margin_summary_v1"
 RENDERER_SELECTION_DEPENDENCY_VERSION = "model_result_renderer_selection_dependency_v1"
@@ -642,6 +642,62 @@ class RendererQualificationReceipt(StrictFreezeModel):
     receipt_sha256: Sha256
 
 
+class PublicPacketPublicationRecord(StrictFreezeModel):
+    schema_version: Literal["appearance_benchmark_public_ci_packet_record_v1"]
+    evidence_class: Literal["PUBLIC_REPOSITORY_ONLY"]
+    repository: Literal["yurifrusin/ecological-predictive-states"]
+    source_commit: GitObject
+    source_tree: GitObject
+    workflow_run_id: int = Field(gt=0)
+    workflow_run_attempt: int = Field(gt=0)
+    workflow_name: str
+    workflow_path: str
+    workflow_run_url: str
+    job_database_id: int = Field(gt=0)
+    job_name: str
+    job_api_url: str
+    job_html_url: str
+    artifact_id: int = Field(gt=0)
+    artifact_name: str
+    artifact_api_url: str
+    artifact_url: str
+    artifact_archive_download_url: str
+    artifact_digest_sha256: Sha256
+    artifact_size_in_bytes: int = Field(gt=0)
+    artifact_created_at_utc: str
+    artifact_expires_at_utc: str
+    artifact_expired_at_record_creation: Literal[False]
+    retention_days: Literal[90]
+    retention_posture: Literal[
+        "github_actions_immutable_90_day_artifact_unless_repository_run_or_owner_deletes_earlier"
+    ]
+    public_access_posture: Literal["public_repository_authenticated_actions_artifact"]
+    packet_identity: PublicQualificationEvidence
+    complete_packet_root_sha256: Sha256
+    record_sha256: Sha256
+
+    @model_validator(mode="after")
+    def timestamps_and_identity_are_exact(self) -> PublicPacketPublicationRecord:
+        try:
+            created = datetime.fromisoformat(self.artifact_created_at_utc.replace("Z", "+00:00"))
+            expires = datetime.fromisoformat(self.artifact_expires_at_utc.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError("publication record timestamps are invalid") from error
+        if (
+            created.tzinfo is None
+            or expires.tzinfo is None
+            or expires <= created
+            or expires - created != timedelta(days=90)
+            or datetime.now(UTC) >= expires.astimezone(UTC)
+        ):
+            raise ValueError("publication record is expired or has invalid retention")
+        domain = self.model_dump(mode="json")
+        declared = domain.pop("record_sha256")
+        if sha256_bytes(canonical_json_bytes(domain)) != declared:
+            raise ValueError("publication record identity differs")
+        return self
+
+
 def _parse_yaml(path: Path) -> dict[str, Any]:
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
     if type(payload) is not dict:
@@ -1131,6 +1187,50 @@ def _source_identity_from_dataset(
     return identity, manifest
 
 
+def _legacy_source_claims_from_dataset(source_root: Path) -> dict[str, str]:
+    """Reconstruct every retained compatibility hash instead of trusting matrix claims."""
+
+    validate_dataset(source_root)
+    try:
+        manifest = DatasetManifest.model_validate_json((source_root / "manifest.json").read_bytes())
+        episode = manifest.episodes[0]
+        transition = TransitionRecord.model_validate_json(
+            (source_root / episode.transition.path).read_bytes()
+        )
+        instrumentation = parse_privileged_instrumentation_json(
+            (source_root / episode.privileged_instrumentation.path).read_bytes()
+        )
+    except Exception as error:
+        raise FreezeError("retained compatibility source evidence is invalid") from error
+    camera_records = [
+        _read_canonical_json(source_root / frame.camera_world_transform.path)
+        for frame in (transition.before, transition.after)
+    ]
+    sampled_geometry = getattr(instrumentation, "sampled_geometry", None)
+    geometry_domain = {
+        "positions": instrumentation.raw_geom_world_positions,
+        "sizes": instrumentation.raw_geom_compiled_sizes,
+        "types": instrumentation.raw_geom_types,
+        "rotations": instrumentation.raw_geom_world_rotations_row_major,
+        "sampled_geometry": (
+            sampled_geometry.model_dump(mode="json") if sampled_geometry is not None else None
+        ),
+    }
+    return {
+        "geometry_sha256": sha256_bytes(canonical_json_bytes(geometry_domain)),
+        "camera_trajectory_sha256": sha256_bytes(canonical_json_bytes(camera_records)),
+        "action_sha256": sha256_bytes(canonical_json_bytes(transition.action)),
+        "opaque_remapping_sha256": sha256_bytes(
+            canonical_json_bytes(instrumentation.raw_to_opaque_surface_ids)
+        ),
+        "scene_content_sha256": episode.scene_content_sha256,
+        "analytic_transport_sha256": episode.analytic_transport_sha256,
+        "oriented_boundary_sha256": episode.oriented_boundary_sha256,
+        "visibility_event_sha256": episode.visibility_event_sha256,
+        "occlusion_sha256": sha256_bytes(canonical_json_bytes(transition.occlusion)),
+    }
+
+
 def _validate_source_evidence(
     packet_root: Path,
     cell: dict[str, Any],
@@ -1204,6 +1304,9 @@ def _validate_source_evidence(
         raise FreezeError("freeze retained source-evidence file manifest differs")
     if cell.get("source_identity") != identity:
         raise FreezeError("freeze source identity differs from independent reconstruction")
+    legacy = _legacy_source_claims_from_dataset(source_root)
+    if any(cell.get(field) != value for field, value in legacy.items()):
+        raise FreezeError("legacy source claim differs from retained source evidence")
     return identity
 
 
@@ -1273,6 +1376,50 @@ def _pair_checks(cell: dict[str, Any], reference: dict[str, Any]) -> dict[str, b
         "segmentation_equality_within_renderer": cell["segmentation_logical_sha256"]
         == reference["segmentation_logical_sha256"],
     }
+
+
+def _evaluate_freeze_cell(
+    packet_root: Path,
+    cell: dict[str, Any],
+    control: dict[str, Any],
+    profile: Any,
+    *,
+    artifact_registry: _PacketArtifactRegistry | None = None,
+    frame_cache: dict[tuple[str, str], tuple[Any, Any, Any]] | None = None,
+) -> None:
+    """Evaluate admission with reconstructed typed source identities as sole authority."""
+
+    _evaluate_cell(
+        packet_root,
+        cell,
+        control,
+        profile,
+        artifact_registry=artifact_registry,
+        frame_cache=frame_cache,
+    )
+    if cell["generation_status"] != "success" or control["generation_status"] != "success":
+        return
+    identity = cell["source_identity"]
+    control_identity = control["source_identity"]
+    structural_fields = SOURCE_IDENTITY_FIELDS
+    portable_fields = (
+        "scene_content_identity_sha256",
+        "analytic_transport_identity_sha256",
+        "oriented_boundary_ownership_identity_sha256",
+        "visibility_event_identity_sha256",
+        "public_occlusion_relation_identity_sha256",
+        "executed_action_identity_sha256",
+    )
+    checks = cell["admission_checks"]
+    checks["structural_invariance"] = all(
+        identity[field] == control_identity[field] for field in structural_fields
+    )
+    checks["portable_analytic_identity_equality"] = all(
+        identity[field] == control_identity[field] for field in portable_fields
+    )
+    reasons = [name for name, passed in checks.items() if not passed]
+    cell["admission_status"] = "admitted" if not reasons else "rejected"
+    cell["rejection_reasons"] = reasons
 
 
 def _portable_source_identity(cell: dict[str, Any]) -> dict[str, Any]:
@@ -1914,7 +2061,7 @@ def create_freeze_audit(
     single_config_path: Path,
     corridor_config_path: Path,
     output: Path,
-    counterpart_receipt_path: Path | None = None,
+    counterpart_evidence_root: Path | None = None,
 ) -> dict[str, Any]:
     """Render all 192 final-root cells and publish one atomic qualification packet."""
 
@@ -1938,8 +2085,8 @@ def create_freeze_audit(
         raise FreezeError("freeze audit requires the exact Revision 1 registry")
     configs = (load_config(single_config_path), load_config(corridor_config_path))
     counterpart = (
-        load_renderer_receipt(counterpart_receipt_path, definition, seeds, lock)
-        if counterpart_receipt_path is not None
+        _load_counterpart_evidence(counterpart_evidence_root, definition, seeds, lock)
+        if counterpart_evidence_root is not None
         else None
     )
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -1953,7 +2100,13 @@ def create_freeze_audit(
         write_canonical_json(staging / "single_scene_config_snapshot.json", configs[0])
         write_canonical_json(staging / "corridor_scene_config_snapshot.json", configs[1])
         if counterpart is not None:
-            write_canonical_json(staging / "counterpart_renderer_receipt.json", counterpart)
+            write_canonical_json(
+                staging / "counterpart_renderer_receipt.json", counterpart["receipt"]
+            )
+            write_canonical_json(
+                staging / "counterpart_publication_record.json",
+                counterpart["publication_record"],
+            )
         work = staging / "_temporary_datasets"
         work.mkdir()
         selected: list[dict[str, Any]] = []
@@ -2001,14 +2154,14 @@ def create_freeze_audit(
                     (controls if profile_id == LEGACY_CONTROL_PROFILE_ID else selected).append(cell)
         for cell in controls:
             profile = profile_by_id(revision, cell["profile_id"])
-            _evaluate_cell(staging, cell, cell, profile)
+            _evaluate_freeze_cell(staging, cell, cell, profile)
             cell["benchmark_pair_checks"] = _pair_checks(cell, cell)
         for cell in selected:
             profile = profile_by_id(revision, cell["profile_id"])
             control = by_key[
                 (cell["scene_family"], profile.matched_control_profile_id, cell["seed_index"])
             ]
-            _evaluate_cell(staging, cell, control, profile)
+            _evaluate_freeze_cell(staging, cell, control, profile)
             reference = by_key[(cell["scene_family"], PRIMARY_REFERENCE, cell["seed_index"])]
             cell["benchmark_pair_checks"] = _pair_checks(cell, reference)
         shutil.rmtree(work)
@@ -2073,7 +2226,12 @@ def create_freeze_audit(
         threshold_summary = _threshold_margin_summary(selected, revision)
         snapshot_names = list(SNAPSHOT_FILES)
         if counterpart is not None:
-            snapshot_names.append("counterpart_renderer_receipt.json")
+            snapshot_names.extend(
+                (
+                    "counterpart_renderer_receipt.json",
+                    "counterpart_publication_record.json",
+                )
+            )
         logical_domain = {
             "schema_version": FREEZE_PACKET_VERSION,
             "root_schema_version": FREEZE_ROOT_VERSION,
@@ -2130,7 +2288,7 @@ def create_freeze_audit(
                 + "\n"
             ).encode("utf-8")
         )
-        validate_freeze_audit(staging)
+        validate_freeze_audit(staging, counterpart_evidence_root)
         _atomic_no_replace_directory(staging, output)
         return packet
     except Exception:
@@ -2160,6 +2318,237 @@ def _public_packet_evidence(packet_root: Path, packet: dict[str, Any]) -> dict[s
         "packet_tree_root_sha256": _domain_hash("public_packet_tree", manifest),
         "packet_artifact_count": len(files),
     }
+
+
+def _ordinary_json_object(path: Path, role: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FreezeError(f"{role} is unavailable or invalid") from error
+    if type(payload) is not dict:
+        raise FreezeError(f"{role} must be a JSON object")
+    return payload
+
+
+def _artifact_digest(value: Any) -> str:
+    if type(value) is not str:
+        raise FreezeError("CI artifact digest is unavailable")
+    digest = value.removeprefix("sha256:")
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        raise FreezeError("CI artifact digest is not canonical SHA-256")
+    return digest
+
+
+def _matching_workflow_job(
+    jobs_metadata: dict[str, Any],
+    *,
+    job_name: str,
+    workflow_run_id: int,
+    workflow_run_attempt: int,
+    source_commit: str,
+) -> dict[str, Any]:
+    jobs = jobs_metadata.get("jobs")
+    expected_endpoint = (
+        "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/"
+        f"runs/{workflow_run_id}/attempts/{workflow_run_attempt}/jobs?per_page=100"
+    )
+    if (
+        type(jobs) is not list
+        or jobs_metadata.get("resolved_workflow_run_id") != workflow_run_id
+        or jobs_metadata.get("resolved_workflow_run_attempt") != workflow_run_attempt
+        or jobs_metadata.get("resolved_head_sha") != source_commit
+        or jobs_metadata.get("resolution_endpoint") != expected_endpoint
+    ):
+        raise FreezeError("workflow jobs metadata is incomplete")
+    matches = [
+        job
+        for job in jobs
+        if type(job) is dict
+        and job.get("name") == job_name
+        and job.get("run_id") == workflow_run_id
+        and job.get("head_sha") == source_commit
+    ]
+    if len(matches) != 1 or type(matches[0].get("id")) is not int:
+        raise FreezeError("workflow job identity is absent or ambiguous")
+    return cast(dict[str, Any], matches[0])
+
+
+def create_publication_record(
+    packet_root: Path,
+    artifact_metadata_path: Path,
+    workflow_run_metadata_path: Path,
+    workflow_jobs_metadata_path: Path,
+    *,
+    job_name: str,
+    artifact_digest_sha256: str,
+    artifact_url: str,
+    output: Path,
+    counterpart_evidence_root: Path | None = None,
+) -> dict[str, Any]:
+    """Bind one already-uploaded immutable CI artifact to its validated complete packet."""
+
+    packet = validate_freeze_audit(packet_root, counterpart_evidence_root)
+    artifact = _ordinary_json_object(artifact_metadata_path, "CI artifact metadata")
+    run = _ordinary_json_object(workflow_run_metadata_path, "workflow run metadata")
+    jobs = _ordinary_json_object(workflow_jobs_metadata_path, "workflow jobs metadata")
+    repository = run.get("repository")
+    workflow_run = artifact.get("workflow_run")
+    head_commit = run.get("head_commit")
+    source_commit = packet["source_provenance"]["git_commit"]
+    source_tree = _git_tree(source_commit)
+    if (
+        type(repository) is not dict
+        or repository.get("full_name") != "yurifrusin/ecological-predictive-states"
+        or run.get("head_sha") != source_commit
+        or type(head_commit) is not dict
+        or head_commit.get("id") != source_commit
+        or head_commit.get("tree_id") != source_tree
+        or type(run.get("id")) is not int
+        or type(run.get("run_attempt")) is not int
+        or type(run.get("name")) is not str
+        or type(run.get("path")) is not str
+        or type(run.get("html_url")) is not str
+        or type(workflow_run) is not dict
+        or workflow_run.get("id") != run["id"]
+        or workflow_run.get("head_sha") != source_commit
+        or artifact.get("expired") is not False
+        or type(artifact.get("id")) is not int
+        or type(artifact.get("name")) is not str
+        or type(artifact.get("url")) is not str
+        or type(artifact.get("size_in_bytes")) is not int
+        or artifact["size_in_bytes"] <= 0
+        or type(artifact.get("archive_download_url")) is not str
+        or type(artifact.get("created_at")) is not str
+        or type(artifact.get("expires_at")) is not str
+    ):
+        raise FreezeError("CI artifact or workflow provenance is incomplete")
+    digest = _artifact_digest(artifact_digest_sha256)
+    if _artifact_digest(artifact.get("digest")) != digest:
+        raise FreezeError("CI artifact API and upload digest differ")
+    job = _matching_workflow_job(
+        jobs,
+        job_name=job_name,
+        workflow_run_id=run["id"],
+        workflow_run_attempt=run["run_attempt"],
+        source_commit=source_commit,
+    )
+    expected_artifact_url = (
+        f"https://github.com/yurifrusin/ecological-predictive-states/actions/runs/"
+        f"{run['id']}/artifacts/{artifact['id']}"
+    )
+    if artifact_url != expected_artifact_url:
+        raise FreezeError("CI artifact public URL differs from its exact identity")
+    domain = {
+        "schema_version": PUBLICATION_RECORD_VERSION,
+        "evidence_class": "PUBLIC_REPOSITORY_ONLY",
+        "repository": "yurifrusin/ecological-predictive-states",
+        "source_commit": source_commit,
+        "source_tree": source_tree,
+        "workflow_run_id": run["id"],
+        "workflow_run_attempt": run["run_attempt"],
+        "workflow_name": run["name"],
+        "workflow_path": run["path"],
+        "workflow_run_url": run["html_url"],
+        "job_database_id": job["id"],
+        "job_name": job_name,
+        "job_api_url": job["url"],
+        "job_html_url": job["html_url"],
+        "artifact_id": artifact["id"],
+        "artifact_name": artifact["name"],
+        "artifact_api_url": artifact["url"],
+        "artifact_url": artifact_url,
+        "artifact_archive_download_url": artifact["archive_download_url"],
+        "artifact_digest_sha256": digest,
+        "artifact_size_in_bytes": artifact["size_in_bytes"],
+        "artifact_created_at_utc": artifact["created_at"],
+        "artifact_expires_at_utc": artifact["expires_at"],
+        "artifact_expired_at_record_creation": False,
+        "retention_days": 90,
+        "retention_posture": (
+            "github_actions_immutable_90_day_artifact_unless_repository_run_or_owner_"
+            "deletes_earlier"
+        ),
+        "public_access_posture": "public_repository_authenticated_actions_artifact",
+        "packet_identity": _public_packet_evidence(packet_root, packet),
+        "complete_packet_root_sha256": packet["complete_packet_root_sha256"],
+    }
+    record = {**domain, "record_sha256": sha256_bytes(canonical_json_bytes(domain))}
+    PublicPacketPublicationRecord.model_validate_json(canonical_json_bytes(record))
+    if output.exists():
+        raise FileExistsError(f"publication record already exists: {output}")
+    write_canonical_json(output, record)
+    return record
+
+
+def validate_publication_record(
+    payload: dict[str, Any],
+    packet_root: Path,
+    packet: dict[str, Any],
+    artifact_metadata: dict[str, Any],
+    workflow_run_metadata: dict[str, Any],
+    workflow_jobs_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Verify packet publication against a live GitHub Actions metadata resolution."""
+
+    try:
+        record = PublicPacketPublicationRecord.model_validate_json(
+            canonical_json_bytes(payload)
+        ).model_dump(mode="json")
+    except Exception as error:
+        raise FreezeError("public packet publication record is invalid or expired") from error
+    if (
+        record["source_commit"] != packet["source_provenance"]["git_commit"]
+        or record["source_tree"] != _git_tree(record["source_commit"])
+        or record["packet_identity"] != _public_packet_evidence(packet_root, packet)
+        or record["complete_packet_root_sha256"] != packet["complete_packet_root_sha256"]
+    ):
+        raise FreezeError("public packet publication differs from validated packet")
+    repository = workflow_run_metadata.get("repository")
+    artifact_run = artifact_metadata.get("workflow_run")
+    head_commit = workflow_run_metadata.get("head_commit")
+    if (
+        type(repository) is not dict
+        or repository.get("full_name") != record["repository"]
+        or workflow_run_metadata.get("id") != record["workflow_run_id"]
+        or workflow_run_metadata.get("run_attempt") != record["workflow_run_attempt"]
+        or workflow_run_metadata.get("name") != record["workflow_name"]
+        or workflow_run_metadata.get("path") != record["workflow_path"]
+        or workflow_run_metadata.get("html_url") != record["workflow_run_url"]
+        or workflow_run_metadata.get("head_sha") != record["source_commit"]
+        or type(head_commit) is not dict
+        or head_commit.get("id") != record["source_commit"]
+        or head_commit.get("tree_id") != record["source_tree"]
+        or type(artifact_run) is not dict
+        or artifact_run.get("id") != record["workflow_run_id"]
+        or artifact_run.get("head_sha") != record["source_commit"]
+        or artifact_metadata.get("id") != record["artifact_id"]
+        or artifact_metadata.get("name") != record["artifact_name"]
+        or artifact_metadata.get("url") != record["artifact_api_url"]
+        or artifact_metadata.get("archive_download_url") != record["artifact_archive_download_url"]
+        or artifact_metadata.get("size_in_bytes") != record["artifact_size_in_bytes"]
+        or artifact_metadata.get("created_at") != record["artifact_created_at_utc"]
+        or artifact_metadata.get("expires_at") != record["artifact_expires_at_utc"]
+        or artifact_metadata.get("expired") is not False
+        or _artifact_digest(artifact_metadata.get("digest")) != record["artifact_digest_sha256"]
+        or record["artifact_url"]
+        != (
+            f"https://github.com/{record['repository']}/actions/runs/"
+            f"{record['workflow_run_id']}/artifacts/{record['artifact_id']}"
+        )
+    ):
+        raise FreezeError("live CI artifact resolution differs or is unavailable")
+    job = _matching_workflow_job(
+        workflow_jobs_metadata,
+        job_name=record["job_name"],
+        workflow_run_id=record["workflow_run_id"],
+        workflow_run_attempt=record["workflow_run_attempt"],
+        source_commit=record["source_commit"],
+    )
+    if job["id"] != record["job_database_id"]:
+        raise FreezeError("live workflow job identity differs")
+    if job.get("url") != record["job_api_url"] or job.get("html_url") != record["job_html_url"]:
+        raise FreezeError("live workflow job URLs differ")
+    return record
 
 
 def _receipt_context(
@@ -2226,7 +2615,72 @@ def _validate_receipt_against_packet(
     return validated
 
 
-def _reject_aliased_publication_parent(parent: Path) -> Path:
+def _load_counterpart_evidence(
+    evidence_root: Path,
+    definition: BenchmarkDefinition,
+    seeds: FinalEvaluationSeedRegistry,
+    lock: dict[str, Any],
+) -> dict[str, Any]:
+    """Resolve and validate all public evidence before admitting a counterpart renderer."""
+
+    packet_root = evidence_root / "packet"
+    receipt_path = evidence_root / "renderer_receipt.json"
+    publication_path = evidence_root / "publication_record.json"
+    artifact_metadata_path = evidence_root / "live_artifact.json"
+    workflow_run_path = evidence_root / "live_workflow_run.json"
+    workflow_jobs_path = evidence_root / "live_workflow_jobs.json"
+    if not evidence_root.is_dir() or not packet_root.is_dir():
+        raise FreezeError("counterpart public packet is absent or unavailable")
+    counterpart_packet = validate_freeze_audit(packet_root)
+    counterpart_definition, counterpart_seeds, counterpart_lock = _receipt_context(packet_root)
+    if (
+        counterpart_definition != definition
+        or counterpart_seeds != seeds
+        or counterpart_lock != lock
+    ):
+        raise FreezeError("counterpart packet scientific inputs differ")
+    receipt = _read_canonical_json(receipt_path)
+    validated_receipt = _validate_receipt_against_packet(
+        receipt,
+        packet_root,
+        counterpart_packet,
+        counterpart_definition,
+        counterpart_seeds,
+        counterpart_lock,
+    )
+    publication = _read_canonical_json(publication_path)
+    validated_publication = validate_publication_record(
+        publication,
+        packet_root,
+        counterpart_packet,
+        _ordinary_json_object(artifact_metadata_path, "live CI artifact metadata"),
+        _ordinary_json_object(workflow_run_path, "live workflow run metadata"),
+        _ordinary_json_object(workflow_jobs_path, "live workflow jobs metadata"),
+    )
+    selected = _read_canonical_json(packet_root / "selected_profile_matrix.json")["cells"]
+    local_rows = _local_profile_readiness(selected, counterpart_definition)
+    if local_rows != counterpart_packet["local_profile_readiness"]:
+        raise FreezeError("counterpart packet readiness reconstruction differs")
+    return {
+        "environment_id": counterpart_packet["renderer_environment_id"],
+        "replacement_definition_lock_commit": counterpart_packet[
+            "replacement_definition_lock_commit"
+        ],
+        "replacement_definition_lock_sha256": counterpart_packet["portable_definition_roots"][
+            "freeze_definition_lock_sha256"
+        ],
+        "profiles": local_rows,
+        "portable_definition_roots": counterpart_packet["portable_definition_roots"],
+        "portable_apparatus_roots": counterpart_packet["portable_apparatus_roots"],
+        "renderer_local_roots": counterpart_packet["renderer_local_roots"],
+        "threshold_margin_summary": counterpart_packet["threshold_margin_summary"],
+        "selected_outcome_map": _outcome_rows(selected),
+        "receipt": validated_receipt,
+        "publication_record": validated_publication,
+    }
+
+
+def _reject_aliased_publication_parent(parent: Path) -> tuple[Path, tuple[int, int]]:
     try:
         unresolved = parent.absolute()
         parent_stat = unresolved.lstat()
@@ -2248,56 +2702,47 @@ def _reject_aliased_publication_parent(parent: Path) -> Path:
         ):
             raise FreezeError("renderer receipt publication path contains an alias")
         cursor = cursor.parent
-    return resolved
+    return resolved, (parent_stat.st_dev, parent_stat.st_ino)
 
 
-def _atomic_publish_receipt(payload: bytes, output: Path, packet_root: Path) -> None:
-    parent = _reject_aliased_publication_parent(output.parent)
+def _atomic_publish_receipt(
+    payload: bytes,
+    output: Path,
+    packet_root: Path,
+    *,
+    revalidate_packet: Any | None = None,
+    boundary_hook: Any | None = None,
+) -> None:
+    if ".." in output.parts or output.name in {"", ".", ".."}:
+        raise FreezeError("renderer receipt publication path contains traversal")
+    parent, parent_identity = _reject_aliased_publication_parent(output.parent)
     destination = parent / output.name
     resolved_packet = packet_root.resolve(strict=True)
     if destination.resolve(strict=False).is_relative_to(resolved_packet):
         raise FreezeError("renderer receipt may not be published inside its source packet")
+
+    def verify_packet() -> None:
+        if revalidate_packet is not None:
+            revalidate_packet()
+
     try:
-        destination.lstat()
-    except FileNotFoundError:
-        pass
-    else:
-        raise FileExistsError(f"renderer receipt already exists: {destination}")
-    descriptor, staging_name = tempfile.mkstemp(prefix=f".{output.name}.staging-", dir=parent)
-    staging = Path(staging_name)
-    published = False
-    staging_identity: tuple[int, int] | None = None
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        staging_stat = staging.stat()
-        staging_identity = (staging_stat.st_dev, staging_stat.st_ino)
-        os.link(staging, destination)
-        published = True
-        staging.unlink()
-        with open_owned_regular_file(parent, output.name) as owned:
-            if owned.payload != payload:
-                raise FreezeError("published renderer receipt bytes differ")
-    except Exception:
-        if published:
-            try:
-                destination_stat = destination.stat()
-                if (destination_stat.st_dev, destination_stat.st_ino) == staging_identity:
-                    destination.unlink()
-            except OSError:
-                pass
-        raise
+        options: dict[str, Any] = {
+            "expected_parent_identity": parent_identity,
+            "post_publish_check": verify_packet,
+        }
+        if boundary_hook is not None:
+            options["boundary_hook"] = boundary_hook
+        atomic_publish_owned_bytes(parent, output.name, payload, **options)
     finally:
-        try:
-            staging.unlink()
-        except FileNotFoundError:
-            pass
+        verify_packet()
 
 
-def create_renderer_receipt(packet_root: Path, output: Path) -> dict[str, Any]:
-    packet = validate_freeze_audit(packet_root)
+def create_renderer_receipt(
+    packet_root: Path,
+    output: Path,
+    counterpart_evidence_root: Path | None = None,
+) -> dict[str, Any]:
+    packet = validate_freeze_audit(packet_root, counterpart_evidence_root)
     definition, seeds, lock = _receipt_context(packet_root)
     selected = _read_canonical_json(packet_root / "selected_profile_matrix.json")["cells"]
     controls = _read_canonical_json(packet_root / "legacy_control_matrix.json")["cells"]
@@ -2339,7 +2784,12 @@ def create_renderer_receipt(packet_root: Path, output: Path) -> dict[str, Any]:
     receipt = {**domain, "receipt_sha256": _domain_hash("renderer_receipt", domain)}
     _validate_receipt_against_packet(receipt, packet_root, packet, definition, seeds, lock)
     encoded = canonical_json_bytes(receipt) + b"\n"
-    _atomic_publish_receipt(encoded, output, packet_root)
+    _atomic_publish_receipt(
+        encoded,
+        output,
+        packet_root,
+        revalidate_packet=lambda: validate_freeze_audit(packet_root, counterpart_evidence_root),
+    )
     published = _read_canonical_json(output)
     _validate_receipt_against_packet(published, packet_root, packet, definition, seeds, lock)
     return published
@@ -2457,7 +2907,10 @@ def _validate_contact_sheets(
                 raise FreezeError("freeze contact sheet differs from reconstruction")
 
 
-def validate_freeze_audit(packet_root: Path) -> dict[str, Any]:
+def validate_freeze_audit(
+    packet_root: Path,
+    counterpart_evidence_root: Path | None = None,
+) -> dict[str, Any]:
     """Independently validate snapshots, cells, pairings, readiness, roots, and tree."""
 
     artifacts = _PacketArtifactRegistry(packet_root)
@@ -2537,9 +2990,18 @@ def validate_freeze_audit(packet_root: Path) -> dict[str, Any]:
         raise FreezeError("renderer-local root schema differs")
     snapshot_hashes = packet["snapshot_file_sha256"]
     snapshot_names = set(SNAPSHOT_FILES)
-    has_counterpart = "counterpart_renderer_receipt.json" in snapshot_hashes
+    has_counterpart_receipt = "counterpart_renderer_receipt.json" in snapshot_hashes
+    has_counterpart_publication = "counterpart_publication_record.json" in snapshot_hashes
+    if has_counterpart_receipt != has_counterpart_publication:
+        raise FreezeError("counterpart packet evidence snapshots are incomplete")
+    has_counterpart = has_counterpart_receipt
     if has_counterpart:
-        snapshot_names.add("counterpart_renderer_receipt.json")
+        snapshot_names.update(
+            {
+                "counterpart_renderer_receipt.json",
+                "counterpart_publication_record.json",
+            }
+        )
     if set(snapshot_hashes) != snapshot_names:
         raise FreezeError("freeze packet snapshot hash domain differs")
     if set(packet["report_file_sha256"]) != set(REPORT_FILES):
@@ -2586,13 +3048,20 @@ def validate_freeze_audit(packet_root: Path) -> dict[str, Any]:
         lock,
         packet["source_provenance"],
     )
+    if has_counterpart and counterpart_evidence_root is None:
+        raise FreezeError("counterpart receipt cannot be used without its resolved public packet")
+    if not has_counterpart and counterpart_evidence_root is not None:
+        raise FreezeError("counterpart packet was supplied to a single-renderer packet")
     counterpart = (
-        validate_renderer_receipt_payload(
-            snapshots["counterpart_renderer_receipt.json"], definition, seeds, lock
-        )
-        if has_counterpart
+        _load_counterpart_evidence(counterpart_evidence_root, definition, seeds, lock)
+        if counterpart_evidence_root is not None
         else None
     )
+    if counterpart is not None and (
+        snapshots["counterpart_renderer_receipt.json"] != counterpart["receipt"]
+        or snapshots["counterpart_publication_record.json"] != counterpart["publication_record"]
+    ):
+        raise FreezeError("counterpart packet evidence snapshots were substituted")
     raw_selected = reports["selected_profile_matrix.json"].get("cells")
     raw_controls = reports["legacy_control_matrix.json"].get("cells")
     if type(raw_selected) is not list or type(raw_controls) is not list:
@@ -2707,6 +3176,7 @@ def validate_freeze_audit(packet_root: Path) -> dict[str, Any]:
                         raise FreezeError("freeze retained array identity differs")
         stored = _admission_evidence_domain(cell)
         recomputed = _freeze_cell_without_fields(cell)
+        recomputed["source_identity"] = cell["source_identity"]
         for field in (
             "frame_metrics",
             "admission_checks",
@@ -2717,11 +3187,14 @@ def validate_freeze_audit(packet_root: Path) -> dict[str, Any]:
         ):
             recomputed.pop(field, None)
         control = by_id[cell["candidate_admission_control_cell_id"]]
-        _evaluate_cell(
+        control_for_evaluation = _freeze_cell_without_fields(control)
+        control_for_evaluation["source_identity"] = control["source_identity"]
+        _evaluate_freeze_cell(
             packet_root,
             recomputed,
-            _freeze_cell_without_fields(control),
+            control_for_evaluation,
             profile,
+            artifact_registry=artifacts,
             frame_cache=frame_cache,
         )
         if canonical_json_bytes(stored) != canonical_json_bytes(

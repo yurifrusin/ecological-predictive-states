@@ -2,12 +2,14 @@
 
 import json
 import os
+import subprocess
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import epsbench.freeze as freeze_module
 from epsbench.appearance import (
     AppearanceRevision1Registry,
     FinalEvaluationSeedRegistry,
@@ -24,11 +26,14 @@ from epsbench.freeze import (
     EXCLUDED_PROFILE_IDS,
     LOGICAL_DOMAINS,
     SELECTED_PROFILE_IDS,
+    SOURCE_IDENTITY_FIELDS,
     BenchmarkDefinition,
     FreezeDefinitionLock,
     _atomic_publish_receipt,
     _domain_hash,
+    _evaluate_freeze_cell,
     _legacy_control_membership_domain,
+    _legacy_source_claims_from_dataset,
     _readiness_summary,
     _selected_membership_domain,
     _source_identity_from_dataset,
@@ -202,6 +207,49 @@ def test_final_seed_registry_keeps_distinct_artifact_and_freeze_identities(
     assert cell["evaluation_seed_registry_sha256"] == seed_registry_hash(seeds)
     assert cell["evaluation_seed_registry_sha256"] != evaluation_seed_registry_hash(seeds)
     assert (packet / cell["source_evidence"]["dataset_path"]).is_dir()
+    legacy = _legacy_source_claims_from_dataset(packet / cell["source_evidence"]["dataset_path"])
+    assert legacy == {field: cell[field] for field in legacy}
+
+
+def test_freeze_admission_uses_typed_source_identity_not_legacy_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = {
+        "schema_version": "appearance_benchmark_source_identity_v1",
+        **{field: "1" * 64 for field in SOURCE_IDENTITY_FIELDS},
+        "source_identity_root_sha256": "2" * 64,
+    }
+    cell = {
+        "generation_status": "success",
+        "source_identity": deepcopy(identity),
+        "legacy_untrusted": "cell",
+    }
+    control = {
+        "generation_status": "success",
+        "source_identity": deepcopy(identity),
+        "legacy_untrusted": "control",
+    }
+
+    def fake_evaluate(*args: Any, **kwargs: Any) -> None:
+        target = args[1]
+        target["admission_checks"] = {
+            "structural_invariance": False,
+            "portable_analytic_identity_equality": False,
+            "ecological_label_equality": True,
+            "depth_segmentation_invariance": True,
+            "determinism": True,
+            "material_rgb_change": True,
+            "controlled_surface_exposure": True,
+            "textured_surface_variation": True,
+        }
+
+    monkeypatch.setattr(freeze_module, "_evaluate_cell", fake_evaluate)
+    _evaluate_freeze_cell(Path("unused"), cell, control, object())
+    admission_checks = cell["admission_checks"]
+    assert isinstance(admission_checks, dict)
+    assert admission_checks["structural_invariance"] is True
+    assert admission_checks["portable_analytic_identity_equality"] is True
+    assert cell["admission_status"] == "admitted"
 
 
 @pytest.mark.parametrize(
@@ -314,9 +362,7 @@ def test_renderer_selection_dependency_mutations_fail_closed() -> None:
         BenchmarkDefinition.model_validate_json(json.dumps(payload))
 
 
-def test_receipt_publication_is_atomic_exclusive_and_outside_packet(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_receipt_publication_is_atomic_exclusive_and_outside_packet(tmp_path: Path) -> None:
     packet = tmp_path / "packet"
     packet.mkdir()
     publication = tmp_path / "publication"
@@ -356,17 +402,140 @@ def test_receipt_publication_is_atomic_exclusive_and_outside_packet(
         with pytest.raises(ValueError, match="non-alias directory"):
             _atomic_publish_receipt(payload, alias / "receipt.json", packet)
 
+    if os.name == "nt":
+        junction = tmp_path / "publication-junction"
+        created = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(junction), str(publication)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert created.returncode == 0, created.stderr
+        try:
+            with pytest.raises(ValueError, match="non-alias directory"):
+                _atomic_publish_receipt(payload, junction / "receipt.json", packet)
+        finally:
+            junction.rmdir()
+
     racing = publication / "racing.json"
-    real_link = os.link
 
-    def concurrent_creator(source: Any, target: Any, *args: Any, **kwargs: Any) -> None:
-        Path(target).write_bytes(b"racing-winner")
-        real_link(source, target, *args, **kwargs)
+    def concurrent_creator(boundary: str, parent: Path) -> None:
+        if boundary == "before_publication":
+            (parent / racing.name).write_bytes(b"racing-winner")
 
-    monkeypatch.setattr(os, "link", concurrent_creator)
     with pytest.raises(FileExistsError):
-        _atomic_publish_receipt(payload, racing, packet)
+        _atomic_publish_receipt(payload, racing, packet, boundary_hook=concurrent_creator)
     assert racing.read_bytes() == b"racing-winner"
+
+    traversal = publication / ".." / "escaped.json"
+    with pytest.raises(ValueError, match="traversal"):
+        _atomic_publish_receipt(payload, traversal, packet)
+    assert not (tmp_path / "escaped.json").exists()
+
+
+@pytest.mark.parametrize("swap_boundary", ["before_staging_creation", "before_publication"])
+def test_receipt_publication_rejects_parent_redirection_by_stable_handle(
+    tmp_path: Path, swap_boundary: str
+) -> None:
+    packet = tmp_path / "packet"
+    packet.mkdir()
+    container = tmp_path / "container"
+    publication = container / "publication"
+    container.mkdir()
+    publication.mkdir()
+    moved = tmp_path / "container-original"
+    external_marker = b"external-directory"
+
+    def redirect_parent(boundary: str, parent: Path) -> None:
+        if boundary != swap_boundary:
+            return
+        try:
+            container.rename(moved)
+        except PermissionError as error:
+            raise ValueError("parent changed attempt was denied by stable OS handles") from error
+        container.mkdir()
+        parent.mkdir()
+        (parent / "external-marker").write_bytes(external_marker)
+
+    with pytest.raises(ValueError, match="parent changed"):
+        _atomic_publish_receipt(
+            b"payload\n",
+            publication / "receipt.json",
+            packet,
+            boundary_hook=redirect_parent,
+        )
+    if (publication / "external-marker").exists():
+        assert (publication / "external-marker").read_bytes() == external_marker
+    assert not (publication / "receipt.json").exists()
+    actual_original = moved / "publication" if moved.exists() else publication
+    assert not (actual_original / "receipt.json").exists()
+    assert not any("staging" in path.name for path in actual_original.iterdir())
+
+
+def test_receipt_publication_revalidates_packet_on_success_and_failure(tmp_path: Path) -> None:
+    packet = tmp_path / "packet"
+    packet.mkdir()
+    publication = tmp_path / "publication"
+    publication.mkdir()
+    calls: list[str] = []
+
+    _atomic_publish_receipt(
+        b"payload\n",
+        publication / "success.json",
+        packet,
+        revalidate_packet=lambda: calls.append("success"),
+    )
+    assert calls == ["success", "success"]
+
+    (publication / "existing.json").write_bytes(b"external")
+    with pytest.raises(FileExistsError):
+        _atomic_publish_receipt(
+            b"payload\n",
+            publication / "existing.json",
+            packet,
+            revalidate_packet=lambda: calls.append("failure"),
+        )
+    assert calls == ["success", "success", "failure"]
+    assert (publication / "existing.json").read_bytes() == b"external"
+
+    def reject_packet() -> None:
+        calls.append("mutated")
+        raise ValueError("packet mutated")
+
+    with pytest.raises(ValueError, match="packet mutated"):
+        _atomic_publish_receipt(
+            b"payload\n",
+            publication / "rolled-back.json",
+            packet,
+            revalidate_packet=reject_packet,
+        )
+    assert not (publication / "rolled-back.json").exists()
+
+
+def test_receipt_publication_rejects_post_check_target_substitution(tmp_path: Path) -> None:
+    packet = tmp_path / "packet"
+    packet.mkdir()
+    publication = tmp_path / "publication"
+    publication.mkdir()
+    destination = publication / "receipt.json"
+    callback_count = 0
+
+    def substitute_target() -> None:
+        nonlocal callback_count
+        callback_count += 1
+        if callback_count == 1:
+            destination.unlink()
+            destination.write_bytes(b"external-race-winner")
+
+    with pytest.raises(ValueError, match="published object differs"):
+        _atomic_publish_receipt(
+            b"owned-payload\n",
+            destination,
+            packet,
+            revalidate_packet=substitute_target,
+        )
+    assert callback_count == 2
+    assert destination.read_bytes() == b"external-race-winner"
 
 
 def test_all_cells_both_renderers_readiness_is_indivisible() -> None:

@@ -23,22 +23,32 @@ profile has been assigned or frozen into a final development/OOD role, and no fi
 has been frozen. The protocol and locked definitions are documented in
 [the Revision 1 contract](docs/GATE_0B_APPEARANCE_CANDIDATE_REVISION_1.md).
 
-The Appearance Benchmark Input Freeze v0 work package is under one owner-authorised PR #17
-correction wave after exact reviewed head `8b34b78d5488af7103119697a286cfb8757cc125` received
-scientific and engineering requests for changes. The original pushed lock commit
-`1a5929307dfcba1d726c650f5e1ce68771f66801` remains immutable historical evidence. A distinct v1
-replacement lock preserves the candidate role map, sixteen public evaluation-only roots, scenes,
-thresholds, comparisons, and exclusions while adding unique logical domains, independently
-reconstructible source evidence, strict source-bound receipts, and a prospective model-result
-renderer-selection dependency. Replacement-lock commit `d4072f912cc58bbc1ca41ceb2652e41783dbf3e1`
-was pushed and remotely read back before corrected qualification. A complete clean-source WGL run
-at `f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2` admitted all 160 selected cells, retained all 32
-legacy controls, passed independent and adversarial packet validation, and published strict receipt
-root `28036d50634b9521b62fa9ceb00d24fe32c3b94d7bb2182d984f2df49c8c76ac`. Corrected status is
-`qualification_incomplete` pending exact-head Ubuntu/OSMesa evidence and cross-renderer
-reconstruction. This remains an implementation candidate, not a benchmark freeze. Its scope,
-identities, policies, validation contract, and qualification state are documented in [the
-freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHMARK_FREEZE_V0.md).
+The Appearance Benchmark Input Freeze v0 work package remains open in PR #17. Historical exact head
+`62e09a920c10d50c62643543f6ebcbd26570b1d4` completed WGL and OSMesa apparatus execution but
+received `ENGINEERING_REQUEST_CHANGES`; its evidence and reviews apply only to that SHA. The owner
+authorised one bounded second correction for `EPS-ER17-0001`, `EPS-ER17-0002`,
+`EPS-ER17-0003`, `EPS-ER17-0005`, and `EPS-ER17-0006`. The replacement-lock commit
+`d4072f912cc58bbc1ca41ceb2652e41783dbf3e1`, root
+`28acd2c340b3ef1e2b8b2b7b31ca69356cd9baa35b94ff8a598e020099883435`, and all locked scientific
+inputs remain unchanged. The second-correction source candidate requires complete exact-head WGL
+and OSMesa requalification through immutable packet artifacts and then renewed independent dual
+review. Post-commit CI outcomes cannot be embedded into the commit they evaluate; reviewers must
+resolve the exact-head Actions artifacts and publication records. The scope and validation contract
+are documented in [the freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHMARK_FREEZE_V0.md).
+
+### PR #17 current correction status
+
+| Boundary | Current source-record status |
+| --- | --- |
+| Apparatus status | `EXACT_HEAD_REQUALIFICATION_RESOLVED_FROM_EXTERNAL_CI_EVIDENCE` |
+| Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
+| Implementation status | `SECOND_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
+| Owner status | `SECOND_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Benchmark-freeze status | `NOT_PERFORMED` |
+| Model-protocol status | `NOT_FROZEN` |
+| Gate status | `NOT_ADVANCED` |
+| Scientific result | `NONE` |
 
 **No scientific result exists yet.** The proposed appearance roles and final-evaluation roots are
 prospectively locked inputs to a freeze candidate, but the benchmark is not frozen. Exact-head dual

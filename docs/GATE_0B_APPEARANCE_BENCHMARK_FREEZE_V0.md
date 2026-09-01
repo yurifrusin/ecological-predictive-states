@@ -134,11 +134,19 @@ portable and renderer-local roots; versioned threshold margins; and a public pac
 receipt excluding volatile `run.json` metadata.
 
 Receipt creation first validates the complete packet, then validates the receipt against that
-packet. Publication is forbidden inside the packet, through a symlink, junction, reparse point,
-hard-link, or other alias, and over any existing or racing target. A complete staged file is
-published with an exclusive hard-link operation on the same filesystem, which is atomic and
-no-replace on Windows and Linux. The published uniquely owned regular file is reopened and
-validated again against the source packet.
+packet. A receipt used as counterpart evidence is insufficient by itself: validation must resolve
+the separately published complete packet, its strict receipt, the exact CI publication record, and
+live artifact/run/job metadata. The complete packet validator independently derives outcome maps,
+profile readiness, roots, margins, counts, and source commit/tree provenance; readiness never
+trusts receipt assertions or profile Boolean fields.
+
+Publication is forbidden inside the packet, through traversal, a symlink, junction, reparse point,
+hard-link, or other alias, and over any existing or racing target. Linux uses an unnamed file and
+directory descriptor with handle-derived `linkat`; Windows uses native root-directory-relative
+file creation, linking, reopening, and disposition. Staging, exclusive publication, reopening,
+rollback, and cleanup remain bound to the same verified parent directory object. Parent swaps are
+checked at both staging and publication boundaries, the target is atomic and no-replace, and the
+complete source packet is revalidated on every publication exit.
 
 ## Qualification rule and current state
 
@@ -157,7 +165,8 @@ root, threshold, renderer, comparison, exclusion, failure rule, or replacement-l
 The added regression generates and validates a retained final-seed dataset while asserting that the
 two typed identities are distinct.
 
-The subsequent complete Windows/WGL run at clean source commit `f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2`
+As historical evidence for exact head `62e09a920c10d50c62643543f6ebcbd26570b1d4`, the subsequent
+complete Windows/WGL run at clean source commit `f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2`
 published packet root `630d23cf791983977bdd9e92ba33ccedb6a18d1faf819c5d2df139c83dac9310`.
 All 160 selected cells were admitted; the 32 retained legacy controls were 16 admitted and 16
 rejected. Independent packet validation and the complete adversarial corpus succeeded. The strict,
@@ -171,9 +180,29 @@ apparatus roots:
 - reconstructed source identity: `3218027ed2135815034a8162158d5940702ec25108cd726fe87a9410c1677948`
 - within-renderer invariance outcomes: `20037a1b7103e38abb69ab62fa659d99ba15fbd6b4fae8be5e1e9d9bfc771ebe`
 
-The versioned threshold-margin root is
+For that historical execution, the versioned threshold-margin root is
 `eb23b2e2724f1603293e06a25d43344c87d5f954219c66ccdb8c5e5dd292c097`; every failure count and
 near-threshold count is zero. The corrected status remains `qualification_incomplete` and the seed
 disposition remains `pending_second_renderer_qualification` until exact-head Ubuntu/OSMesa CI and
 cross-renderer reconstruction complete. `benchmark_frozen` remains false and `scientific_result`
 remains null. No finding is self-verified by this implementation evidence.
+
+The historical head later completed OSMesa execution but received `ENGINEERING_REQUEST_CHANGES`.
+Its apparatus evidence and reviews do not carry forward. The owner-authorised second correction
+requires complete exact-head WGL and OSMesa requalification after the new source commit. Those
+artifact outcomes are necessarily post-commit external CI evidence and must be resolved through
+their immutable Actions packet artifacts and publication records.
+
+## Current PR #17 status
+
+| Boundary | Current source-record status |
+| --- | --- |
+| Apparatus status | `EXACT_HEAD_REQUALIFICATION_RESOLVED_FROM_EXTERNAL_CI_EVIDENCE` |
+| Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
+| Implementation status | `SECOND_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
+| Owner status | `SECOND_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Benchmark-freeze status | `NOT_PERFORMED` |
+| Model-protocol status | `NOT_FROZEN` |
+| Gate status | `NOT_ADVANCED` |
+| Scientific result | `NONE` |

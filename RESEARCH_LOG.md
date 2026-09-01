@@ -206,3 +206,35 @@ This is one-renderer apparatus evidence only. Status remains `qualification_inco
 exact-head Ubuntu/OSMesa and cross-renderer reconstruction. The benchmark is not frozen; no finding
 is self-verified; and no review, owner, merge, closeout, gate, model, or scientific-result authority
 follows.
+
+## 2026-09-01 — PR #17 second correction authority and current source state
+
+Historical exact head `62e09a920c10d50c62643543f6ebcbd26570b1d4` subsequently completed
+two-renderer execution and received renewed scientific pass plus engineering request changes. Those
+results, reviews, and owner dispositions remain exact-head historical evidence only. The owner
+authorised a bounded second correction for `EPS-ER17-0001`, `EPS-ER17-0002`, `EPS-ER17-0003`,
+`EPS-ER17-0005`, and `EPS-ER17-0006`; the verified domain-separation correction
+`EPS-ER17-0004` and the complete replacement-lock boundary must remain unchanged.
+
+The source correction requires a counterpart receipt to resolve a complete immutable packet plus a
+live-verifiable CI publication record before any cross-renderer readiness can be constructed. It
+reconstructs the nine compatibility hashes from retained source datasets, makes typed reconstructed
+identities authoritative for admission/pairing/roots, and uses directory-handle-relative Windows
+and Linux publication primitives. Fresh exact-head WGL and OSMesa packet artifacts are generated
+only after the source commit exists. Their run, job, artifact ID, digest, source commit/tree,
+availability, and 90-day retention record therefore cannot be embedded in the commit they evaluate;
+they remain external exact-head CI evidence for independent review.
+
+### Current PR #17 status
+
+| Boundary | Current source-record status |
+| --- | --- |
+| Apparatus status | `EXACT_HEAD_REQUALIFICATION_RESOLVED_FROM_EXTERNAL_CI_EVIDENCE` |
+| Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
+| Implementation status | `SECOND_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
+| Owner status | `SECOND_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Benchmark-freeze status | `NOT_PERFORMED` |
+| Model-protocol status | `NOT_FROZEN` |
+| Gate status | `NOT_ADVANCED` |
+| Scientific result | `NONE` |
