@@ -244,8 +244,11 @@ def _atomic_publish_posix(
 def _windows_api() -> dict[str, Any]:
     from ctypes import wintypes
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    ntdll = ctypes.WinDLL("ntdll")
+    win_dll = ctypes.WinDLL  # type: ignore[attr-defined,unused-ignore]
+    win_error = ctypes.WinError  # type: ignore[attr-defined,unused-ignore]
+    get_last_error = ctypes.get_last_error  # type: ignore[attr-defined,unused-ignore]
+    kernel32 = win_dll("kernel32", use_last_error=True)
+    ntdll = win_dll("ntdll")
 
     class ByHandleFileInformation(ctypes.Structure):
         _fields_ = [
@@ -351,7 +354,7 @@ def _win_identity(info: Any) -> tuple[int, int]:
 def _win_info(api: dict[str, Any], handle: Any) -> Any:
     info = api["ByHandleFileInformation"]()
     if not api["get_info"](handle, ctypes.byref(info)):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise api["win_error"](api["get_last_error"]())
     return info
 
 
@@ -359,7 +362,7 @@ def _close_win(api: dict[str, Any], handle: Any) -> None:
     invalid = ctypes.c_void_p(-1).value
     value = handle.value if hasattr(handle, "value") else handle
     if value not in {None, 0, invalid} and not api["close_handle"](handle):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise api["win_error"](api["get_last_error"]())
 
 
 def _open_win_parent(api: dict[str, Any], parent: Path) -> Any:
@@ -368,7 +371,7 @@ def _open_win_parent(api: dict[str, Any], parent: Path) -> Any:
     flags = 0x02000000 | 0x00200000
     handle = api["create_file"](str(parent), access, share, None, 3, flags, None)
     if handle == ctypes.c_void_p(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise api["win_error"](api["get_last_error"]())
     info = _win_info(api, handle)
     if not info.dwFileAttributes & 0x10 or info.dwFileAttributes & 0x400:
         _close_win(api, handle)
@@ -446,12 +449,12 @@ def _write_win(api: dict[str, Any], handle: Any, payload: bytes) -> None:
         buffer = ctypes.create_string_buffer(chunk)
         written = api["wintypes"].DWORD()
         if not api["write_file"](handle, buffer, len(chunk), ctypes.byref(written), None):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise api["win_error"](api["get_last_error"]())
         if written.value == 0:
             raise OSError("publication staging write made no progress")
         position += written.value
     if not api["flush"](handle):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise api["win_error"](api["get_last_error"]())
 
 
 def _read_win(api: dict[str, Any], handle: Any) -> bytes:
@@ -460,7 +463,7 @@ def _read_win(api: dict[str, Any], handle: Any) -> bytes:
         buffer = ctypes.create_string_buffer(1024 * 1024)
         read = api["wintypes"].DWORD()
         if not api["read_file"](handle, buffer, len(buffer), ctypes.byref(read), None):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise api["win_error"](api["get_last_error"]())
         if read.value == 0:
             return b"".join(chunks)
         chunks.append(buffer.raw[: read.value])

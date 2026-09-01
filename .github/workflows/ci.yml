@@ -330,7 +330,7 @@ jobs:
   qualify-wgl:
     name: qualify-wgl
     if: ${{ github.event_name == 'pull_request' }}
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, eps-wgl-ephemeral]
     outputs:
       packet-artifact-id: ${{ steps.upload-packet.outputs.artifact-id }}
       packet-artifact-name: ${{ steps.names.outputs.packet }}

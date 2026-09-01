@@ -225,6 +225,14 @@ only after the source commit exists. Their run, job, artifact ID, digest, source
 availability, and 90-day retention record therefore cannot be embedded in the commit they evaluate;
 they remain external exact-head CI evidence for independent review.
 
+Exact head `2dec901f1465bff59f1a2507d3ed0a87235fca8b` completed the local WGL matrix and
+corrected adversarial corpus, then Actions run `33522600616` failed before qualification and
+published no packet or receipt. The hosted Windows runner had no usable WGL driver; Linux mypy also
+identified platform-specific `ctypes` attributes that needed explicit portability handling. The
+next source candidate uses a single-job ephemeral self-hosted Windows/WGL label for the locked WGL
+apparatus and retains hosted Ubuntu/OSMesa CI. Because the source head changes, the successful local
+execution at `2dec901f` is historical diagnostic evidence only and must be repeated.
+
 ### Current PR #17 status
 
 | Boundary | Current source-record status |
