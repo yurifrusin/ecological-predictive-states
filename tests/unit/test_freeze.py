@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ from epsbench.freeze import (
     SOURCE_IDENTITY_FIELDS,
     BenchmarkDefinition,
     FreezeDefinitionLock,
+    PublicPacketPublicationRecord,
     _atomic_publish_receipt,
     _domain_hash,
     _evaluate_freeze_cell,
@@ -45,7 +47,7 @@ from epsbench.freeze import (
     validate_definition_lock,
 )
 from epsbench.revision import validate_definition_lock as validate_revision1_lock
-from epsbench.utils.canonical import canonical_json_bytes, sha256_file
+from epsbench.utils.canonical import canonical_json_bytes, sha256_bytes, sha256_file
 
 DEFINITION = Path("configs/appearance_benchmark_freeze_v0.yaml")
 SEEDS = Path("configs/appearance_benchmark_v0_evaluation_episode_seeds.yaml")
@@ -79,6 +81,83 @@ def _definition_payload() -> dict[str, object]:
 
 def _seed_payload() -> dict[str, object]:
     return load_final_evaluation_seeds(SEEDS).model_dump(mode="json")
+
+
+def _publication_record_payload() -> dict[str, object]:
+    digest = "0" * 64
+    commit = "0" * 40
+    now = datetime.now(UTC).replace(microsecond=0)
+    run_created = now - timedelta(hours=1)
+    artifact_created = now - timedelta(minutes=10)
+    expires = run_created + timedelta(days=90)
+
+    def utc_string(value: datetime) -> str:
+        return value.isoformat().replace("+00:00", "Z")
+
+    domain: dict[str, object] = {
+        "schema_version": "appearance_benchmark_public_ci_packet_record_v1",
+        "evidence_class": "PUBLIC_REPOSITORY_ONLY",
+        "repository": "yurifrusin/ecological-predictive-states",
+        "source_commit": commit,
+        "source_tree": commit,
+        "workflow_run_id": 33524945210,
+        "workflow_run_attempt": 1,
+        "workflow_name": "ci",
+        "workflow_path": ".github/workflows/ci.yml",
+        "workflow_run_url": "https://github.com/example/run",
+        "workflow_run_created_at_utc": utc_string(run_created),
+        "job_database_id": 99913287809,
+        "job_name": "qualify-wgl",
+        "job_api_url": "https://api.github.com/example/job",
+        "job_html_url": "https://github.com/example/job",
+        "artifact_id": 9809315485,
+        "artifact_name": "packet",
+        "artifact_api_url": "https://api.github.com/example/artifact",
+        "artifact_url": "https://github.com/example/artifact",
+        "artifact_archive_download_url": "https://api.github.com/example/archive",
+        "artifact_digest_sha256": digest,
+        "artifact_size_in_bytes": 1,
+        "artifact_created_at_utc": utc_string(artifact_created),
+        "artifact_expires_at_utc": utc_string(expires),
+        "artifact_expired_at_record_creation": False,
+        "retention_days": 90,
+        "retention_posture": (
+            "github_actions_immutable_90_day_artifact_unless_repository_run_or_owner_"
+            "deletes_earlier"
+        ),
+        "public_access_posture": "public_repository_authenticated_actions_artifact",
+        "packet_identity": {
+            "evidence_class": "PUBLIC_REPOSITORY_ONLY",
+            "availability": "repository_or_ci_artifact",
+            "packet_schema_version": "appearance_benchmark_freeze_candidate_v1",
+            "packet_root_schema_version": "appearance_benchmark_freeze_root_domains_v1",
+            "packet_file_sha256": digest,
+            "packet_tree_root_sha256": digest,
+            "packet_artifact_count": 1,
+        },
+        "complete_packet_root_sha256": digest,
+    }
+    return {**domain, "record_sha256": sha256_bytes(canonical_json_bytes(domain))}
+
+
+def test_publication_retention_is_bound_to_workflow_run_creation() -> None:
+    payload = _publication_record_payload()
+    validated = PublicPacketPublicationRecord.model_validate(payload)
+    assert validated.workflow_run_created_at_utc != validated.artifact_created_at_utc
+
+    invalid = deepcopy(payload)
+    invalid["artifact_expires_at_utc"] = (
+        (
+            datetime.fromisoformat(str(invalid["artifact_created_at_utc"]).replace("Z", "+00:00"))
+            + timedelta(days=90)
+        )
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    invalid_domain = {key: value for key, value in invalid.items() if key != "record_sha256"}
+    invalid["record_sha256"] = sha256_bytes(canonical_json_bytes(invalid_domain))
+    with pytest.raises(ValueError, match="workflow-run retention"):
+        PublicPacketPublicationRecord.model_validate(invalid)
 
 
 def test_protected_canonical_definition_files_are_byte_identical() -> None:

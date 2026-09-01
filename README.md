@@ -40,7 +40,7 @@ are documented in [the freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHM
 
 | Boundary | Current source-record status |
 | --- | --- |
-| Apparatus status | `EXACT_HEAD_REQUALIFICATION_RESOLVED_FROM_EXTERNAL_CI_EVIDENCE` |
+| Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
 | Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
 | Implementation status | `SECOND_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
 | Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |

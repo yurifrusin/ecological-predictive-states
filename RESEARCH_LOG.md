@@ -233,11 +233,24 @@ next source candidate uses a single-job ephemeral self-hosted Windows/WGL label 
 apparatus and retains hosted Ubuntu/OSMesa CI. Because the source head changes, the successful local
 execution at `2dec901f` is historical diagnostic evidence only and must be repeated.
 
+Exact head `b63121cdc7ef11340e0275498fda0f0b32213637` then completed the full WGL matrix
+and packet adversarial corpus in Actions run `33524945210`, publishing immutable packet artifact
+`9809315485`. The first publication-record attempt rejected the live GitHub timestamps because the
+validator incorrectly anchored the configured 90-day retention to the later artifact-upload time
+rather than the workflow-run creation time. PowerShell continued to the receipt command and exposed
+only that final exit status, so evidence artifact `9809732826` contained a receipt but no publication
+record. Packet-bound OSMesa processing rejected the downloaded WGL evidence during independent
+Linux recomputation before generating any OSMesa cell or artifact. This is retained failed evidence,
+not qualification evidence. The source correction binds retention to the live run creation time,
+keeps the artifact creation and expiry times exact, separates publication and receipt into distinct
+fail-fast CI steps, and adds strict difference-path diagnostics for cross-platform reconstruction.
+Changing the source head invalidates the successful WGL execution for qualification purposes.
+
 ### Current PR #17 status
 
 | Boundary | Current source-record status |
 | --- | --- |
-| Apparatus status | `EXACT_HEAD_REQUALIFICATION_RESOLVED_FROM_EXTERNAL_CI_EVIDENCE` |
+| Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
 | Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
 | Implementation status | `SECOND_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
 | Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |

@@ -193,11 +193,22 @@ requires complete exact-head WGL and OSMesa requalification after the new source
 artifact outcomes are necessarily post-commit external CI evidence and must be resolved through
 their immutable Actions packet artifacts and publication records.
 
+Exact head `b63121cdc7ef11340e0275498fda0f0b32213637` is retained failed evidence. Its WGL
+packet completed, but publication-record creation rejected an incorrectly modeled artifact-upload
+retention interval, PowerShell masked that first exit, and Linux independently rejected
+cross-platform reconstruction before OSMesa generation. The corrected evidence contract binds
+GitHub's exact run-created, artifact-created, and expiry timestamps and measures the configured
+90-day interval from workflow-run creation. Derived audit floats use a twelve-decimal portable
+serialization boundary, while symmetric real-FFT peaks use a tolerance-bounded sign-normalized
+index. Threshold comparisons continue to use unrounded values; profiles, evaluation episode roots,
+thresholds, renderers, and locked scientific inputs are unchanged. Exact-head requalification must
+start again after the source changes.
+
 ## Current PR #17 status
 
 | Boundary | Current source-record status |
 | --- | --- |
-| Apparatus status | `EXACT_HEAD_REQUALIFICATION_RESOLVED_FROM_EXTERNAL_CI_EVIDENCE` |
+| Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
 | Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
 | Implementation status | `SECOND_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
 | Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |

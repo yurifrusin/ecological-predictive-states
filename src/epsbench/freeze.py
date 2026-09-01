@@ -184,6 +184,36 @@ class FreezeError(ValueError):
     """Raised when a freeze definition, lock, receipt, or packet is invalid."""
 
 
+def _first_json_difference(
+    stored: Any,
+    recomputed: Any,
+    path: str = "$",
+) -> tuple[str, Any, Any]:
+    """Return one strict JSON difference for actionable fail-closed diagnostics."""
+
+    if type(stored) is not type(recomputed):
+        return path, stored, recomputed
+    if isinstance(stored, dict):
+        for key in sorted(set(stored) | set(recomputed)):
+            child_path = f"{path}.{key}"
+            if key not in stored:
+                return child_path, "<missing>", recomputed[key]
+            if key not in recomputed:
+                return child_path, stored[key], "<missing>"
+            if canonical_json_bytes(stored[key]) != canonical_json_bytes(recomputed[key]):
+                return _first_json_difference(stored[key], recomputed[key], child_path)
+    elif isinstance(stored, list):
+        if len(stored) != len(recomputed):
+            return f"{path}.length", len(stored), len(recomputed)
+        for index, (stored_item, recomputed_item) in enumerate(
+            zip(stored, recomputed, strict=True)
+        ):
+            child_path = f"{path}[{index}]"
+            if canonical_json_bytes(stored_item) != canonical_json_bytes(recomputed_item):
+                return _first_json_difference(stored_item, recomputed_item, child_path)
+    return path, stored, recomputed
+
+
 class StrictFreezeModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
@@ -653,6 +683,7 @@ class PublicPacketPublicationRecord(StrictFreezeModel):
     workflow_name: str
     workflow_path: str
     workflow_run_url: str
+    workflow_run_created_at_utc: str
     job_database_id: int = Field(gt=0)
     job_name: str
     job_api_url: str
@@ -679,18 +710,27 @@ class PublicPacketPublicationRecord(StrictFreezeModel):
     @model_validator(mode="after")
     def timestamps_and_identity_are_exact(self) -> PublicPacketPublicationRecord:
         try:
-            created = datetime.fromisoformat(self.artifact_created_at_utc.replace("Z", "+00:00"))
+            run_created = datetime.fromisoformat(
+                self.workflow_run_created_at_utc.replace("Z", "+00:00")
+            )
+            artifact_created = datetime.fromisoformat(
+                self.artifact_created_at_utc.replace("Z", "+00:00")
+            )
             expires = datetime.fromisoformat(self.artifact_expires_at_utc.replace("Z", "+00:00"))
         except ValueError as error:
             raise ValueError("publication record timestamps are invalid") from error
         if (
-            created.tzinfo is None
+            run_created.tzinfo is None
+            or artifact_created.tzinfo is None
             or expires.tzinfo is None
-            or expires <= created
-            or expires - created != timedelta(days=90)
+            or artifact_created < run_created
+            or expires <= artifact_created
+            or expires - run_created != timedelta(days=90)
             or datetime.now(UTC) >= expires.astimezone(UTC)
         ):
-            raise ValueError("publication record is expired or has invalid retention")
+            raise ValueError(
+                "publication record is expired or lacks exact 90-day workflow-run retention"
+            )
         domain = self.model_dump(mode="json")
         declared = domain.pop("record_sha256")
         if sha256_bytes(canonical_json_bytes(domain)) != declared:
@@ -2408,6 +2448,7 @@ def create_publication_record(
         or type(run.get("name")) is not str
         or type(run.get("path")) is not str
         or type(run.get("html_url")) is not str
+        or type(run.get("created_at")) is not str
         or type(workflow_run) is not dict
         or workflow_run.get("id") != run["id"]
         or workflow_run.get("head_sha") != source_commit
@@ -2449,6 +2490,7 @@ def create_publication_record(
         "workflow_name": run["name"],
         "workflow_path": run["path"],
         "workflow_run_url": run["html_url"],
+        "workflow_run_created_at_utc": run["created_at"],
         "job_database_id": job["id"],
         "job_name": job_name,
         "job_api_url": job["url"],
@@ -2514,6 +2556,7 @@ def validate_publication_record(
         or workflow_run_metadata.get("name") != record["workflow_name"]
         or workflow_run_metadata.get("path") != record["workflow_path"]
         or workflow_run_metadata.get("html_url") != record["workflow_run_url"]
+        or workflow_run_metadata.get("created_at") != record["workflow_run_created_at_utc"]
         or workflow_run_metadata.get("head_sha") != record["source_commit"]
         or type(head_commit) is not dict
         or head_commit.get("id") != record["source_commit"]
@@ -3156,16 +3199,33 @@ def validate_freeze_audit(
                 )
             except Exception as error:
                 raise FreezeError("freeze appearance instance is invalid") from error
-            if (
-                nested != render_plan.record
-                or cell["appearance_instance_sha256"]
-                != render_plan.record.appearance_instance_sha256
-                or cell["appearance_profile_sha256"] != render_plan.record.appearance_profile_sha256
-                or cell["evaluation_seed_registry_sha256"] != seed_registry_hash(seeds)
-                or cell["source_texture_diagnostics"]
-                != _source_texture_diagnostics(profile, cell["scene_family"], render_plan.record)
+            stored_appearance = {
+                "appearance_instance": nested.model_dump(mode="json"),
+                "appearance_instance_sha256": cell["appearance_instance_sha256"],
+                "appearance_profile_sha256": cell["appearance_profile_sha256"],
+                "evaluation_seed_registry_sha256": cell["evaluation_seed_registry_sha256"],
+                "source_texture_diagnostics": cell["source_texture_diagnostics"],
+            }
+            recomputed_appearance = {
+                "appearance_instance": render_plan.record.model_dump(mode="json"),
+                "appearance_instance_sha256": render_plan.record.appearance_instance_sha256,
+                "appearance_profile_sha256": render_plan.record.appearance_profile_sha256,
+                "evaluation_seed_registry_sha256": seed_registry_hash(seeds),
+                "source_texture_diagnostics": _source_texture_diagnostics(
+                    profile, cell["scene_family"], render_plan.record
+                ),
+            }
+            if canonical_json_bytes(stored_appearance) != canonical_json_bytes(
+                recomputed_appearance
             ):
-                raise FreezeError("freeze appearance instance differs from recomputation")
+                difference_path, stored_value, recomputed_value = _first_json_difference(
+                    stored_appearance, recomputed_appearance
+                )
+                raise FreezeError(
+                    "freeze appearance instance differs from recomputation for "
+                    f"{cell['cell_id']} at {difference_path}: "
+                    f"stored={stored_value!r}, recomputed={recomputed_value!r}"
+                )
             for frame_index, frame_name in enumerate(("before", "after")):
                 arrays = frame_cache[(cell["cell_id"], frame_name)]
                 for role_name, array in zip(("rgb", "depth", "segmentation"), arrays, strict=True):
@@ -3197,10 +3257,16 @@ def validate_freeze_audit(
             artifact_registry=artifacts,
             frame_cache=frame_cache,
         )
-        if canonical_json_bytes(stored) != canonical_json_bytes(
-            _admission_evidence_domain(recomputed)
-        ):
-            raise FreezeError("freeze admission evidence differs from recomputation")
+        recomputed_admission = _admission_evidence_domain(recomputed)
+        if canonical_json_bytes(stored) != canonical_json_bytes(recomputed_admission):
+            difference_path, stored_value, recomputed_value = _first_json_difference(
+                stored, recomputed_admission
+            )
+            raise FreezeError(
+                "freeze admission evidence differs from recomputation for "
+                f"{cell['cell_id']} at {difference_path}: "
+                f"stored={stored_value!r}, recomputed={recomputed_value!r}"
+            )
         reference = by_id[cell["benchmark_reference_cell_id"]]
         if cell["benchmark_pair_checks"] != _pair_checks(cell, reference):
             raise FreezeError("freeze benchmark pair evidence differs")

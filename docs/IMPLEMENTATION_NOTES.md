@@ -45,6 +45,17 @@ live artifact/run/job resolution; all nine compatibility hashes are independentl
 from retained source datasets; and receipt publication uses stable directory-handle-relative
 Windows and Linux primitives. The replacement lock and locked scientific inputs remain unchanged.
 
+Exact head `b63121cdc7ef11340e0275498fda0f0b32213637` exposed two further fail-closed
+portability defects before OSMesa generation: Actions retention is anchored to workflow-run
+creation rather than the later packet upload, and derived NumPy metrics can differ in their final
+floating-point bits or choose opposite signed bins from one symmetric real-FFT peak. Publication
+records now bind the exact live run-creation, artifact-creation, and expiry timestamps, with the
+configured 90-day interval measured from run creation. Derived audit floats are serialized to
+twelve decimal places, and FFT peak identities use a tolerance-bounded sign-normalized index.
+Threshold decisions still use the unrounded values and every threshold is unchanged; the smallest
+historically observed absolute margin was greater than `0.012`, so this representation rule is far
+below a decision boundary. CI publication and receipt commands are separate fail-fast steps.
+
 Post-commit CI evidence cannot be embedded into the exact commit it evaluates. Reviewers must
 resolve the immutable WGL and OSMesa packet artifacts and their 90-day publication records before
 assessing apparatus status. Neither apparatus qualification nor a replacement lock freezes the
@@ -55,7 +66,7 @@ remain mandatory.
 
 | Boundary | Current source-record status |
 | --- | --- |
-| Apparatus status | `EXACT_HEAD_REQUALIFICATION_RESOLVED_FROM_EXTERNAL_CI_EVIDENCE` |
+| Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
 | Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
 | Implementation status | `SECOND_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
 | Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
