@@ -180,3 +180,29 @@ Corrected qualification remains prohibited until the replacement-lock commit has
 read back remotely. The obsolete v0 WGL receipt is removed from the corrected candidate; its
 historical commit remains in Git. No benchmark freeze, model-result access, model work, gate
 advancement, approval, merge, closeout, or scientific result follows from this correction stage.
+
+## 2026-09-01 — Corrected WGL execution after replacement-lock readback
+
+Replacement-lock commit `d4072f912cc58bbc1ca41ceb2652e41783dbf3e1` was pushed and read back
+from the branch, fetched remote reference, and GitHub commit API before corrected final-root
+execution. The first WGL execution then failed closed because the final seed registry's canonical
+dataset-artifact identity had been conflated with its new freeze-domain identity. No packet or
+receipt was published. This failed execution is retained as engineering evidence. Source-only
+commit `f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2` separated the two identities and added a real
+retained-dataset regression; the replacement lock and all locked scientific content remained
+unchanged.
+
+The complete clean-source WGL rerun published packet root
+`630d23cf791983977bdd9e92ba33ccedb6a18d1faf819c5d2df139c83dac9310`: all 160 selected cells
+were admitted and all 32 legacy controls were retained as 16 admitted and 16 rejected. Independent
+validation and all complete-packet adversarial regressions succeeded. The strict receipt root is
+`28036d50634b9521b62fa9ceb00d24fe32c3b94d7bb2182d984f2df49c8c76ac`; it binds clean source
+commit `f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2`, Git tree
+`bbc29863fd4efef24c3d74cc8a99caff15ada504`, 6,550 packet artifacts, complete outcome maps,
+portable and renderer-local roots, and threshold-margin root
+`eb23b2e2724f1603293e06a25d43344c87d5f954219c66ccdb8c5e5dd292c097`.
+
+This is one-renderer apparatus evidence only. Status remains `qualification_incomplete` pending
+exact-head Ubuntu/OSMesa and cross-renderer reconstruction. The benchmark is not frozen; no finding
+is self-verified; and no review, owner, merge, closeout, gate, model, or scientific-result authority
+follows.

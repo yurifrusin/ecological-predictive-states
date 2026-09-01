@@ -30,9 +30,17 @@ envelopes, retains complete typed source datasets for independent reconstruction
 identity, binds strict renderer receipts to clean source revision/tree and complete packet
 evidence, publishes receipts atomically without replacement or aliases, and requires prospective
 primary/secondary renderer treatment before comparative model-result access. Corrected
-qualification remains `unqualified` until the replacement lock is pushed and remotely read back.
-Neither a replacement lock nor later apparatus qualification freezes the benchmark: renewed dual
-review, exact-head owner approval, and separately authorised closeout remain mandatory.
+replacement-lock commit `d4072f912cc58bbc1ca41ceb2652e41783dbf3e1` and root
+`28acd2c340b3ef1e2b8b2b7b31ca69356cd9baa35b94ff8a598e020099883435` were
+pushed and remotely read back before corrected execution. The first execution failed closed on an
+artifact/freeze identity conflation and produced no packet or receipt; source-only correction
+`f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2` separated those identities without changing the lock.
+The complete clean-source WGL rerun admitted 160/160 selected cells, retained 32 controls, passed
+independent and adversarial packet validation, and published receipt root
+`28036d50634b9521b62fa9ceb00d24fe32c3b94d7bb2182d984f2df49c8c76ac`.
+Qualification remains incomplete pending exact-head Ubuntu/OSMesa and cross-renderer evidence.
+Neither a replacement lock nor apparatus qualification freezes the benchmark: renewed dual review,
+exact-head owner approval, and separately authorised closeout remain mandatory.
 
 The path is intentionally short:
 

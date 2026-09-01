@@ -30,10 +30,15 @@ scientific and engineering requests for changes. The original pushed lock commit
 replacement lock preserves the candidate role map, sixteen public evaluation-only roots, scenes,
 thresholds, comparisons, and exclusions while adding unique logical domains, independently
 reconstructible source evidence, strict source-bound receipts, and a prospective model-result
-renderer-selection dependency. Corrected qualification is `unqualified` until the replacement
-lock is pushed and remotely read back. This remains an implementation candidate, not a benchmark
-freeze. Its scope, identities, policies, validation contract, and qualification state are documented in
-[the freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHMARK_FREEZE_V0.md).
+renderer-selection dependency. Replacement-lock commit `d4072f912cc58bbc1ca41ceb2652e41783dbf3e1`
+was pushed and remotely read back before corrected qualification. A complete clean-source WGL run
+at `f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2` admitted all 160 selected cells, retained all 32
+legacy controls, passed independent and adversarial packet validation, and published strict receipt
+root `28036d50634b9521b62fa9ceb00d24fe32c3b94d7bb2182d984f2df49c8c76ac`. Corrected status is
+`qualification_incomplete` pending exact-head Ubuntu/OSMesa evidence and cross-renderer
+reconstruction. This remains an implementation candidate, not a benchmark freeze. Its scope,
+identities, policies, validation contract, and qualification state are documented in [the
+freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHMARK_FREEZE_V0.md).
 
 **No scientific result exists yet.** The proposed appearance roles and final-evaluation roots are
 prospectively locked inputs to a freeze candidate, but the benchmark is not frozen. Exact-head dual

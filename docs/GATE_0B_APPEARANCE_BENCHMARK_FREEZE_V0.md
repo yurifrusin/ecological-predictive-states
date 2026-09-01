@@ -29,6 +29,10 @@ recently changes the lock file is required by validation to have subject
 and to contain the exact definition, seed registry, and replacement-lock snapshots. No corrected
 qualification may begin until that commit is pushed and its remote readback is verified.
 
+That replacement-lock commit is
+`d4072f912cc58bbc1ca41ceb2652e41783dbf3e1`. The branch reference, fetched remote reference, and
+GitHub commit API were read back at that exact SHA before corrected final-root execution began.
+
 The correction does not change the five selected profile identities or roles, the two excluded
 negative-evidence profiles, the sixteen episode roots or order, the two scene families, the primary
 or secondary pairing relationships, appearance thresholds, supported renderer environments,
@@ -144,8 +148,32 @@ apparatus roots must match, while renderer-local outcomes and raster evidence re
 not equality-asserted. Any selected-cell or locked-renderer failure retires the complete root set
 for a revised profile set.
 
-At this replacement-lock stage, corrected qualification has not started, no corrected receipt is
-present, candidate status is `unqualified`, and benchmark freeze remains false. The CI qualification
-step is gated on the corrected WGL receipt so pushing this replacement lock cannot begin an
-OSMesa qualification before remote lock readback. Later qualification evidence may update this
-section without changing the locked scientific content.
+The first post-readback WGL execution failed closed before packet publication because the dataset
+artifact content identity had been incorrectly conflated with the new freeze-domain identity. It
+produced no packet or receipt. Source-only commit
+`f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2` restored the dataset snapshot's canonical artifact
+identity while retaining the separately domain-enveloped freeze root; no profile, role, episode
+root, threshold, renderer, comparison, exclusion, failure rule, or replacement-lock byte changed.
+The added regression generates and validates a retained final-seed dataset while asserting that the
+two typed identities are distinct.
+
+The subsequent complete Windows/WGL run at clean source commit `f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2`
+published packet root `630d23cf791983977bdd9e92ba33ccedb6a18d1faf819c5d2df139c83dac9310`.
+All 160 selected cells were admitted; the 32 retained legacy controls were 16 admitted and 16
+rejected. Independent packet validation and the complete adversarial corpus succeeded. The strict,
+uniquely owned WGL receipt has root
+`28036d50634b9521b62fa9ceb00d24fe32c3b94d7bb2182d984f2df49c8c76ac`, binds 6,550 packet
+artifacts, the clean source Git tree `bbc29863fd4efef24c3d74cc8a99caff15ada504`, and these portable
+apparatus roots:
+
+- procedural assets: `e38f3132b1b8821b1df45ba0edae015081c8243eaac53e9a5c092c25e60de5a2`
+- appearance assignment: `7caa2e43c07ad522e27d41a8d71a23abff22c57fcd820d8f607f0233ff49ff12`
+- reconstructed source identity: `3218027ed2135815034a8162158d5940702ec25108cd726fe87a9410c1677948`
+- within-renderer invariance outcomes: `20037a1b7103e38abb69ab62fa659d99ba15fbd6b4fae8be5e1e9d9bfc771ebe`
+
+The versioned threshold-margin root is
+`eb23b2e2724f1603293e06a25d43344c87d5f954219c66ccdb8c5e5dd292c097`; every failure count and
+near-threshold count is zero. The corrected status remains `qualification_incomplete` and the seed
+disposition remains `pending_second_renderer_qualification` until exact-head Ubuntu/OSMesa CI and
+cross-renderer reconstruction complete. `benchmark_frozen` remains false and `scientific_result`
+remains null. No finding is self-verified by this implementation evidence.
