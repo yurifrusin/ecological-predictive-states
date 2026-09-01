@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 from epsbench.appearance import (
     REVISION1_PROFILE_IDS,
+    TEXTURE_RESOLUTION,
     AdmissionThresholds,
     AppearanceInstanceRecord,
     AppearanceRevision1Registry,
@@ -182,6 +183,33 @@ def _domain_hash(domain_key: str, payload: Any) -> str:
 
 class FreezeError(ValueError):
     """Raised when a freeze definition, lock, receipt, or packet is invalid."""
+
+
+_FREEZE_PORTABLE_METRIC_DECIMAL_PLACES = 12
+
+
+def _portable_freeze_metric_value(value: Any) -> Any:
+    """Canonicalize PR #17 derived floats without changing historical audit packets."""
+
+    if type(value) is float:
+        return float(round(value, _FREEZE_PORTABLE_METRIC_DECIMAL_PLACES))
+    if type(value) is list:
+        return [_portable_freeze_metric_value(item) for item in value]
+    if type(value) is dict:
+        return {key: _portable_freeze_metric_value(item) for key, item in value.items()}
+    return value
+
+
+def _portable_freeze_source_texture_diagnostics(
+    diagnostics: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Normalize signed real-FFT aliases and last-bit derived floats for this freeze."""
+
+    normalized = cast(list[dict[str, Any]], _portable_freeze_metric_value(diagnostics))
+    for item in normalized:
+        dominant = item["dominant_spectrum_index"]
+        dominant[0] = min(dominant[0], TEXTURE_RESOLUTION - dominant[0])
+    return normalized
 
 
 def _first_json_difference(
@@ -1437,6 +1465,8 @@ def _evaluate_freeze_cell(
         artifact_registry=artifact_registry,
         frame_cache=frame_cache,
     )
+    if "frame_metrics" in cell:
+        cell["frame_metrics"] = _portable_freeze_metric_value(cell["frame_metrics"])
     if cell["generation_status"] != "success" or control["generation_status"] != "success":
         return
     identity = cell["source_identity"]
@@ -2175,6 +2205,11 @@ def create_freeze_audit(
                         retain_source_evidence=True,
                     )
                     if cell["generation_status"] == "success":
+                        cell["source_texture_diagnostics"] = (
+                            _portable_freeze_source_texture_diagnostics(
+                                cell["source_texture_diagnostics"]
+                            )
+                        )
                         source_root = staging / cell["source_evidence"]["dataset_path"]
                         cell["source_identity"], _ = _source_identity_from_dataset(
                             source_root, config
@@ -3211,8 +3246,8 @@ def validate_freeze_audit(
                 "appearance_instance_sha256": render_plan.record.appearance_instance_sha256,
                 "appearance_profile_sha256": render_plan.record.appearance_profile_sha256,
                 "evaluation_seed_registry_sha256": seed_registry_hash(seeds),
-                "source_texture_diagnostics": _source_texture_diagnostics(
-                    profile, cell["scene_family"], render_plan.record
+                "source_texture_diagnostics": _portable_freeze_source_texture_diagnostics(
+                    _source_texture_diagnostics(profile, cell["scene_family"], render_plan.record)
                 ),
             }
             if canonical_json_bytes(stored_appearance) != canonical_json_bytes(

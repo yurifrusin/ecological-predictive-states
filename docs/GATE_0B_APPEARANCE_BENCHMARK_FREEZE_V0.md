@@ -198,9 +198,9 @@ packet completed, but publication-record creation rejected an incorrectly modele
 retention interval, PowerShell masked that first exit, and Linux independently rejected
 cross-platform reconstruction before OSMesa generation. The corrected evidence contract binds
 GitHub's exact run-created, artifact-created, and expiry timestamps and measures the configured
-90-day interval from workflow-run creation. Derived audit floats use a twelve-decimal portable
-serialization boundary, while symmetric real-FFT peaks use a tolerance-bounded sign-normalized
-index. Threshold comparisons continue to use unrounded values; profiles, evaluation episode roots,
+90-day interval from workflow-run creation. PR #17 freeze-layer audit copies use a twelve-decimal
+portable serialization boundary and sign-normalize symmetric real-FFT row aliases; the shared
+historical Slice 5 audit remains byte-compatible. Threshold comparisons continue to use unrounded values; profiles, evaluation episode roots,
 thresholds, renderers, and locked scientific inputs are unchanged. Exact-head requalification must
 start again after the source changes.
 

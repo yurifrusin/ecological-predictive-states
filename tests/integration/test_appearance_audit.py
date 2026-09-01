@@ -31,14 +31,6 @@ from epsbench.utils.seeding import derive_seed
 REPORT_NAMES = ("profile_summary.json", "seed_matrix.json", "negative_evidence.json")
 
 
-def test_portable_metric_normalization_canonicalizes_fft_sign_ties() -> None:
-    spectrum = np.zeros((128, 65), dtype=np.float64)
-    spectrum[1, 4] = 10.0
-    spectrum[127, 4] = 10.0 + 1e-13
-    assert audit._canonical_dominant_spectrum_index(spectrum, 128) == [1, 4]
-    assert audit._portable_metric_value(0.1234567890126) == 0.123456789013
-
-
 def _write_rehashed_packet(
     packet_root: Path,
     packet: dict[str, Any] | None = None,

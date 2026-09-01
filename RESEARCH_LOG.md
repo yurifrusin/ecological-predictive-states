@@ -246,6 +246,17 @@ keeps the artifact creation and expiry times exact, separates publication and re
 fail-fast CI steps, and adds strict difference-path diagnostics for cross-platform reconstruction.
 Changing the source head invalidates the successful WGL execution for qualification purposes.
 
+Exact head `98d6b33e5f39e5ac1ef4a115b5fef364a7737937` subsequently produced a fresh local
+192-cell WGL packet, passed standalone validation and every complete-packet adversarial case, and
+reported packet root `ab840376b6d1af2b904c5c8ce26ecc6656b96e2f27f2b44dd4374826fe1cfabb`.
+Exact-head Actions run `33536577509` nevertheless failed in its quality job before renderer
+qualification because portable normalization had been applied to the shared historical Slice 5
+audit and therefore no longer reproduced that immutable negative-evidence packet. The concurrent
+WGL job was cancelled and no packet artifact was published. This failed run is retained. The
+follow-up source correction restores the shared historical audit byte semantics and applies
+portable float and signed-frequency normalization only to copied PR #17 freeze-layer evidence.
+Changing the source head again invalidates the local WGL result for qualification purposes.
+
 ### Current PR #17 status
 
 | Boundary | Current source-record status |

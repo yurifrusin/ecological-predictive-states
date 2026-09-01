@@ -36,6 +36,8 @@ from epsbench.freeze import (
     _evaluate_freeze_cell,
     _legacy_control_membership_domain,
     _legacy_source_claims_from_dataset,
+    _portable_freeze_metric_value,
+    _portable_freeze_source_texture_diagnostics,
     _readiness_summary,
     _selected_membership_domain,
     _source_identity_from_dataset,
@@ -158,6 +160,26 @@ def test_publication_retention_is_bound_to_workflow_run_creation() -> None:
     invalid["record_sha256"] = sha256_bytes(canonical_json_bytes(invalid_domain))
     with pytest.raises(ValueError, match="workflow-run retention"):
         PublicPacketPublicationRecord.model_validate(invalid)
+
+
+def test_freeze_portable_metrics_are_scoped_and_sign_normalized() -> None:
+    raw = [
+        {
+            "source_luminance_standard_deviation": 0.1234567890126,
+            "dominant_spectrum_index": [127, 4],
+            "high_frequency_power_fraction": 0.9876543210984,
+        }
+    ]
+    normalized = _portable_freeze_source_texture_diagnostics(raw)
+    assert raw[0]["dominant_spectrum_index"] == [127, 4]
+    assert normalized == [
+        {
+            "source_luminance_standard_deviation": 0.123456789013,
+            "dominant_spectrum_index": [1, 4],
+            "high_frequency_power_fraction": 0.987654321098,
+        }
+    ]
+    assert _portable_freeze_metric_value({"metric": 0.3333333333336}) == {"metric": 0.333333333334}
 
 
 def test_protected_canonical_definition_files_are_byte_identical() -> None:

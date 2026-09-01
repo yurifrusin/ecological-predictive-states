@@ -47,11 +47,12 @@ Windows and Linux primitives. The replacement lock and locked scientific inputs 
 
 Exact head `b63121cdc7ef11340e0275498fda0f0b32213637` exposed two further fail-closed
 portability defects before OSMesa generation: Actions retention is anchored to workflow-run
-creation rather than the later packet upload, and derived NumPy metrics can differ in their final
-floating-point bits or choose opposite signed bins from one symmetric real-FFT peak. Publication
+creation rather than the later packet upload, and freeze-layer NumPy metrics can differ in their
+final floating-point bits or choose opposite signed bins from one symmetric real-FFT peak. Publication
 records now bind the exact live run-creation, artifact-creation, and expiry timestamps, with the
-configured 90-day interval measured from run creation. Derived audit floats are serialized to
-twelve decimal places, and FFT peak identities use a tolerance-bounded sign-normalized index.
+configured 90-day interval measured from run creation. PR #17 freeze-layer audit copies serialize
+derived floats to twelve decimal places and sign-normalize real-FFT row aliases; the shared
+historical Slice 5 audit semantics remain unchanged.
 Threshold decisions still use the unrounded values and every threshold is unchanged; the smallest
 historically observed absolute margin was greater than `0.012`, so this representation rule is far
 below a decision boundary. CI publication and receipt commands are separate fail-fast steps.

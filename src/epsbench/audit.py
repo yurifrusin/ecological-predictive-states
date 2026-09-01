@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -220,34 +220,6 @@ _SOURCE_TEXTURE_DIAGNOSTIC_FIELDS = {
     "dominant_spectrum_index",
     "high_frequency_power_fraction",
 }
-
-_PORTABLE_METRIC_DECIMAL_PLACES = 12
-
-
-def _portable_metric_value(value: Any) -> Any:
-    """Canonicalize derived floats beyond the precision used by benchmark thresholds."""
-
-    if type(value) is float:
-        return float(round(value, _PORTABLE_METRIC_DECIMAL_PLACES))
-    if type(value) is list:
-        return [_portable_metric_value(item) for item in value]
-    if type(value) is dict:
-        return {key: _portable_metric_value(item) for key, item in value.items()}
-    return value
-
-
-def _canonical_dominant_spectrum_index(spectrum: Any, row_count: int) -> list[int]:
-    """Choose one sign-normalized index from numerically tied real-FFT peaks."""
-
-    maximum = float(np.max(spectrum))
-    tolerance = max(abs(maximum) * 1e-12, 1e-24)
-    candidates = np.argwhere(np.abs(spectrum - maximum) <= tolerance)
-    if candidates.size == 0:
-        raise AppearanceAuditError("source texture spectrum has no dominant index")
-    row, column = min(
-        (min(int(index[0]), row_count - int(index[0])), int(index[1])) for index in candidates
-    )
-    return [row, column]
 
 
 class _PacketArtifactRegistry:
@@ -893,26 +865,19 @@ def _frame_metrics(
     boundary_contrast = (
         float(np.mean(np.concatenate(boundary_deltas, axis=0)) / 255.0) if boundary_deltas else 0.0
     )
-    return cast(
-        dict[str, Any],
-        _portable_metric_value(
-            {
-                "controlled_pixel_count": controlled_count,
-                "changed_controlled_pixel_fraction": fraction,
-                "normalized_controlled_rgb_mad": mad,
-                "material_change_pass": (
-                    fraction
-                    >= profile.non_degeneracy_thresholds.changed_controlled_pixel_fraction_minimum
-                    and mad
-                    >= profile.non_degeneracy_thresholds.normalized_controlled_rgb_mad_minimum
-                ),
-                "controlled_surface_exposure_pass": exposure_pass,
-                "textured_surface_variation_pass": texture_pass,
-                "controlled_boundary_normalized_rgb_contrast": boundary_contrast,
-                "surface_diagnostics": surface_metrics,
-            }
+    return {
+        "controlled_pixel_count": controlled_count,
+        "changed_controlled_pixel_fraction": fraction,
+        "normalized_controlled_rgb_mad": mad,
+        "material_change_pass": (
+            fraction >= profile.non_degeneracy_thresholds.changed_controlled_pixel_fraction_minimum
+            and mad >= profile.non_degeneracy_thresholds.normalized_controlled_rgb_mad_minimum
         ),
-    )
+        "controlled_surface_exposure_pass": exposure_pass,
+        "textured_surface_variation_pass": texture_pass,
+        "controlled_boundary_normalized_rgb_contrast": boundary_contrast,
+        "surface_diagnostics": surface_metrics,
+    }
 
 
 def _source_texture_diagnostics(
@@ -935,7 +900,7 @@ def _source_texture_diagnostics(
         luminance = 0.2126 * pixels[:, :, 0] + 0.7152 * pixels[:, :, 1] + 0.0722 * pixels[:, :, 2]
         spectrum = np.abs(np.fft.rfft2(luminance - np.mean(luminance))) ** 2
         spectrum[0, 0] = 0.0
-        dominant = _canonical_dominant_spectrum_index(spectrum, luminance.shape[0])
+        dominant = np.unravel_index(int(np.argmax(spectrum)), spectrum.shape)
         row_frequency = np.fft.fftfreq(luminance.shape[0])[:, None]
         column_frequency = np.fft.rfftfreq(luminance.shape[1])[None, :]
         radius = np.sqrt(row_frequency**2 + column_frequency**2)
@@ -944,15 +909,13 @@ def _source_texture_diagnostics(
             float(np.sum(spectrum[radius >= 0.25]) / total_power) if total_power > 0.0 else 0.0
         )
         diagnostics.append(
-            _portable_metric_value(
-                {
-                    "semantic_surface_name": record.semantic_surface_name,
-                    "source_texture_logical_sha256": record.source_texture_logical_sha256,
-                    "source_luminance_standard_deviation": float(np.std(luminance)),
-                    "dominant_spectrum_index": dominant,
-                    "high_frequency_power_fraction": high_frequency_power_fraction,
-                }
-            )
+            {
+                "semantic_surface_name": record.semantic_surface_name,
+                "source_texture_logical_sha256": record.source_texture_logical_sha256,
+                "source_luminance_standard_deviation": float(np.std(luminance)),
+                "dominant_spectrum_index": [int(dominant[0]), int(dominant[1])],
+                "high_frequency_power_fraction": high_frequency_power_fraction,
+            }
         )
     return diagnostics
 
