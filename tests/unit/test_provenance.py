@@ -13,7 +13,11 @@ from epsbench.data.provenance import (
     ProvenanceError,
     collect_source_provenance,
 )
-from epsbench.schema import GitAvailabilityStatus
+from epsbench.schema import (
+    GitAvailabilityStatus,
+    canonical_github_repository_identity,
+    sanitize_git_repository,
+)
 
 
 def _git(root: Path, *arguments: str) -> None:
@@ -115,3 +119,55 @@ def test_git_origin_is_sanitized_before_serialization(
     assert "secret" not in serialized
     assert "Users/private" not in serialized
     assert "../private" not in serialized
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://github.com/yurifrusin/ecological-predictive-states",
+        "https://github.com/yurifrusin/ecological-predictive-states.git",
+        "HTTPS://GITHUB.COM/YuriFrusin/Ecological-Predictive-States.git",
+    ],
+)
+def test_equivalent_github_https_origins_have_one_repository_identity(
+    provenance_repository: Path,
+    origin: str,
+) -> None:
+    _git(provenance_repository, "remote", "set-url", "origin", origin)
+    provenance = collect_source_provenance(provenance_repository)
+    assert provenance.git_repository == "yurifrusin/ecological-predictive-states"
+    assert canonical_github_repository_identity(origin) == provenance.git_repository
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://github.com/another-owner/ecological-predictive-states",
+        "https://github.com/yurifrusin/another-repository",
+    ],
+)
+def test_different_github_repositories_have_different_canonical_identities(origin: str) -> None:
+    assert canonical_github_repository_identity(origin) != (
+        "yurifrusin/ecological-predictive-states"
+    )
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://github.example/yurifrusin/ecological-predictive-states",
+        "https://github.com/yurifrusin/ecological-predictive-states/extra",
+        "https://user@github.com/yurifrusin/ecological-predictive-states",
+        "https://token:secret@github.com/yurifrusin/ecological-predictive-states",
+        "https://github.com/yurifrusin/ecological-predictive-states?token=secret",
+        "https://github.com/yurifrusin/ecological-predictive-states#fragment",
+        "https://github.com.evil.invalid/yurifrusin/ecological-predictive-states",
+        "https://github.com/yurifrusin/ecological-predictive-states.git/extra",
+    ],
+)
+def test_github_repository_identity_rejects_ambiguous_references(
+    origin: str,
+) -> None:
+    with pytest.raises(ValueError):
+        canonical_github_repository_identity(origin)
+    assert sanitize_git_repository(origin) != "yurifrusin/ecological-predictive-states"

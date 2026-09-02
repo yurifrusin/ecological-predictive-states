@@ -204,15 +204,24 @@ historical Slice 5 audit remains byte-compatible. Threshold comparisons continue
 thresholds, renderers, and locked scientific inputs are unchanged. Exact-head requalification must
 start again after the source changes.
 
+Second-correction exact head `dc17d8453bed2583c085aa7441255ca476d3e1f0` later completed both
+renderer paths and received `SCIENTIFIC_PASS` plus `ENGINEERING_REQUEST_CHANGES`. The engineering
+re-review verified `EPS-ER17-0002` through `EPS-ER17-0005`, left `EPS-ER17-0001` and
+`EPS-ER17-0006` unverified, and raised `EPS-ER17-0007`. The owner-issued third correction requires
+the production validator to consume only safely extracted, digest-verified raw packet and evidence
+archives resolved from exact live GitHub metadata, and gives equivalent credential-free GitHub
+HTTPS origins one canonical owner/repository identity. The verified findings and replacement lock
+remain preservation constraints. All exact-head apparatus evidence must be regenerated.
+
 ## Current PR #17 status
 
 | Boundary | Current source-record status |
 | --- | --- |
 | Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
 | Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
-| Implementation status | `SECOND_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Implementation status | `THIRD_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
 | Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
-| Owner status | `SECOND_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Owner status | `THIRD_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
 | Benchmark-freeze status | `NOT_PERFORMED` |
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |

@@ -11,11 +11,12 @@ import stat
 import subprocess
 import tempfile
 import time
+import zipfile
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal, cast
 
 import numpy as np
@@ -62,6 +63,7 @@ from epsbench.data.identity import (
     single_occluder_scene_content_domain,
     visibility_event_domain,
 )
+from epsbench.data.paths import UnsafeOwnedFileError, open_owned_regular_file
 from epsbench.data.provenance import collect_source_provenance
 from epsbench.data.publication import atomic_publish_owned_bytes
 from epsbench.data.validate import validate_dataset
@@ -74,6 +76,7 @@ from epsbench.schema import (
     RendererProvenance,
     SourceProvenance,
     TransitionRecord,
+    canonical_github_repository_identity,
     parse_privileged_instrumentation_json,
 )
 from epsbench.utils.canonical import (
@@ -121,6 +124,7 @@ EXCLUDED_PROFILE_IDS = (
 )
 LEGACY_CONTROL_PROFILE_ID = "legacy_solid_base_v1"
 LOCK_PATH = Path("configs/appearance_benchmark_freeze_v0_lock.json")
+CANONICAL_REPOSITORY_IDENTITY = "yurifrusin/ecological-predictive-states"
 
 LOGICAL_DOMAINS = {
     "benchmark_definition": "epsbench.appearance_benchmark.v1.benchmark_definition",
@@ -183,6 +187,14 @@ def _domain_hash(domain_key: str, payload: Any) -> str:
 
 class FreezeError(ValueError):
     """Raised when a freeze definition, lock, receipt, or packet is invalid."""
+
+
+class ImmutableArtifactBindingError(FreezeError):
+    """Raised when live artifact authority cannot be bound to the consumed archive bytes."""
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        super().__init__(f"{code}: {message}")
 
 
 _FREEZE_PORTABLE_METRIC_DECIMAL_PLACES = 12
@@ -1954,7 +1966,11 @@ def _validate_lock_commit_snapshots(
         provenance = SourceProvenance.model_validate_json(canonical_json_bytes(source_provenance))
     except Exception as error:
         raise FreezeError("qualification source provenance is invalid") from error
-    if provenance.git_commit is None or provenance.git_dirty is not False:
+    if (
+        provenance.git_commit is None
+        or provenance.git_dirty is not False
+        or provenance.git_repository != CANONICAL_REPOSITORY_IDENTITY
+    ):
         raise FreezeError("qualification requires exact Git source provenance")
     if source_provenance != collect_source_provenance(Path.cwd()).model_dump(mode="json"):
         raise FreezeError("qualification source provenance is not truthful")
@@ -2046,6 +2062,7 @@ def validate_renderer_receipt_payload(
     provenance = validated["qualification_source_provenance"]
     if (
         provenance["git_commit"] != validated["qualification_source_commit"]
+        or provenance["git_repository"] != CANONICAL_REPOSITORY_IDENTITY
         or provenance["git_dirty"] is not False
         or provenance["dirty_diff_sha256"] is not None
         or _git_tree(validated["qualification_source_commit"])
@@ -2414,6 +2431,194 @@ def _artifact_digest(value: Any) -> str:
     return digest
 
 
+def _is_canonical_repository_reference(value: Any) -> bool:
+    if type(value) is not str:
+        return False
+    try:
+        return canonical_github_repository_identity(value) == CANONICAL_REPOSITORY_IDENTITY
+    except ValueError:
+        return False
+
+
+def _owned_archive_payload(path: Path, role: str) -> bytes:
+    try:
+        with open_owned_regular_file(path.parent, path.name) as owned:
+            return owned.payload
+    except UnsafeOwnedFileError as error:
+        raise ImmutableArtifactBindingError(
+            "artifact_archive_unavailable",
+            f"{role} archive is not one stable owned regular file",
+        ) from error
+
+
+def _verify_artifact_archive_payload(
+    payload: bytes,
+    artifact_metadata: dict[str, Any],
+    role: str,
+) -> None:
+    if artifact_metadata.get("expired") is not False:
+        raise ImmutableArtifactBindingError(
+            "artifact_expired",
+            f"{role} artifact is expired or its live expiry status is unavailable",
+        )
+    try:
+        expected_digest = _artifact_digest(artifact_metadata.get("digest"))
+    except FreezeError as error:
+        raise ImmutableArtifactBindingError(
+            "artifact_digest_unavailable",
+            f"{role} live artifact digest is unavailable",
+        ) from error
+    if type(artifact_metadata.get("size_in_bytes")) is not int:
+        raise ImmutableArtifactBindingError(
+            "artifact_size_unavailable",
+            f"{role} live artifact size is unavailable",
+        )
+    if len(payload) != artifact_metadata["size_in_bytes"]:
+        raise ImmutableArtifactBindingError(
+            "artifact_archive_size_mismatch",
+            f"{role} archive bytes differ from the live artifact size",
+        )
+    if sha256_bytes(payload) != expected_digest:
+        raise ImmutableArtifactBindingError(
+            "artifact_archive_digest_mismatch",
+            f"{role} archive bytes differ from the live immutable artifact digest",
+        )
+
+
+def _safe_extract_artifact_archive(
+    payload: bytes,
+    destination: Path,
+    role: str,
+    *,
+    expected_members: set[str] | None = None,
+) -> set[str]:
+    """Extract one already digest-verified ZIP into a new isolated directory."""
+
+    if destination.exists():
+        raise ImmutableArtifactBindingError(
+            "artifact_extraction_destination_exists",
+            f"{role} extraction destination already exists",
+        )
+    try:
+        archive = zipfile.ZipFile(BytesIO(payload))
+    except (OSError, zipfile.BadZipFile) as error:
+        raise ImmutableArtifactBindingError(
+            "artifact_archive_invalid",
+            f"{role} archive is not a valid ZIP",
+        ) from error
+    with archive:
+        members: dict[str, zipfile.ZipInfo] = {}
+        casefolded: set[str] = set()
+        try:
+            infos = archive.infolist()
+        except (OSError, zipfile.BadZipFile) as error:
+            raise ImmutableArtifactBindingError(
+                "artifact_archive_invalid",
+                f"{role} archive member table is invalid",
+            ) from error
+        if len(infos) > 10_000 or sum(info.file_size for info in infos) > 1_073_741_824:
+            raise ImmutableArtifactBindingError(
+                "artifact_archive_resource_limit",
+                f"{role} archive exceeds the bounded member or extracted-byte limit",
+            )
+        for info in infos:
+            name = info.filename
+            logical = PurePosixPath(name)
+            unix_mode = (info.external_attr >> 16) & 0xFFFF
+            unix_kind = stat.S_IFMT(unix_mode)
+            if (
+                not name
+                or "\\" in name
+                or "\x00" in name
+                or name.endswith("/")
+                or info.is_dir()
+                or info.flag_bits & 0x1
+                or logical.is_absolute()
+                or logical.as_posix() != name
+                or ".." in logical.parts
+                or any(not part or part == "." or ":" in part for part in logical.parts)
+                or unix_kind not in {0, stat.S_IFREG}
+            ):
+                raise ImmutableArtifactBindingError(
+                    "artifact_archive_unsafe_member",
+                    f"{role} archive contains a non-regular or unsafe member",
+                )
+            folded = name.casefold()
+            if name in members or folded in casefolded:
+                raise ImmutableArtifactBindingError(
+                    "artifact_archive_colliding_member",
+                    f"{role} archive contains duplicate or case-colliding members",
+                )
+            members[name] = info
+            casefolded.add(folded)
+        for name in members:
+            parent = PurePosixPath(name).parent
+            while parent != PurePosixPath("."):
+                if parent.as_posix().casefold() in casefolded:
+                    raise ImmutableArtifactBindingError(
+                        "artifact_archive_colliding_member",
+                        f"{role} archive contains a file/directory path collision",
+                    )
+                parent = parent.parent
+        member_names = set(members)
+        if expected_members is not None and member_names != expected_members:
+            raise ImmutableArtifactBindingError(
+                "artifact_archive_member_set_mismatch",
+                f"{role} archive member set is not the exact authorised set",
+            )
+
+        destination.mkdir(parents=False, exist_ok=False)
+        for name in sorted(members):
+            target = destination.joinpath(*PurePosixPath(name).parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with archive.open(members[name], "r") as source, target.open("xb") as output:
+                    shutil.copyfileobj(source, output)
+            except (OSError, RuntimeError, zipfile.BadZipFile) as error:
+                raise ImmutableArtifactBindingError(
+                    "artifact_archive_extraction_failed",
+                    f"{role} archive member could not be extracted exactly",
+                ) from error
+            try:
+                extracted_size = target.stat().st_size
+            except OSError as error:
+                raise ImmutableArtifactBindingError(
+                    "artifact_archive_extraction_failed",
+                    f"{role} extracted member is unavailable",
+                ) from error
+            if extracted_size != members[name].file_size:
+                raise ImmutableArtifactBindingError(
+                    "artifact_archive_extraction_failed",
+                    f"{role} extracted member size differs",
+                )
+        return member_names
+
+
+def _validate_packet_archive_binding(
+    packet_root: Path,
+    artifact_archive_path: Path,
+    artifact_metadata: dict[str, Any],
+    counterpart_evidence_root: Path | None,
+    role: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    archive_payload = _owned_archive_payload(artifact_archive_path, role)
+    _verify_artifact_archive_payload(archive_payload, artifact_metadata, role)
+    with tempfile.TemporaryDirectory(prefix="epsbench-verified-artifact-") as temporary:
+        extracted_root = Path(temporary) / "packet"
+        _safe_extract_artifact_archive(archive_payload, extracted_root, role)
+        archive_packet = validate_freeze_audit(extracted_root, counterpart_evidence_root)
+        archive_identity = _public_packet_evidence(extracted_root, archive_packet)
+        local_packet = validate_freeze_audit(packet_root, counterpart_evidence_root)
+        if archive_packet != local_packet or archive_identity != _public_packet_evidence(
+            packet_root, local_packet
+        ):
+            raise ImmutableArtifactBindingError(
+                "artifact_archive_packet_mismatch",
+                f"{role} digest-verified archive differs from the supplied packet",
+            )
+        return archive_packet, archive_identity
+
+
 def _matching_workflow_job(
     jobs_metadata: dict[str, Any],
     *,
@@ -2450,6 +2655,7 @@ def _matching_workflow_job(
 
 def create_publication_record(
     packet_root: Path,
+    artifact_archive_path: Path,
     artifact_metadata_path: Path,
     workflow_run_metadata_path: Path,
     workflow_jobs_metadata_path: Path,
@@ -2460,10 +2666,16 @@ def create_publication_record(
     output: Path,
     counterpart_evidence_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Bind one already-uploaded immutable CI artifact to its validated complete packet."""
+    """Bind a digest-verified immutable CI archive to its validated complete packet."""
 
-    packet = validate_freeze_audit(packet_root, counterpart_evidence_root)
     artifact = _ordinary_json_object(artifact_metadata_path, "CI artifact metadata")
+    packet, packet_identity = _validate_packet_archive_binding(
+        packet_root,
+        artifact_archive_path,
+        artifact,
+        counterpart_evidence_root,
+        "published packet",
+    )
     run = _ordinary_json_object(workflow_run_metadata_path, "workflow run metadata")
     jobs = _ordinary_json_object(workflow_jobs_metadata_path, "workflow jobs metadata")
     repository = run.get("repository")
@@ -2471,9 +2683,18 @@ def create_publication_record(
     head_commit = run.get("head_commit")
     source_commit = packet["source_provenance"]["git_commit"]
     source_tree = _git_tree(source_commit)
+    renderer_name = {
+        "windows_wgl_locked": "wgl",
+        "ubuntu_osmesa_locked": "osmesa",
+    }.get(packet["renderer_environment_id"])
+    expected_artifact_name = f"appearance-freeze-{renderer_name}-packet-{source_commit}"
+    expected_job_name = f"qualify-{renderer_name}"
     if (
-        type(repository) is not dict
-        or repository.get("full_name") != "yurifrusin/ecological-predictive-states"
+        renderer_name is None
+        or job_name != expected_job_name
+        or type(repository) is not dict
+        or not _is_canonical_repository_reference(repository.get("html_url"))
+        or repository.get("full_name") != CANONICAL_REPOSITORY_IDENTITY
         or run.get("head_sha") != source_commit
         or type(head_commit) is not dict
         or head_commit.get("id") != source_commit
@@ -2489,11 +2710,15 @@ def create_publication_record(
         or workflow_run.get("head_sha") != source_commit
         or artifact.get("expired") is not False
         or type(artifact.get("id")) is not int
-        or type(artifact.get("name")) is not str
-        or type(artifact.get("url")) is not str
+        or artifact.get("name") != expected_artifact_name
+        or artifact.get("url")
+        != (
+            f"https://api.github.com/repos/{CANONICAL_REPOSITORY_IDENTITY}/actions/"
+            f"artifacts/{artifact.get('id')}"
+        )
         or type(artifact.get("size_in_bytes")) is not int
         or artifact["size_in_bytes"] <= 0
-        or type(artifact.get("archive_download_url")) is not str
+        or artifact.get("archive_download_url") != f"{artifact.get('url')}/zip"
         or type(artifact.get("created_at")) is not str
         or type(artifact.get("expires_at")) is not str
     ):
@@ -2517,7 +2742,7 @@ def create_publication_record(
     domain = {
         "schema_version": PUBLICATION_RECORD_VERSION,
         "evidence_class": "PUBLIC_REPOSITORY_ONLY",
-        "repository": "yurifrusin/ecological-predictive-states",
+        "repository": CANONICAL_REPOSITORY_IDENTITY,
         "source_commit": source_commit,
         "source_tree": source_tree,
         "workflow_run_id": run["id"],
@@ -2546,7 +2771,7 @@ def create_publication_record(
             "deletes_earlier"
         ),
         "public_access_posture": "public_repository_authenticated_actions_artifact",
-        "packet_identity": _public_packet_evidence(packet_root, packet),
+        "packet_identity": packet_identity,
         "complete_packet_root_sha256": packet["complete_packet_root_sha256"],
     }
     record = {**domain, "record_sha256": sha256_bytes(canonical_json_bytes(domain))}
@@ -2581,10 +2806,23 @@ def validate_publication_record(
     ):
         raise FreezeError("public packet publication differs from validated packet")
     repository = workflow_run_metadata.get("repository")
+    repository_url = repository.get("html_url") if type(repository) is dict else None
     artifact_run = artifact_metadata.get("workflow_run")
     head_commit = workflow_run_metadata.get("head_commit")
+    renderer_name = {
+        "windows_wgl_locked": "wgl",
+        "ubuntu_osmesa_locked": "osmesa",
+    }.get(packet["renderer_environment_id"])
+    expected_artifact_name = f"appearance-freeze-{renderer_name}-packet-{record['source_commit']}"
+    expected_api_url = (
+        f"https://api.github.com/repos/{record['repository']}/actions/artifacts/"
+        f"{record['artifact_id']}"
+    )
     if (
-        type(repository) is not dict
+        renderer_name is None
+        or record["job_name"] != f"qualify-{renderer_name}"
+        or type(repository) is not dict
+        or not _is_canonical_repository_reference(repository_url)
         or repository.get("full_name") != record["repository"]
         or workflow_run_metadata.get("id") != record["workflow_run_id"]
         or workflow_run_metadata.get("run_attempt") != record["workflow_run_attempt"]
@@ -2600,9 +2838,12 @@ def validate_publication_record(
         or artifact_run.get("id") != record["workflow_run_id"]
         or artifact_run.get("head_sha") != record["source_commit"]
         or artifact_metadata.get("id") != record["artifact_id"]
-        or artifact_metadata.get("name") != record["artifact_name"]
-        or artifact_metadata.get("url") != record["artifact_api_url"]
-        or artifact_metadata.get("archive_download_url") != record["artifact_archive_download_url"]
+        or artifact_metadata.get("name") != expected_artifact_name
+        or record["artifact_name"] != expected_artifact_name
+        or artifact_metadata.get("url") != expected_api_url
+        or record["artifact_api_url"] != expected_api_url
+        or artifact_metadata.get("archive_download_url") != f"{expected_api_url}/zip"
+        or record["artifact_archive_download_url"] != f"{expected_api_url}/zip"
         or artifact_metadata.get("size_in_bytes") != record["artifact_size_in_bytes"]
         or artifact_metadata.get("created_at") != record["artifact_created_at_utc"]
         or artifact_metadata.get("expires_at") != record["artifact_expires_at_utc"]
@@ -2693,69 +2934,215 @@ def _validate_receipt_against_packet(
     return validated
 
 
+_COUNTERPART_BUNDLE_JSON_FILES = (
+    "packet_live_artifact.json",
+    "packet_live_workflow_run.json",
+    "packet_live_workflow_jobs.json",
+    "evidence_live_artifact.json",
+    "evidence_live_workflow_run.json",
+    "evidence_live_workflow_jobs.json",
+)
+_COUNTERPART_BUNDLE_ARCHIVE_FILES = (
+    "packet_artifact.zip",
+    "evidence_artifact.zip",
+)
+_EVIDENCE_ARCHIVE_MEMBERS = {"renderer_receipt.json", "publication_record.json"}
+
+
+def _load_counterpart_bundle(evidence_root: Path) -> dict[str, Any]:
+    artifacts = _PacketArtifactRegistry(evidence_root)
+    bundle: dict[str, Any] = {}
+    try:
+        for name in _COUNTERPART_BUNDLE_JSON_FILES:
+            with artifacts.claim(name, f"counterpart-bundle:{name}") as owned:
+                bundle[name] = _decode_canonical_object(owned.payload, name)
+        for name in _COUNTERPART_BUNDLE_ARCHIVE_FILES:
+            with artifacts.claim(name, f"counterpart-bundle:{name}") as owned:
+                bundle[name] = owned.payload
+        artifacts.assert_exact_tree()
+    except ImmutableArtifactBindingError:
+        raise
+    except (OSError, ValueError) as error:
+        raise ImmutableArtifactBindingError(
+            "counterpart_bundle_invalid",
+            "counterpart evidence bundle is incomplete, aliased, or contains extra paths",
+        ) from error
+    return bundle
+
+
+def _validate_evidence_artifact_metadata(
+    artifact: dict[str, Any],
+    run: dict[str, Any],
+    jobs: dict[str, Any],
+    publication: dict[str, Any],
+    environment_id: str,
+) -> None:
+    repository = run.get("repository")
+    artifact_run = artifact.get("workflow_run")
+    repository_url = repository.get("html_url") if type(repository) is dict else None
+    renderer_name = {
+        "windows_wgl_locked": "wgl",
+        "ubuntu_osmesa_locked": "osmesa",
+    }.get(environment_id)
+    expected_name = f"appearance-freeze-{renderer_name}-evidence-{publication['source_commit']}"
+    expected_api_url = (
+        f"https://api.github.com/repos/{CANONICAL_REPOSITORY_IDENTITY}/actions/artifacts/"
+        f"{artifact.get('id')}"
+    )
+    expected_archive_url = f"{expected_api_url}/zip"
+    if (
+        renderer_name is None
+        or type(repository) is not dict
+        or not _is_canonical_repository_reference(repository_url)
+        or repository.get("full_name") != CANONICAL_REPOSITORY_IDENTITY
+        or run.get("id") != publication["workflow_run_id"]
+        or run.get("run_attempt") != publication["workflow_run_attempt"]
+        or run.get("name") != publication["workflow_name"]
+        or run.get("path") != publication["workflow_path"]
+        or run.get("html_url") != publication["workflow_run_url"]
+        or run.get("created_at") != publication["workflow_run_created_at_utc"]
+        or run.get("head_sha") != publication["source_commit"]
+        or type(run.get("head_commit")) is not dict
+        or run["head_commit"].get("id") != publication["source_commit"]
+        or run["head_commit"].get("tree_id") != publication["source_tree"]
+        or type(artifact_run) is not dict
+        or artifact_run.get("id") != publication["workflow_run_id"]
+        or artifact_run.get("head_sha") != publication["source_commit"]
+        or type(artifact.get("id")) is not int
+        or artifact["id"] <= 0
+        or artifact["id"] == publication["artifact_id"]
+        or artifact.get("name") != expected_name
+        or artifact.get("url") != expected_api_url
+        or artifact.get("archive_download_url") != expected_archive_url
+        or type(artifact.get("created_at")) is not str
+        or type(artifact.get("expires_at")) is not str
+        or artifact.get("expired") is not False
+    ):
+        raise ImmutableArtifactBindingError(
+            "evidence_artifact_metadata_mismatch",
+            "evidence archive live repository, run, job, head, or artifact identity differs",
+        )
+    job = _matching_workflow_job(
+        jobs,
+        job_name=publication["job_name"],
+        workflow_run_id=publication["workflow_run_id"],
+        workflow_run_attempt=publication["workflow_run_attempt"],
+        source_commit=publication["source_commit"],
+    )
+    if (
+        job["id"] != publication["job_database_id"]
+        or job.get("url") != publication["job_api_url"]
+        or job.get("html_url") != publication["job_html_url"]
+    ):
+        raise ImmutableArtifactBindingError(
+            "evidence_artifact_job_mismatch",
+            "evidence archive live workflow job differs from the packet publication authority",
+        )
+    try:
+        run_created = datetime.fromisoformat(
+            publication["workflow_run_created_at_utc"].replace("Z", "+00:00")
+        )
+        artifact_created = datetime.fromisoformat(artifact["created_at"].replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(artifact["expires_at"].replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ImmutableArtifactBindingError(
+            "evidence_artifact_timestamp_invalid",
+            "evidence archive live timestamps are invalid",
+        ) from error
+    if (
+        run_created.tzinfo is None
+        or artifact_created.tzinfo is None
+        or expires.tzinfo is None
+        or artifact_created < run_created
+        or expires - run_created != timedelta(days=90)
+        or datetime.now(UTC) >= expires.astimezone(UTC)
+    ):
+        raise ImmutableArtifactBindingError(
+            "evidence_artifact_expired",
+            "evidence archive is expired or lacks exact workflow-run retention",
+        )
+
+
 def _load_counterpart_evidence(
     evidence_root: Path,
     definition: BenchmarkDefinition,
     seeds: FinalEvaluationSeedRegistry,
     lock: dict[str, Any],
 ) -> dict[str, Any]:
-    """Resolve and validate all public evidence before admitting a counterpart renderer."""
+    """Bind raw live archives to extracted bytes before admitting a counterpart renderer."""
 
-    packet_root = evidence_root / "packet"
-    receipt_path = evidence_root / "renderer_receipt.json"
-    publication_path = evidence_root / "publication_record.json"
-    artifact_metadata_path = evidence_root / "live_artifact.json"
-    workflow_run_path = evidence_root / "live_workflow_run.json"
-    workflow_jobs_path = evidence_root / "live_workflow_jobs.json"
-    if not evidence_root.is_dir() or not packet_root.is_dir():
-        raise FreezeError("counterpart public packet is absent or unavailable")
-    counterpart_packet = validate_freeze_audit(packet_root)
-    counterpart_definition, counterpart_seeds, counterpart_lock = _receipt_context(packet_root)
-    if (
-        counterpart_definition != definition
-        or counterpart_seeds != seeds
-        or counterpart_lock != lock
-    ):
-        raise FreezeError("counterpart packet scientific inputs differ")
-    receipt = _read_canonical_json(receipt_path)
-    validated_receipt = _validate_receipt_against_packet(
-        receipt,
-        packet_root,
-        counterpart_packet,
-        counterpart_definition,
-        counterpart_seeds,
-        counterpart_lock,
-    )
-    publication = _read_canonical_json(publication_path)
-    validated_publication = validate_publication_record(
-        publication,
-        packet_root,
-        counterpart_packet,
-        _ordinary_json_object(artifact_metadata_path, "live CI artifact metadata"),
-        _ordinary_json_object(workflow_run_path, "live workflow run metadata"),
-        _ordinary_json_object(workflow_jobs_path, "live workflow jobs metadata"),
-    )
-    selected = _read_canonical_json(packet_root / "selected_profile_matrix.json")["cells"]
-    local_rows = _local_profile_readiness(selected, counterpart_definition)
-    if local_rows != counterpart_packet["local_profile_readiness"]:
-        raise FreezeError("counterpart packet readiness reconstruction differs")
-    return {
-        "environment_id": counterpart_packet["renderer_environment_id"],
-        "replacement_definition_lock_commit": counterpart_packet[
-            "replacement_definition_lock_commit"
-        ],
-        "replacement_definition_lock_sha256": counterpart_packet["portable_definition_roots"][
-            "freeze_definition_lock_sha256"
-        ],
-        "profiles": local_rows,
-        "portable_definition_roots": counterpart_packet["portable_definition_roots"],
-        "portable_apparatus_roots": counterpart_packet["portable_apparatus_roots"],
-        "renderer_local_roots": counterpart_packet["renderer_local_roots"],
-        "threshold_margin_summary": counterpart_packet["threshold_margin_summary"],
-        "selected_outcome_map": _outcome_rows(selected),
-        "receipt": validated_receipt,
-        "publication_record": validated_publication,
-    }
+    bundle = _load_counterpart_bundle(evidence_root)
+    packet_metadata = cast(dict[str, Any], bundle["packet_live_artifact.json"])
+    evidence_metadata = cast(dict[str, Any], bundle["evidence_live_artifact.json"])
+    packet_archive = cast(bytes, bundle["packet_artifact.zip"])
+    evidence_archive = cast(bytes, bundle["evidence_artifact.zip"])
+    _verify_artifact_archive_payload(packet_archive, packet_metadata, "counterpart packet")
+    _verify_artifact_archive_payload(evidence_archive, evidence_metadata, "counterpart evidence")
+
+    with tempfile.TemporaryDirectory(prefix="epsbench-counterpart-evidence-") as temporary:
+        packet_root = Path(temporary) / "packet"
+        extracted_evidence = Path(temporary) / "evidence"
+        _safe_extract_artifact_archive(packet_archive, packet_root, "counterpart packet")
+        _safe_extract_artifact_archive(
+            evidence_archive,
+            extracted_evidence,
+            "counterpart evidence",
+            expected_members=_EVIDENCE_ARCHIVE_MEMBERS,
+        )
+        counterpart_packet = validate_freeze_audit(packet_root)
+        counterpart_definition, counterpart_seeds, counterpart_lock = _receipt_context(packet_root)
+        if (
+            counterpart_definition != definition
+            or counterpart_seeds != seeds
+            or counterpart_lock != lock
+        ):
+            raise FreezeError("counterpart packet scientific inputs differ")
+        receipt = _read_canonical_json(extracted_evidence / "renderer_receipt.json")
+        validated_receipt = _validate_receipt_against_packet(
+            receipt,
+            packet_root,
+            counterpart_packet,
+            counterpart_definition,
+            counterpart_seeds,
+            counterpart_lock,
+        )
+        publication = _read_canonical_json(extracted_evidence / "publication_record.json")
+        validated_publication = validate_publication_record(
+            publication,
+            packet_root,
+            counterpart_packet,
+            packet_metadata,
+            cast(dict[str, Any], bundle["packet_live_workflow_run.json"]),
+            cast(dict[str, Any], bundle["packet_live_workflow_jobs.json"]),
+        )
+        _validate_evidence_artifact_metadata(
+            evidence_metadata,
+            cast(dict[str, Any], bundle["evidence_live_workflow_run.json"]),
+            cast(dict[str, Any], bundle["evidence_live_workflow_jobs.json"]),
+            validated_publication,
+            counterpart_packet["renderer_environment_id"],
+        )
+        selected = _read_canonical_json(packet_root / "selected_profile_matrix.json")["cells"]
+        local_rows = _local_profile_readiness(selected, counterpart_definition)
+        if local_rows != counterpart_packet["local_profile_readiness"]:
+            raise FreezeError("counterpart packet readiness reconstruction differs")
+        return {
+            "environment_id": counterpart_packet["renderer_environment_id"],
+            "replacement_definition_lock_commit": counterpart_packet[
+                "replacement_definition_lock_commit"
+            ],
+            "replacement_definition_lock_sha256": counterpart_packet["portable_definition_roots"][
+                "freeze_definition_lock_sha256"
+            ],
+            "profiles": local_rows,
+            "portable_definition_roots": counterpart_packet["portable_definition_roots"],
+            "portable_apparatus_roots": counterpart_packet["portable_apparatus_roots"],
+            "renderer_local_roots": counterpart_packet["renderer_local_roots"],
+            "threshold_margin_summary": counterpart_packet["threshold_margin_summary"],
+            "selected_outcome_map": _outcome_rows(selected),
+            "receipt": validated_receipt,
+            "publication_record": validated_publication,
+        }
 
 
 def _reject_aliased_publication_parent(parent: Path) -> tuple[Path, tuple[int, int]]:

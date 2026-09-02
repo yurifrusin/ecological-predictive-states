@@ -257,15 +257,36 @@ follow-up source correction restores the shared historical audit byte semantics 
 portable float and signed-frequency normalization only to copied PR #17 freeze-layer evidence.
 Changing the source head again invalidates the local WGL result for qualification purposes.
 
+## 2026-09-02 — PR #17 third correction authority and source boundary
+
+Second-correction exact head `dc17d8453bed2583c085aa7441255ca476d3e1f0` completed the WGL and
+OSMesa paths and received renewed `SCIENTIFIC_PASS` plus `ENGINEERING_REQUEST_CHANGES`. Engineering
+verified `EPS-ER17-0002` through `EPS-ER17-0005`, did not verify `EPS-ER17-0001` or
+`EPS-ER17-0006`, and raised `EPS-ER17-0007`. Its joint-substitution test showed that a different
+valid packet and jointly resealed receipt/publication records could retain the original live
+artifact digest while the validator consumed unrelated extracted bytes.
+
+Yuri Frusin acting as `OWNER_PI` issued one consolidated third correction limited to those three
+findings. The source correction makes the raw GitHub packet and evidence ZIPs the consumed
+authority: each archive is resolved live, downloaded without forwarding credentials to the signed
+storage redirect, rechecked for disappearance or expiry, hashed against live metadata, and safely
+extracted into a new isolated destination. Exact evidence membership and regular, non-colliding
+packet members are required before the existing complete packet, receipt, publication, and
+readiness validators run. Equivalent credential-free GitHub HTTPS origins with and without terminal
+`.git` now produce one canonical `yurifrusin/ecological-predictive-states` identity. The verified
+findings and byte-identical replacement lock remain preservation constraints. Fresh exact-head
+WGL/OSMesa evidence and renewed independent scientific and engineering review are required; no
+merge, freeze, gate, model, or scientific-result authority follows.
+
 ### Current PR #17 status
 
 | Boundary | Current source-record status |
 | --- | --- |
 | Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
 | Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
-| Implementation status | `SECOND_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Implementation status | `THIRD_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
 | Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
-| Owner status | `SECOND_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Owner status | `THIRD_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
 | Benchmark-freeze status | `NOT_PERFORMED` |
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |

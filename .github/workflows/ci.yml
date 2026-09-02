@@ -334,6 +334,8 @@ jobs:
     outputs:
       packet-artifact-id: ${{ steps.upload-packet.outputs.artifact-id }}
       packet-artifact-name: ${{ steps.names.outputs.packet }}
+      evidence-artifact-id: ${{ steps.upload-evidence.outputs.artifact-id }}
+      evidence-artifact-name: ${{ steps.names.outputs.evidence }}
     steps:
       - name: Check out exact pull-request head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -405,6 +407,7 @@ jobs:
         run: >-
           uv run epsbench appearance-freeze-publication-record
           artifacts/appearance-benchmark-freeze-v0-wgl
+          --artifact-archive artifacts/appearance-freeze-wgl-evidence/artifact.zip
           --artifact-metadata artifacts/appearance-freeze-wgl-evidence/live_artifact.json
           --workflow-run-metadata artifacts/appearance-freeze-wgl-evidence/live_workflow_run.json
           --workflow-jobs-metadata artifacts/appearance-freeze-wgl-evidence/live_workflow_jobs.json
@@ -420,6 +423,7 @@ jobs:
           --output artifacts/appearance-freeze-wgl-evidence/renderer_receipt.json
 
       - name: Upload WGL receipt and publication record
+        id: upload-evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.names.outputs.evidence }}
@@ -458,19 +462,7 @@ jobs:
       - name: Install locked Python environment
         run: uv sync --locked
 
-      - name: Download immutable WGL packet
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.qualify-wgl.outputs.packet-artifact-name }}
-          path: artifacts/counterpart-evidence/packet
-
-      - name: Download WGL receipt and publication record
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: appearance-freeze-wgl-evidence-${{ github.event.pull_request.head.sha }}
-          path: artifacts/counterpart-evidence
-
-      - name: Resolve live WGL artifact, run, and job identities again
+      - name: Resolve live WGL packet identity and exact raw archive bytes
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
@@ -478,6 +470,18 @@ jobs:
           --repository "${{ github.repository }}"
           --run-id "${{ github.run_id }}"
           --artifact-id "${{ needs.qualify-wgl.outputs.packet-artifact-id }}"
+          --role packet
+          --output artifacts/counterpart-evidence
+
+      - name: Resolve live WGL evidence identity and exact raw archive bytes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          uv run python scripts/fetch_github_actions_evidence.py
+          --repository "${{ github.repository }}"
+          --run-id "${{ github.run_id }}"
+          --artifact-id "${{ needs.qualify-wgl.outputs.evidence-artifact-id }}"
+          --role evidence
           --output artifacts/counterpart-evidence
 
       - name: Qualify all 192 Ubuntu/OSMesa cells through packet-bound counterpart evidence
@@ -528,6 +532,7 @@ jobs:
         run: >-
           uv run epsbench appearance-freeze-publication-record
           artifacts/appearance-benchmark-freeze-v0-osmesa
+          --artifact-archive artifacts/appearance-freeze-osmesa-evidence/artifact.zip
           --artifact-metadata artifacts/appearance-freeze-osmesa-evidence/live_artifact.json
           --workflow-run-metadata artifacts/appearance-freeze-osmesa-evidence/live_workflow_run.json
           --workflow-jobs-metadata artifacts/appearance-freeze-osmesa-evidence/live_workflow_jobs.json

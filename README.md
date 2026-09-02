@@ -30,9 +30,15 @@ authorised one bounded second correction for `EPS-ER17-0001`, `EPS-ER17-0002`,
 `EPS-ER17-0003`, `EPS-ER17-0005`, and `EPS-ER17-0006`. The replacement-lock commit
 `d4072f912cc58bbc1ca41ceb2652e41783dbf3e1`, root
 `28acd2c340b3ef1e2b8b2b7b31ca69356cd9baa35b94ff8a598e020099883435`, and all locked scientific
-inputs remain unchanged. The second-correction source candidate requires complete exact-head WGL
-and OSMesa requalification through immutable packet artifacts and then renewed independent dual
-review. Post-commit CI outcomes cannot be embedded into the commit they evaluate; reviewers must
+inputs remain unchanged. Second-correction exact head
+`dc17d8453bed2583c085aa7441255ca476d3e1f0` later received `SCIENTIFIC_PASS` but
+`ENGINEERING_REQUEST_CHANGES`: `EPS-ER17-0001` and `EPS-ER17-0006` were not verified,
+`EPS-ER17-0002` through `EPS-ER17-0005` were verified, and `EPS-ER17-0007` was raised for
+non-canonical equivalent GitHub origins. The owner issued one bounded third correction for
+`EPS-ER17-0001`, `EPS-ER17-0006`, and `EPS-ER17-0007`. The third-correction source candidate
+requires complete exact-head WGL and OSMesa requalification from digest-verified raw packet and
+evidence archives and then renewed independent dual review. Post-commit CI outcomes cannot be
+embedded into the commit they evaluate; reviewers must
 resolve the exact-head Actions artifacts and publication records. The scope and validation contract
 are documented in [the freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHMARK_FREEZE_V0.md).
 
@@ -42,9 +48,9 @@ are documented in [the freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHM
 | --- | --- |
 | Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
 | Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
-| Implementation status | `SECOND_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Implementation status | `THIRD_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
 | Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
-| Owner status | `SECOND_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Owner status | `THIRD_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
 | Benchmark-freeze status | `NOT_PERFORMED` |
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |

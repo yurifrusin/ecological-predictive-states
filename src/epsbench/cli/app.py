@@ -310,6 +310,7 @@ def appearance_freeze_receipt_command(
 @app.command(name="appearance-freeze-publication-record")
 def appearance_freeze_publication_record_command(
     packet: Annotated[Path, typer.Argument(exists=True, file_okay=False, readable=True)],
+    artifact_archive: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
     artifact_metadata: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
     workflow_run_metadata: Annotated[
         Path, typer.Option(exists=True, dir_okay=False, readable=True)
@@ -330,6 +331,7 @@ def appearance_freeze_publication_record_command(
     try:
         record = create_publication_record(
             packet,
+            artifact_archive,
             artifact_metadata,
             workflow_run_metadata,
             workflow_jobs_metadata,

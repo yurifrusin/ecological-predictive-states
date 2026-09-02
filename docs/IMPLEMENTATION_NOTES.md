@@ -57,6 +57,16 @@ Threshold decisions still use the unrounded values and every threshold is unchan
 historically observed absolute margin was greater than `0.012`, so this representation rule is far
 below a decision boundary. CI publication and receipt commands are separate fail-fast steps.
 
+Second-correction exact head `dc17d8453bed2583c085aa7441255ca476d3e1f0` completed exact-head
+qualification and received scientific pass but engineering request changes. The owner-issued third
+correction retains the independently verified source reconstruction, publication atomicity, domain
+separation, lock integrity, and lifecycle reporting. It replaces detached counterpart directories
+with exact raw packet and evidence archives, recomputes each archive SHA-256 against independently
+resolved live GitHub metadata before safe extraction, admits only exact regular non-colliding member
+sets, and derives readiness only from those extracted bytes. GitHub HTTPS origins with or without a
+terminal `.git` now serialize as the same canonical owner/repository identity. Fresh exact-head
+WGL/OSMesa evidence and renewed independent dual review remain required.
+
 Post-commit CI evidence cannot be embedded into the exact commit it evaluates. Reviewers must
 resolve the immutable WGL and OSMesa packet artifacts and their 90-day publication records before
 assessing apparatus status. Neither apparatus qualification nor a replacement lock freezes the
@@ -69,9 +79,9 @@ remain mandatory.
 | --- | --- |
 | Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
 | Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
-| Implementation status | `SECOND_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Implementation status | `THIRD_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
 | Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
-| Owner status | `SECOND_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Owner status | `THIRD_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
 | Benchmark-freeze status | `NOT_PERFORMED` |
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |

@@ -2,9 +2,13 @@
 
 import json
 import os
+import stat
 import subprocess
+import warnings
+import zipfile
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +34,7 @@ from epsbench.freeze import (
     SOURCE_IDENTITY_FIELDS,
     BenchmarkDefinition,
     FreezeDefinitionLock,
+    ImmutableArtifactBindingError,
     PublicPacketPublicationRecord,
     _atomic_publish_receipt,
     _domain_hash,
@@ -160,6 +165,108 @@ def test_publication_retention_is_bound_to_workflow_run_creation() -> None:
     invalid["record_sha256"] = sha256_bytes(canonical_json_bytes(invalid_domain))
     with pytest.raises(ValueError, match="workflow-run retention"):
         PublicPacketPublicationRecord.model_validate(invalid)
+
+
+def _zip_payload(entries: list[tuple[zipfile.ZipInfo | str, bytes]]) -> bytes:
+    payload = BytesIO()
+    with zipfile.ZipFile(payload, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries:
+            member = name
+            if isinstance(name, str) and "\\" in name:
+                member = zipfile.ZipInfo("placeholder")
+                member.filename = name
+                member.orig_filename = name
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                archive.writestr(member, content)
+    return payload.getvalue()
+
+
+def test_artifact_archive_digest_is_checked_before_extraction(tmp_path: Path) -> None:
+    archive = _zip_payload([("publication_record.json", b"{}\n")])
+    metadata = {
+        "expired": False,
+        "size_in_bytes": len(archive),
+        "digest": f"sha256:{sha256_bytes(archive)}",
+    }
+    freeze_module._verify_artifact_archive_payload(archive, metadata, "counterpart evidence")
+
+    substituted = bytearray(archive)
+    substituted[-1] ^= 1
+    with pytest.raises(ImmutableArtifactBindingError) as rejected:
+        freeze_module._verify_artifact_archive_payload(
+            bytes(substituted), metadata, "counterpart evidence"
+        )
+    assert rejected.value.code == "artifact_archive_digest_mismatch"
+    assert not (tmp_path / "extracted").exists()
+
+
+@pytest.mark.parametrize(
+    ("entries", "expected_code"),
+    [
+        ([("../escape.json", b"x")], "artifact_archive_unsafe_member"),
+        ([("/absolute.json", b"x")], "artifact_archive_unsafe_member"),
+        ([("folder/", b"")], "artifact_archive_unsafe_member"),
+        (
+            [("duplicate.json", b"a"), ("duplicate.json", b"b")],
+            "artifact_archive_colliding_member",
+        ),
+        (
+            [("Receipt.json", b"a"), ("receipt.json", b"b")],
+            "artifact_archive_colliding_member",
+        ),
+        (
+            [("parent", b"a"), ("parent/child.json", b"b")],
+            "artifact_archive_colliding_member",
+        ),
+    ],
+)
+def test_safe_artifact_extraction_rejects_unsafe_or_colliding_members(
+    tmp_path: Path,
+    entries: list[tuple[zipfile.ZipInfo | str, bytes]],
+    expected_code: str,
+) -> None:
+    with pytest.raises(ImmutableArtifactBindingError) as rejected:
+        freeze_module._safe_extract_artifact_archive(
+            _zip_payload(entries), tmp_path / "extracted", "counterpart evidence"
+        )
+    assert rejected.value.code == expected_code
+    assert not (tmp_path / "escape.json").exists()
+
+
+@pytest.mark.parametrize("file_type", [stat.S_IFLNK, stat.S_IFIFO, stat.S_IFCHR])
+def test_safe_artifact_extraction_rejects_non_regular_unix_members(
+    tmp_path: Path,
+    file_type: int,
+) -> None:
+    member = zipfile.ZipInfo("renderer_receipt.json")
+    member.create_system = 3
+    member.external_attr = (file_type | 0o644) << 16
+    with pytest.raises(ImmutableArtifactBindingError) as rejected:
+        freeze_module._safe_extract_artifact_archive(
+            _zip_payload([(member, b"target")]),
+            tmp_path / "extracted",
+            "counterpart evidence",
+        )
+    assert rejected.value.code == "artifact_archive_unsafe_member"
+
+
+def test_evidence_archive_requires_exact_authorised_member_set(tmp_path: Path) -> None:
+    archive = _zip_payload(
+        [
+            ("renderer_receipt.json", b"{}\n"),
+            ("publication_record.json", b"{}\n"),
+            ("unexpected.json", b"{}\n"),
+        ]
+    )
+    with pytest.raises(ImmutableArtifactBindingError) as rejected:
+        freeze_module._safe_extract_artifact_archive(
+            archive,
+            tmp_path / "evidence",
+            "counterpart evidence",
+            expected_members={"renderer_receipt.json", "publication_record.json"},
+        )
+    assert rejected.value.code == "artifact_archive_member_set_mismatch"
 
 
 def test_freeze_portable_metrics_are_scoped_and_sign_normalized() -> None:
