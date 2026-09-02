@@ -324,7 +324,7 @@ def main() -> None:
         run_path = alternate_packet_root / "run.json"
         run = json.loads(run_path.read_text(encoding="utf-8"))
         run["hostname"] = f"{run['hostname']}-independently-valid-alternate"
-        run_path.write_text(json.dumps(run, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        run_path.write_bytes((json.dumps(run, indent=2, sort_keys=True) + "\n").encode("utf-8"))
         alternate_packet = validate_freeze_audit(alternate_packet_root)
         alternate_identity = _public_packet_evidence(alternate_packet_root, alternate_packet)
 
@@ -334,8 +334,10 @@ def main() -> None:
         publication = json.loads(
             (original_evidence_root / "publication_record.json").read_text(encoding="utf-8")
         )
-        if alternate_identity == publication["packet_identity"]:
-            raise AssertionError("alternate packet did not obtain a distinct exact tree identity")
+        if alternate_identity != publication["packet_identity"]:
+            raise AssertionError(
+                "volatile alternate packet unexpectedly changed the public scientific tree identity"
+            )
         receipt["public_qualification_evidence"] = alternate_identity
         _reseal_receipt(receipt)
         publication["packet_identity"] = alternate_identity
@@ -365,6 +367,8 @@ def main() -> None:
         )
 
         alternate_packet_archive = _zip_tree(alternate_packet_root)
+        if alternate_packet_archive == packet_archive:
+            raise AssertionError("alternate packet did not change the exact raw archive bytes")
         alternate_evidence_archive = _zip_evidence(receipt, publication)
         with (
             _replace(packet_archive_path, alternate_packet_archive),
