@@ -136,9 +136,23 @@ receipt excluding volatile `run.json` metadata.
 Receipt creation first validates the complete packet, then validates the receipt against that
 packet. A receipt used as counterpart evidence is insufficient by itself: validation must resolve
 the separately published complete packet, its strict receipt, the exact CI publication record, and
-live artifact/run/job metadata. The complete packet validator independently derives outcome maps,
-profile readiness, roots, margins, counts, and source commit/tree provenance; readiness never
-trusts receipt assertions or profile Boolean fields.
+live repository/artifact/run/job metadata. The complete packet validator independently derives
+outcome maps, profile readiness, roots, margins, counts, and source commit/tree provenance;
+readiness never trusts receipt assertions or profile Boolean fields.
+
+`appearance_benchmark_public_ci_packet_record_v2` separates repository visibility from artifact
+access. Its strict fields bind canonical repository identity plus API and HTML URLs;
+`repository_visibility` (`private`, `public`, or `internal`); the live `repository_private` flag;
+non-archived/non-disabled availability; and `artifact_access_mechanism`
+(`connected_authenticated_github_actions` or `public_github_actions`). A public repository must use
+the public mechanism; private and internal repositories require connected authenticated access.
+The production resolver obtains the exact repository object before and after artifact download and
+rejects visibility or availability changes. Creation and counterpart validation compare the record
+to the independently resolved repository metadata; a self-resealed access claim is not authority.
+The current repository is private and reviewers therefore require connected GitHub and Actions
+artifact access. Evidence class `PUBLIC_REPOSITORY_ONLY` covers public or connected GitHub records,
+not unpublished private off-platform evidence. Artifact accessibility, visibility, 90-day
+retention, and reviewer access are separate facts.
 
 Publication is forbidden inside the packet, through traversal, a symlink, junction, reparse point,
 hard-link, or other alias, and over any existing or racing target. Linux uses an unnamed file and
@@ -213,15 +227,25 @@ archives resolved from exact live GitHub metadata, and gives equivalent credenti
 HTTPS origins one canonical owner/repository identity. The verified findings and replacement lock
 remain preservation constraints. All exact-head apparatus evidence must be regenerated.
 
+Third-correction exact head `53b988372634e8a7d2d006021af5b5aadbf96d3c` completed both renderer
+paths and received `SCIENTIFIC_PASS` plus `ENGINEERING_REQUEST_CHANGES`. Engineering verified
+`EPS-ER17-0001` through `EPS-ER17-0004`, `EPS-ER17-0006`, and `EPS-ER17-0007`, left the truthful
+access-posture portion of `EPS-ER17-0005` unverified, and raised `EPS-ER17-0008` because the record
+called this private repository public. The owner-issued fourth correction is limited to those two
+access/lifecycle findings. All previously verified implementations and all locked scientific
+inputs remain preservation constraints. The versioned access metadata does not change packet
+science, roots, profiles, seeds, scenes, thresholds, outcomes, pairing, authority flags, or the
+replacement lock. Complete exact-head evidence must be regenerated.
+
 ## Current PR #17 status
 
 | Boundary | Current source-record status |
 | --- | --- |
 | Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
 | Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
-| Implementation status | `THIRD_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Implementation status | `FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
 | Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
-| Owner status | `THIRD_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Owner status | `FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
 | Benchmark-freeze status | `NOT_PERFORMED` |
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |

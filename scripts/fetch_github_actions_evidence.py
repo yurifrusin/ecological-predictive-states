@@ -12,12 +12,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from epsbench.github import github_repository_access
 from epsbench.utils.canonical import canonical_json_bytes
 
 _REPOSITORY = "yurifrusin/ecological-predictive-states"
 _API_HEADERS = {
     "Accept": "application/vnd.github+json",
-    "User-Agent": "epsbench-public-evidence-fetcher",
+    "User-Agent": "epsbench-github-evidence-fetcher",
     "X-GitHub-Api-Version": "2022-11-28",
 }
 
@@ -81,7 +82,7 @@ def _download_archive(url: str, token: str, expected_size: int) -> bytes:
     )
     try:
         with urllib.request.urlopen(unauthenticated, timeout=120) as response:
-            payload = response.read(expected_size + 1)
+            payload: bytes = response.read(expected_size + 1)
     except (OSError, urllib.error.HTTPError) as error:
         raise RuntimeError("GitHub artifact archive bytes are unavailable") from error
     if len(payload) != expected_size:
@@ -105,17 +106,36 @@ def _artifact_identity(artifact: dict[str, Any]) -> dict[str, Any]:
     return {field: artifact.get(field) for field in fields}
 
 
-def _output_names(role: str) -> tuple[str, str, str, str]:
+def _require_stable_repository_resolution(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    repository: str,
+) -> dict[str, Any]:
+    try:
+        before_access = github_repository_access(before, repository)
+        after_access = github_repository_access(after, repository)
+    except ValueError as error:
+        raise RuntimeError("GitHub repository access metadata is invalid") from error
+    if before_access != after_access:
+        raise RuntimeError(
+            "GitHub repository visibility or availability changed during live resolution"
+        )
+    return after
+
+
+def _output_names(role: str) -> tuple[str, str, str, str, str]:
     if role == "publication":
         return (
             "artifact.zip",
             "live_artifact.json",
+            "live_repository.json",
             "live_workflow_run.json",
             "live_workflow_jobs.json",
         )
     return (
         f"{role}_artifact.zip",
         f"{role}_live_artifact.json",
+        f"{role}_live_repository.json",
         f"{role}_live_workflow_run.json",
         f"{role}_live_workflow_jobs.json",
     )
@@ -145,7 +165,9 @@ def main() -> None:
         raise RuntimeError("publication evidence repository is outside the authorised scope")
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
-        raise RuntimeError("GITHUB_TOKEN is required to resolve public CI evidence")
+        raise RuntimeError("GITHUB_TOKEN is required to resolve GitHub CI evidence")
+    repository_endpoint = f"https://api.github.com/repos/{args.repository}"
+    repository_before = _fetch(repository_endpoint, token)
     base = f"https://api.github.com/repos/{args.repository}/actions"
     artifact_endpoint = f"{base}/artifacts/{args.artifact_id}"
     artifact = _fetch(artifact_endpoint, token)
@@ -181,18 +203,24 @@ def main() -> None:
         raise RuntimeError("live artifact digest is unavailable")
     if hashlib.sha256(archive).hexdigest() != digest.removeprefix("sha256:"):
         raise RuntimeError("downloaded artifact archive digest differs from live metadata")
-
     jobs_endpoint = f"{base}/runs/{args.run_id}/attempts/{run_attempt}/jobs?per_page=100"
     jobs = _fetch(jobs_endpoint, token)
     jobs["resolved_workflow_run_id"] = args.run_id
     jobs["resolved_workflow_run_attempt"] = run_attempt
     jobs["resolved_head_sha"] = head_sha
     jobs["resolution_endpoint"] = jobs_endpoint
+    repository_after = _fetch(repository_endpoint, token)
+    repository = _require_stable_repository_resolution(
+        repository_before,
+        repository_after,
+        args.repository,
+    )
     args.output.mkdir(parents=True, exist_ok=True)
-    archive_name, artifact_name, run_name, jobs_name = _output_names(args.role)
+    archive_name, artifact_name, repository_name, run_name, jobs_name = _output_names(args.role)
     for name, payload in (
         (archive_name, archive),
         (artifact_name, canonical_json_bytes(resolved_again) + b"\n"),
+        (repository_name, canonical_json_bytes(repository) + b"\n"),
         (run_name, canonical_json_bytes(run) + b"\n"),
         (jobs_name, canonical_json_bytes(jobs) + b"\n"),
     ):

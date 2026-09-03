@@ -34,6 +34,7 @@ from epsbench.freeze import (
     SOURCE_IDENTITY_FIELDS,
     BenchmarkDefinition,
     FreezeDefinitionLock,
+    FreezeError,
     ImmutableArtifactBindingError,
     PublicPacketPublicationRecord,
     _atomic_publish_receipt,
@@ -46,6 +47,7 @@ from epsbench.freeze import (
     _readiness_summary,
     _selected_membership_domain,
     _source_identity_from_dataset,
+    _validate_publication_repository_access,
     benchmark_definition_hash,
     create_definition_lock_payload,
     evaluation_seed_registry_hash,
@@ -53,6 +55,7 @@ from epsbench.freeze import (
     load_final_evaluation_seeds,
     validate_definition_lock,
 )
+from epsbench.github import github_repository_access
 from epsbench.revision import validate_definition_lock as validate_revision1_lock
 from epsbench.utils.canonical import canonical_json_bytes, sha256_bytes, sha256_file
 
@@ -102,9 +105,18 @@ def _publication_record_payload() -> dict[str, object]:
         return value.isoformat().replace("+00:00", "Z")
 
     domain: dict[str, object] = {
-        "schema_version": "appearance_benchmark_public_ci_packet_record_v1",
+        "schema_version": "appearance_benchmark_public_ci_packet_record_v2",
         "evidence_class": "PUBLIC_REPOSITORY_ONLY",
         "repository": "yurifrusin/ecological-predictive-states",
+        "repository_api_url": (
+            "https://api.github.com/repos/yurifrusin/ecological-predictive-states"
+        ),
+        "repository_html_url": ("https://github.com/yurifrusin/ecological-predictive-states"),
+        "repository_visibility": "private",
+        "repository_private": True,
+        "repository_archived_at_record_creation": False,
+        "repository_disabled_at_record_creation": False,
+        "artifact_access_mechanism": "connected_authenticated_github_actions",
         "source_commit": commit,
         "source_tree": commit,
         "workflow_run_id": 33524945210,
@@ -132,7 +144,6 @@ def _publication_record_payload() -> dict[str, object]:
             "github_actions_immutable_90_day_artifact_unless_repository_run_or_owner_"
             "deletes_earlier"
         ),
-        "public_access_posture": "public_repository_authenticated_actions_artifact",
         "packet_identity": {
             "evidence_class": "PUBLIC_REPOSITORY_ONLY",
             "availability": "repository_or_ci_artifact",
@@ -165,6 +176,100 @@ def test_publication_retention_is_bound_to_workflow_run_creation() -> None:
     invalid["record_sha256"] = sha256_bytes(canonical_json_bytes(invalid_domain))
     with pytest.raises(ValueError, match="workflow-run retention"):
         PublicPacketPublicationRecord.model_validate(invalid)
+
+
+@pytest.mark.parametrize(
+    ("visibility", "private", "mechanism"),
+    [
+        ("private", True, "connected_authenticated_github_actions"),
+        ("public", False, "public_github_actions"),
+        ("internal", False, "connected_authenticated_github_actions"),
+    ],
+)
+def test_live_repository_visibility_derives_typed_artifact_access(
+    visibility: str,
+    private: bool,
+    mechanism: str,
+) -> None:
+    repository = "example-owner/example-repository"
+    metadata = {
+        "full_name": repository,
+        "url": f"https://api.github.com/repos/{repository}",
+        "html_url": f"https://github.com/{repository}",
+        "visibility": visibility,
+        "private": private,
+        "archived": False,
+        "disabled": False,
+    }
+    resolved = github_repository_access(metadata, repository)
+    assert resolved["repository_visibility"] == visibility
+    assert resolved["repository_private"] is private
+    assert resolved["artifact_access_mechanism"] == mechanism
+
+
+def test_self_resealed_publication_cannot_mix_visibility_and_access_mechanism() -> None:
+    payload = _publication_record_payload()
+    payload["artifact_access_mechanism"] = "public_github_actions"
+    domain = {key: value for key, value in payload.items() if key != "record_sha256"}
+    payload["record_sha256"] = sha256_bytes(canonical_json_bytes(domain))
+    with pytest.raises(ValueError, match="visibility and artifact access mechanism"):
+        PublicPacketPublicationRecord.model_validate(payload)
+
+
+def _live_repository_metadata(*, public: bool = False) -> dict[str, object]:
+    repository = "yurifrusin/ecological-predictive-states"
+    return {
+        "full_name": repository,
+        "url": f"https://api.github.com/repos/{repository}",
+        "html_url": f"https://github.com/{repository}",
+        "visibility": "public" if public else "private",
+        "private": not public,
+        "archived": False,
+        "disabled": False,
+    }
+
+
+@pytest.mark.parametrize("public", [False, True])
+def test_matching_private_and_public_publication_access_postures_validate(public: bool) -> None:
+    payload = _publication_record_payload()
+    if public:
+        payload["repository_visibility"] = "public"
+        payload["repository_private"] = False
+        payload["artifact_access_mechanism"] = "public_github_actions"
+        domain = {key: value for key, value in payload.items() if key != "record_sha256"}
+        payload["record_sha256"] = sha256_bytes(canonical_json_bytes(domain))
+    record = PublicPacketPublicationRecord.model_validate(payload).model_dump(mode="json")
+    resolved = _validate_publication_repository_access(
+        record,
+        _live_repository_metadata(public=public),
+    )
+    assert resolved["repository_visibility"] == ("public" if public else "private")
+    assert resolved["artifact_access_mechanism"] == (
+        "public_github_actions" if public else "connected_authenticated_github_actions"
+    )
+
+
+def test_self_resealed_public_posture_is_rejected_against_live_private_repository() -> None:
+    payload = _publication_record_payload()
+    payload["repository_visibility"] = "public"
+    payload["repository_private"] = False
+    payload["artifact_access_mechanism"] = "public_github_actions"
+    domain = {key: value for key, value in payload.items() if key != "record_sha256"}
+    payload["record_sha256"] = sha256_bytes(canonical_json_bytes(domain))
+    record = PublicPacketPublicationRecord.model_validate(payload).model_dump(mode="json")
+    with pytest.raises(FreezeError, match="differs from live GitHub metadata"):
+        _validate_publication_repository_access(record, _live_repository_metadata())
+
+
+def test_private_connected_posture_is_rejected_against_live_public_repository() -> None:
+    record = PublicPacketPublicationRecord.model_validate(_publication_record_payload()).model_dump(
+        mode="json"
+    )
+    with pytest.raises(FreezeError, match="differs from live GitHub metadata"):
+        _validate_publication_repository_access(
+            record,
+            _live_repository_metadata(public=True),
+        )
 
 
 def _zip_payload(entries: list[tuple[zipfile.ZipInfo | str, bytes]]) -> bytes:

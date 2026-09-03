@@ -67,6 +67,12 @@ from epsbench.data.paths import UnsafeOwnedFileError, open_owned_regular_file
 from epsbench.data.provenance import collect_source_provenance
 from epsbench.data.publication import atomic_publish_owned_bytes
 from epsbench.data.validate import validate_dataset
+from epsbench.github import (
+    ArtifactAccessMechanism,
+    RepositoryVisibility,
+    artifact_access_mechanism_for_visibility,
+    github_repository_access,
+)
 from epsbench.schema import (
     AvailableDenseOpticalTransport,
     AvailableEcologicalVisibilityEvents,
@@ -96,7 +102,7 @@ FREEZE_PACKET_VERSION = "appearance_benchmark_freeze_candidate_v1"
 FREEZE_ROOT_VERSION = "appearance_benchmark_freeze_root_domains_v1"
 FREEZE_CONTACT_SHEET_VERSION = "appearance_benchmark_freeze_contact_sheet_manifest_v1"
 RENDERER_RECEIPT_VERSION = "appearance_benchmark_renderer_qualification_receipt_v1"
-PUBLICATION_RECORD_VERSION = "appearance_benchmark_public_ci_packet_record_v1"
+PUBLICATION_RECORD_VERSION = "appearance_benchmark_public_ci_packet_record_v2"
 SOURCE_IDENTITY_VERSION = "appearance_benchmark_source_identity_v1"
 THRESHOLD_MARGIN_VERSION = "appearance_benchmark_threshold_margin_summary_v1"
 RENDERER_SELECTION_DEPENDENCY_VERSION = "model_result_renderer_selection_dependency_v1"
@@ -713,9 +719,18 @@ class RendererQualificationReceipt(StrictFreezeModel):
 
 
 class PublicPacketPublicationRecord(StrictFreezeModel):
-    schema_version: Literal["appearance_benchmark_public_ci_packet_record_v1"]
+    schema_version: Literal["appearance_benchmark_public_ci_packet_record_v2"]
     evidence_class: Literal["PUBLIC_REPOSITORY_ONLY"]
     repository: Literal["yurifrusin/ecological-predictive-states"]
+    repository_api_url: Literal[
+        "https://api.github.com/repos/yurifrusin/ecological-predictive-states"
+    ]
+    repository_html_url: Literal["https://github.com/yurifrusin/ecological-predictive-states"]
+    repository_visibility: RepositoryVisibility
+    repository_private: bool
+    repository_archived_at_record_creation: Literal[False]
+    repository_disabled_at_record_creation: Literal[False]
+    artifact_access_mechanism: ArtifactAccessMechanism
     source_commit: GitObject
     source_tree: GitObject
     workflow_run_id: int = Field(gt=0)
@@ -742,13 +757,22 @@ class PublicPacketPublicationRecord(StrictFreezeModel):
     retention_posture: Literal[
         "github_actions_immutable_90_day_artifact_unless_repository_run_or_owner_deletes_earlier"
     ]
-    public_access_posture: Literal["public_repository_authenticated_actions_artifact"]
     packet_identity: PublicQualificationEvidence
     complete_packet_root_sha256: Sha256
     record_sha256: Sha256
 
     @model_validator(mode="after")
     def timestamps_and_identity_are_exact(self) -> PublicPacketPublicationRecord:
+        expected_access = artifact_access_mechanism_for_visibility(self.repository_visibility)
+        if (
+            self.artifact_access_mechanism != expected_access
+            or (self.repository_visibility == "public" and self.repository_private)
+            or (self.repository_visibility == "private" and not self.repository_private)
+        ):
+            raise ValueError(
+                "publication record repository visibility and artifact access mechanism "
+                "are inconsistent"
+            )
         try:
             run_created = datetime.fromisoformat(
                 self.workflow_run_created_at_utc.replace("Z", "+00:00")
@@ -2440,6 +2464,32 @@ def _is_canonical_repository_reference(value: Any) -> bool:
         return False
 
 
+def _validate_publication_repository_access(
+    record: dict[str, Any],
+    repository_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        live_repository_access = github_repository_access(repository_metadata, record["repository"])
+    except (KeyError, ValueError) as error:
+        raise FreezeError("live GitHub repository access metadata is invalid") from error
+    declared_repository_access = {
+        "repository": record["repository"],
+        "repository_api_url": record["repository_api_url"],
+        "repository_html_url": record["repository_html_url"],
+        "repository_visibility": record["repository_visibility"],
+        "repository_private": record["repository_private"],
+        "repository_archived": record["repository_archived_at_record_creation"],
+        "repository_disabled": record["repository_disabled_at_record_creation"],
+        "artifact_access_mechanism": record["artifact_access_mechanism"],
+    }
+    if declared_repository_access != live_repository_access:
+        raise FreezeError(
+            "publication record repository visibility or artifact access mechanism "
+            "differs from live GitHub metadata"
+        )
+    return dict(live_repository_access)
+
+
 def _owned_archive_payload(path: Path, role: str) -> bytes:
     try:
         with open_owned_regular_file(path.parent, path.name) as owned:
@@ -2657,6 +2707,7 @@ def create_publication_record(
     packet_root: Path,
     artifact_archive_path: Path,
     artifact_metadata_path: Path,
+    repository_metadata_path: Path,
     workflow_run_metadata_path: Path,
     workflow_jobs_metadata_path: Path,
     *,
@@ -2669,6 +2720,15 @@ def create_publication_record(
     """Bind a digest-verified immutable CI archive to its validated complete packet."""
 
     artifact = _ordinary_json_object(artifact_metadata_path, "CI artifact metadata")
+    repository_metadata = _ordinary_json_object(
+        repository_metadata_path, "GitHub repository metadata"
+    )
+    try:
+        repository_access = github_repository_access(
+            repository_metadata, CANONICAL_REPOSITORY_IDENTITY
+        )
+    except ValueError as error:
+        raise FreezeError("live GitHub repository access metadata is invalid") from error
     packet, packet_identity = _validate_packet_archive_binding(
         packet_root,
         artifact_archive_path,
@@ -2695,6 +2755,7 @@ def create_publication_record(
         or type(repository) is not dict
         or not _is_canonical_repository_reference(repository.get("html_url"))
         or repository.get("full_name") != CANONICAL_REPOSITORY_IDENTITY
+        or repository.get("private") != repository_access["repository_private"]
         or run.get("head_sha") != source_commit
         or type(head_commit) is not dict
         or head_commit.get("id") != source_commit
@@ -2743,6 +2804,13 @@ def create_publication_record(
         "schema_version": PUBLICATION_RECORD_VERSION,
         "evidence_class": "PUBLIC_REPOSITORY_ONLY",
         "repository": CANONICAL_REPOSITORY_IDENTITY,
+        "repository_api_url": repository_access["repository_api_url"],
+        "repository_html_url": repository_access["repository_html_url"],
+        "repository_visibility": repository_access["repository_visibility"],
+        "repository_private": repository_access["repository_private"],
+        "repository_archived_at_record_creation": repository_access["repository_archived"],
+        "repository_disabled_at_record_creation": repository_access["repository_disabled"],
+        "artifact_access_mechanism": repository_access["artifact_access_mechanism"],
         "source_commit": source_commit,
         "source_tree": source_tree,
         "workflow_run_id": run["id"],
@@ -2770,7 +2838,6 @@ def create_publication_record(
             "github_actions_immutable_90_day_artifact_unless_repository_run_or_owner_"
             "deletes_earlier"
         ),
-        "public_access_posture": "public_repository_authenticated_actions_artifact",
         "packet_identity": packet_identity,
         "complete_packet_root_sha256": packet["complete_packet_root_sha256"],
     }
@@ -2787,6 +2854,7 @@ def validate_publication_record(
     packet_root: Path,
     packet: dict[str, Any],
     artifact_metadata: dict[str, Any],
+    repository_metadata: dict[str, Any],
     workflow_run_metadata: dict[str, Any],
     workflow_jobs_metadata: dict[str, Any],
 ) -> dict[str, Any]:
@@ -2797,14 +2865,15 @@ def validate_publication_record(
             canonical_json_bytes(payload)
         ).model_dump(mode="json")
     except Exception as error:
-        raise FreezeError("public packet publication record is invalid or expired") from error
+        raise FreezeError("CI packet publication record is invalid or expired") from error
     if (
         record["source_commit"] != packet["source_provenance"]["git_commit"]
         or record["source_tree"] != _git_tree(record["source_commit"])
         or record["packet_identity"] != _public_packet_evidence(packet_root, packet)
         or record["complete_packet_root_sha256"] != packet["complete_packet_root_sha256"]
     ):
-        raise FreezeError("public packet publication differs from validated packet")
+        raise FreezeError("CI packet publication differs from validated packet")
+    _validate_publication_repository_access(record, repository_metadata)
     repository = workflow_run_metadata.get("repository")
     repository_url = repository.get("html_url") if type(repository) is dict else None
     artifact_run = artifact_metadata.get("workflow_run")
@@ -2824,6 +2893,7 @@ def validate_publication_record(
         or type(repository) is not dict
         or not _is_canonical_repository_reference(repository_url)
         or repository.get("full_name") != record["repository"]
+        or repository.get("private") != record["repository_private"]
         or workflow_run_metadata.get("id") != record["workflow_run_id"]
         or workflow_run_metadata.get("run_attempt") != record["workflow_run_attempt"]
         or workflow_run_metadata.get("name") != record["workflow_name"]
@@ -2936,9 +3006,11 @@ def _validate_receipt_against_packet(
 
 _COUNTERPART_BUNDLE_JSON_FILES = (
     "packet_live_artifact.json",
+    "packet_live_repository.json",
     "packet_live_workflow_run.json",
     "packet_live_workflow_jobs.json",
     "evidence_live_artifact.json",
+    "evidence_live_repository.json",
     "evidence_live_workflow_run.json",
     "evidence_live_workflow_jobs.json",
 )
@@ -2972,11 +3044,19 @@ def _load_counterpart_bundle(evidence_root: Path) -> dict[str, Any]:
 
 def _validate_evidence_artifact_metadata(
     artifact: dict[str, Any],
+    repository_metadata: dict[str, Any],
     run: dict[str, Any],
     jobs: dict[str, Any],
     publication: dict[str, Any],
     environment_id: str,
 ) -> None:
+    try:
+        _validate_publication_repository_access(publication, repository_metadata)
+    except FreezeError as error:
+        raise ImmutableArtifactBindingError(
+            "evidence_artifact_access_posture_mismatch",
+            "evidence archive live repository visibility or access mechanism differs",
+        ) from error
     repository = run.get("repository")
     artifact_run = artifact.get("workflow_run")
     repository_url = repository.get("html_url") if type(repository) is dict else None
@@ -2995,6 +3075,7 @@ def _validate_evidence_artifact_metadata(
         or type(repository) is not dict
         or not _is_canonical_repository_reference(repository_url)
         or repository.get("full_name") != CANONICAL_REPOSITORY_IDENTITY
+        or repository.get("private") != publication["repository_private"]
         or run.get("id") != publication["workflow_run_id"]
         or run.get("run_attempt") != publication["workflow_run_attempt"]
         or run.get("name") != publication["workflow_name"]
@@ -3112,11 +3193,13 @@ def _load_counterpart_evidence(
             packet_root,
             counterpart_packet,
             packet_metadata,
+            cast(dict[str, Any], bundle["packet_live_repository.json"]),
             cast(dict[str, Any], bundle["packet_live_workflow_run.json"]),
             cast(dict[str, Any], bundle["packet_live_workflow_jobs.json"]),
         )
         _validate_evidence_artifact_metadata(
             evidence_metadata,
+            cast(dict[str, Any], bundle["evidence_live_repository.json"]),
             cast(dict[str, Any], bundle["evidence_live_workflow_run.json"]),
             cast(dict[str, Any], bundle["evidence_live_workflow_jobs.json"]),
             validated_publication,

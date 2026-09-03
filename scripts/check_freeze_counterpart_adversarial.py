@@ -262,8 +262,11 @@ def main() -> None:
     packet_archive_path = evidence / "packet_artifact.zip"
     evidence_archive_path = evidence / "evidence_artifact.zip"
     packet_metadata_path = evidence / "packet_live_artifact.json"
+    packet_repository_path = evidence / "packet_live_repository.json"
     evidence_metadata_path = evidence / "evidence_live_artifact.json"
+    evidence_repository_path = evidence / "evidence_live_repository.json"
     packet_metadata = json.loads(packet_metadata_path.read_text(encoding="utf-8"))
+    packet_repository = json.loads(packet_repository_path.read_text(encoding="utf-8"))
     packet_archive = packet_archive_path.read_bytes()
     evidence_archive = evidence_archive_path.read_bytes()
 
@@ -357,6 +360,7 @@ def main() -> None:
             alternate_packet_root,
             alternate_packet,
             packet_metadata,
+            packet_repository,
             json.loads((evidence / "packet_live_workflow_run.json").read_text()),
             json.loads((evidence / "packet_live_workflow_jobs.json").read_text()),
         )
@@ -426,6 +430,59 @@ def main() -> None:
         original_receipt = json.loads((extracted / "renderer_receipt.json").read_text())
         original_publication = json.loads((extracted / "publication_record.json").read_text())
 
+    public_posture_publication = json.loads(json.dumps(original_publication))
+    public_posture_publication["repository_visibility"] = "public"
+    public_posture_publication["repository_private"] = False
+    public_posture_publication["artifact_access_mechanism"] = "public_github_actions"
+    _reseal_publication(public_posture_publication)
+    public_posture_evidence = _zip_evidence(
+        original_receipt,
+        public_posture_publication,
+    )
+    with (
+        _replace(evidence_archive_path, public_posture_evidence),
+        _replace(
+            evidence_metadata_path,
+            _metadata_for_archive(evidence_metadata_path, public_posture_evidence),
+        ),
+        _replace_local_counterpart_snapshots(
+            local,
+            original_receipt,
+            public_posture_publication,
+        ),
+    ):
+        _expect_precise_rejection(
+            "private repository with a self-resealed public-repository posture",
+            "publication record repository visibility or artifact access mechanism differs",
+            validate,
+        )
+
+    public_repository_metadata = json.loads(json.dumps(packet_repository))
+    public_repository_metadata["visibility"] = "public"
+    public_repository_metadata["private"] = False
+    with _replace(
+        packet_repository_path,
+        canonical_json_bytes(public_repository_metadata) + b"\n",
+    ):
+        _expect_precise_rejection(
+            "public repository metadata with a private-connected publication posture",
+            "publication record repository visibility or artifact access mechanism differs",
+            validate,
+        )
+
+    public_evidence_repository = json.loads(evidence_repository_path.read_text(encoding="utf-8"))
+    public_evidence_repository["visibility"] = "public"
+    public_evidence_repository["private"] = False
+    with _replace(
+        evidence_repository_path,
+        canonical_json_bytes(public_evidence_repository) + b"\n",
+    ):
+        _expect_binding_rejected(
+            "evidence archive resolution with a different live repository visibility",
+            "evidence_artifact_access_posture_mismatch",
+            validate,
+        )
+
     changed_publication = json.loads(json.dumps(original_publication))
     changed_publication["packet_identity"]["packet_tree_root_sha256"] = "0" * 64
     _reseal_publication(changed_publication)
@@ -440,7 +497,7 @@ def main() -> None:
     ):
         _expect_precise_rejection(
             "correct receipt paired with publication record for a different packet",
-            "public packet publication differs from validated packet",
+            "CI packet publication differs from validated packet",
             validate,
         )
 

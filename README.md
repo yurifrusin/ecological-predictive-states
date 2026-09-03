@@ -35,12 +35,24 @@ inputs remain unchanged. Second-correction exact head
 `ENGINEERING_REQUEST_CHANGES`: `EPS-ER17-0001` and `EPS-ER17-0006` were not verified,
 `EPS-ER17-0002` through `EPS-ER17-0005` were verified, and `EPS-ER17-0007` was raised for
 non-canonical equivalent GitHub origins. The owner issued one bounded third correction for
-`EPS-ER17-0001`, `EPS-ER17-0006`, and `EPS-ER17-0007`. The third-correction source candidate
-requires complete exact-head WGL and OSMesa requalification from digest-verified raw packet and
-evidence archives and then renewed independent dual review. Post-commit CI outcomes cannot be
-embedded into the commit they evaluate; reviewers must
-resolve the exact-head Actions artifacts and publication records. The scope and validation contract
-are documented in [the freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHMARK_FREEZE_V0.md).
+`EPS-ER17-0001`, `EPS-ER17-0006`, and `EPS-ER17-0007`. Third-correction exact head
+`53b988372634e8a7d2d006021af5b5aadbf96d3c` completed fresh WGL and OSMesa qualification and
+received `SCIENTIFIC_PASS` plus `ENGINEERING_REQUEST_CHANGES`. Engineering verified
+`EPS-ER17-0001` through `EPS-ER17-0004`, `EPS-ER17-0006`, and `EPS-ER17-0007`, left the truthful
+access-posture portion of `EPS-ER17-0005` unverified, and raised `EPS-ER17-0008` because its
+publication record described this private repository as public.
+
+The owner issued one bounded fourth correction for that `EPS-ER17-0005` portion and
+`EPS-ER17-0008`. The fourth-correction source candidate versions the publication record and binds
+actual repository visibility separately from the artifact access mechanism. This repository is
+recorded as private and its artifacts require connected authenticated GitHub Actions access. A
+public repository instead records public GitHub Actions access. `PUBLIC_REPOSITORY_ONLY` continues
+to mean review evidence in repository content, reproducible artifacts, CI, and public or connected
+GitHub records; it does not misclassify a private repository as public or admit unpublished
+off-platform evidence. Post-commit CI outcomes cannot be embedded into the commit they evaluate;
+reviewers must have connected repository access and resolve the exact-head Actions artifacts and
+publication records. The scope and validation contract are documented in
+[the freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHMARK_FREEZE_V0.md).
 
 ### PR #17 current correction status
 
@@ -48,9 +60,9 @@ are documented in [the freeze-candidate contract](docs/GATE_0B_APPEARANCE_BENCHM
 | --- | --- |
 | Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
 | Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
-| Implementation status | `THIRD_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Implementation status | `FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
 | Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
-| Owner status | `THIRD_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Owner status | `FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
 | Benchmark-freeze status | `NOT_PERFORMED` |
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |

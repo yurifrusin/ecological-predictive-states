@@ -312,6 +312,7 @@ def appearance_freeze_publication_record_command(
     packet: Annotated[Path, typer.Argument(exists=True, file_okay=False, readable=True)],
     artifact_archive: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
     artifact_metadata: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    repository_metadata: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
     workflow_run_metadata: Annotated[
         Path, typer.Option(exists=True, dir_okay=False, readable=True)
     ],
@@ -326,13 +327,14 @@ def appearance_freeze_publication_record_command(
         Path | None, typer.Option(exists=True, file_okay=False, readable=True)
     ] = None,
 ) -> None:
-    """Record exact public CI artifact provenance for one validated complete packet."""
+    """Record exact connected/public CI provenance for one validated packet."""
 
     try:
         record = create_publication_record(
             packet,
             artifact_archive,
             artifact_metadata,
+            repository_metadata,
             workflow_run_metadata,
             workflow_jobs_metadata,
             job_name=job_name,
@@ -344,7 +346,7 @@ def appearance_freeze_publication_record_command(
     except Exception as error:
         typer.echo(f"Appearance freeze publication record failed: {error}", err=True)
         raise typer.Exit(code=1) from error
-    typer.echo(f"Public packet publication record: {record['record_sha256']}")
+    typer.echo(f"CI packet publication record: {record['record_sha256']}")
 
 
 def main() -> None:

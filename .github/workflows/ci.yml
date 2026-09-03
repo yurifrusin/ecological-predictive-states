@@ -409,6 +409,7 @@ jobs:
           artifacts/appearance-benchmark-freeze-v0-wgl
           --artifact-archive artifacts/appearance-freeze-wgl-evidence/artifact.zip
           --artifact-metadata artifacts/appearance-freeze-wgl-evidence/live_artifact.json
+          --repository-metadata artifacts/appearance-freeze-wgl-evidence/live_repository.json
           --workflow-run-metadata artifacts/appearance-freeze-wgl-evidence/live_workflow_run.json
           --workflow-jobs-metadata artifacts/appearance-freeze-wgl-evidence/live_workflow_jobs.json
           --job-name qualify-wgl
@@ -534,6 +535,7 @@ jobs:
           artifacts/appearance-benchmark-freeze-v0-osmesa
           --artifact-archive artifacts/appearance-freeze-osmesa-evidence/artifact.zip
           --artifact-metadata artifacts/appearance-freeze-osmesa-evidence/live_artifact.json
+          --repository-metadata artifacts/appearance-freeze-osmesa-evidence/live_repository.json
           --workflow-run-metadata artifacts/appearance-freeze-osmesa-evidence/live_workflow_run.json
           --workflow-jobs-metadata artifacts/appearance-freeze-osmesa-evidence/live_workflow_jobs.json
           --job-name qualify-osmesa

@@ -13,12 +13,14 @@ DOCUMENTS = (
     Path("docs/IMPLEMENTATION_NOTES.md"),
 )
 
+ACCESS_DOCUMENTS = (*DOCUMENTS, Path("docs/open-questions.md"))
+
 STATUS_MARKERS = (
     "`EXACT_HEAD_REQUALIFICATION_PENDING`",
     "`EXTERNAL_TO_SOURCE_COMMIT`",
-    "`THIRD_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW`",
+    "`FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW`",
     "`RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED`",
-    "`THIRD_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN`",
+    "`FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN`",
     "`NOT_PERFORMED`",
     "`NOT_FROZEN`",
     "`NOT_ADVANCED`",
@@ -36,6 +38,7 @@ LOCKED_INPUTS = (
 
 REPLACEMENT_LOCK_COMMIT = "d4072f912cc58bbc1ca41ceb2652e41783dbf3e1"
 HISTORICAL_REVIEW_HEAD = "62e09a920c10d50c62643543f6ebcbd26570b1d4"
+PRIOR_REVIEW_HEAD = "53b988372634e8a7d2d006021af5b5aadbf96d3c"
 
 
 def main() -> None:
@@ -46,6 +49,8 @@ def main() -> None:
             raise AssertionError(f"{path} lacks current-status markers: {missing}")
         if HISTORICAL_REVIEW_HEAD not in text or "historical" not in text.lower():
             raise AssertionError(f"{path} does not distinguish historical exact-head evidence")
+        if PRIOR_REVIEW_HEAD not in text or "fourth correction" not in text.lower():
+            raise AssertionError(f"{path} does not distinguish the prior reviewed exact head")
         status_start = text.rfind("| Apparatus status |")
         if status_start < 0:
             raise AssertionError(f"{path} lacks a bounded current-status table")
@@ -62,6 +67,31 @@ def main() -> None:
         ):
             if forbidden in current:
                 raise AssertionError(f"{path} fabricates current authority: {forbidden}")
+
+    for path in ACCESS_DOCUMENTS:
+        text = path.read_text(encoding="utf-8").lower()
+        for marker in (
+            "public_repository_only",
+            "repository visibility",
+            "connected authenticated",
+            "artifact access",
+            "review",
+        ):
+            if marker not in text:
+                raise AssertionError(f"{path} lacks access-posture marker: {marker}")
+
+    for path in (
+        Path("src/epsbench/freeze.py"),
+        Path("src/epsbench/cli/app.py"),
+        Path("src/epsbench/github.py"),
+        Path("scripts/fetch_github_actions_evidence.py"),
+        Path("scripts/check_freeze_counterpart_adversarial.py"),
+        Path("tests/unit/test_freeze.py"),
+        Path("tests/unit/test_github_evidence_fetcher.py"),
+        Path(".github/workflows/ci.yml"),
+    ):
+        if "public_repository_authenticated_actions_artifact" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} retains the ambiguous v1 access posture")
 
     for path in LOCKED_INPUTS:
         committed = subprocess.run(

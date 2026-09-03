@@ -278,15 +278,42 @@ findings and byte-identical replacement lock remain preservation constraints. Fr
 WGL/OSMesa evidence and renewed independent scientific and engineering review are required; no
 merge, freeze, gate, model, or scientific-result authority follows.
 
+## 2026-09-03 — PR #17 fourth correction authority and source boundary
+
+Third-correction exact head `53b988372634e8a7d2d006021af5b5aadbf96d3c` completed exact-head
+WGL and OSMesa qualification and received `SCIENTIFIC_PASS` plus
+`ENGINEERING_REQUEST_CHANGES`. Engineering verified `EPS-ER17-0001` through
+`EPS-ER17-0004`, `EPS-ER17-0006`, and `EPS-ER17-0007`, left the access-posture portion of
+`EPS-ER17-0005` unverified, and raised `EPS-ER17-0008`. Although the artifacts actually require
+connected authenticated access to this private GitHub repository, the v1 publication record
+combined repository visibility and access mechanism in a value that called the repository public.
+
+Yuri Frusin acting as `OWNER_PI` issued one consolidated fourth correction limited to
+`EPS-ER17-0005` and `EPS-ER17-0008`. The source correction versions the publication record and
+separately records canonical repository identity, repository API/HTML identity, actual visibility,
+the live `private` flag, availability, and either connected authenticated or public GitHub Actions
+artifact access. The production resolver fetches repository metadata before and after the raw
+artifact resolution and rejects a changed visibility or availability; packet and evidence
+validation independently compare their live repository metadata to the record. For this repository
+the truthful posture is `private` with `connected_authenticated_github_actions` access.
+`PUBLIC_REPOSITORY_ONLY` retains its governing meaning: evidence must remain accessible through
+repository content, reproducible artifacts, CI, and public or connected GitHub records. It does not
+admit unpublished private off-platform material. Reviewers need connected repository and Actions
+artifact access, and the recorded 90-day retention remains a nonblocking closeout dependency only.
+The verified findings, byte-identical replacement lock, locked scientific inputs, packet science,
+and outcomes remain preservation constraints. Fresh exact-head WGL/OSMesa evidence and renewed
+independent dual review are required; no owner implementation approval, merge, freeze, closeout,
+gate, model, comparative-result, or scientific-result authority follows.
+
 ### Current PR #17 status
 
 | Boundary | Current source-record status |
 | --- | --- |
 | Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
 | Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
-| Implementation status | `THIRD_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Implementation status | `FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
 | Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
-| Owner status | `THIRD_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Owner status | `FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
 | Benchmark-freeze status | `NOT_PERFORMED` |
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |

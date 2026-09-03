@@ -41,9 +41,10 @@ apparatus execution after the clean-source WGL rerun admitted 160/160 selected c
 its apparatus evidence and reviews do not carry forward. The bounded second correction requires
 full exact-head packet publication and requalification after the new source commit. Counterpart
 readiness now requires the complete validated packet, strict receipt, CI publication record, and
-live artifact/run/job resolution; all nine compatibility hashes are independently reconstructed
-from retained source datasets; and receipt publication uses stable directory-handle-relative
-Windows and Linux primitives. The replacement lock and locked scientific inputs remain unchanged.
+live repository/artifact/run/job resolution; all nine compatibility hashes are independently
+reconstructed from retained source datasets; and receipt publication uses stable
+directory-handle-relative Windows and Linux primitives. The replacement lock and locked scientific
+inputs remain unchanged.
 
 Exact head `b63121cdc7ef11340e0275498fda0f0b32213637` exposed two further fail-closed
 portability defects before OSMesa generation: Actions retention is anchored to workflow-run
@@ -67,6 +68,28 @@ sets, and derives readiness only from those extracted bytes. GitHub HTTPS origin
 terminal `.git` now serialize as the same canonical owner/repository identity. Fresh exact-head
 WGL/OSMesa evidence and renewed independent dual review remain required.
 
+Third-correction exact head `53b988372634e8a7d2d006021af5b5aadbf96d3c` completed both renderer
+paths and received `SCIENTIFIC_PASS` plus `ENGINEERING_REQUEST_CHANGES`. Engineering verified the
+raw-archive binding and canonical-repository corrections but left the access-posture portion of
+`EPS-ER17-0005` unverified and raised `EPS-ER17-0008`: the v1 publication record called the private
+repository public. The owner-authorised fourth correction uses strict
+`appearance_benchmark_public_ci_packet_record_v2` records. They separately bind canonical
+repository identity and API/HTML URLs; visibility (`private`, `public`, or `internal`); the live
+`private` flag; non-archived/non-disabled availability; and either
+`connected_authenticated_github_actions` or `public_github_actions` artifact access. Public
+repositories require the public mechanism; private and internal repositories require connected
+authenticated access.
+
+The production resolver fetches repository metadata before and after each raw artifact acquisition
+and rejects visibility or availability changes. Packet and evidence validation independently
+compare that metadata to the record, so an internal hash or coherent self-reseal cannot replace the
+live authority. This repository records `private` visibility with connected authenticated Actions
+access. `PUBLIC_REPOSITORY_ONLY` covers public or connected GitHub records, not unpublished
+off-platform evidence. Repository visibility, artifact accessibility, 90-day retention, and
+reviewer access are distinct; reviewers require connected repository and artifact access. The
+verified implementations, replacement lock, packet science, and locked scientific inputs remain
+unchanged. Fresh exact-head WGL/OSMesa evidence and renewed independent dual review are required.
+
 Post-commit CI evidence cannot be embedded into the exact commit it evaluates. Reviewers must
 resolve the immutable WGL and OSMesa packet artifacts and their 90-day publication records before
 assessing apparatus status. Neither apparatus qualification nor a replacement lock freezes the
@@ -79,9 +102,9 @@ remain mandatory.
 | --- | --- |
 | Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
 | Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
-| Implementation status | `THIRD_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Implementation status | `FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
 | Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
-| Owner status | `THIRD_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Owner status | `FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
 | Benchmark-freeze status | `NOT_PERFORMED` |
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |
