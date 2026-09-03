@@ -30,17 +30,25 @@ Factual repository events only; this file does not override the research documen
 - 2026-09-02: Exact head `98d6b33e5f39e5ac1ef4a115b5fef364a7737937` locally completed all 192 WGL cells, standalone packet validation, and the complete adversarial corpus as packet root `ab840376b6d1af2b904c5c8ce26ecc6656b96e2f27f2b44dd4374826fe1cfabb`. Actions run `33536577509` then failed closed in its quality job because the portable metric representation had incorrectly modified the shared historical Slice 5 audit and no longer reproduced its immutable negative evidence; the already-running WGL job was cancelled and published no artifact. The follow-up source correction scopes portable representation to PR #17 freeze-layer copies while restoring the shared audit unchanged. Local and CI evidence from `98d6b33` does not carry forward to the changed source head; no review, approval, freeze, gate, model, or scientific-result authority follows.
 - 2026-09-02: Second-correction exact head `dc17d8453bed2583c085aa7441255ca476d3e1f0` completed all WGL and OSMesa qualification and received renewed `SCIENTIFIC_PASS` plus `ENGINEERING_REQUEST_CHANGES`. Engineering verified `EPS-ER17-0002` through `EPS-ER17-0005`, did not verify `EPS-ER17-0001` or `EPS-ER17-0006`, and raised `EPS-ER17-0007`. A jointly resealed alternate valid packet remained acceptable because consumed extracted directories were not cryptographically bound to the live artifact archive digest, and equivalent GitHub origins with and without terminal `.git` compared differently. Yuri Frusin acting as `OWNER_PI` issued a third correction limited to `EPS-ER17-0001`, `EPS-ER17-0006`, and `EPS-ER17-0007`, preserving the verified findings and byte-identical replacement lock. Fresh exact-head WGL/OSMesa raw-archive-bound qualification and renewed independent dual review are required. No implementation-merge approval, freeze, gate action, model work, or scientific result is authorised.
 - 2026-09-03: Third-correction exact head `53b988372634e8a7d2d006021af5b5aadbf96d3c` completed raw-archive-bound WGL and OSMesa qualification and received `SCIENTIFIC_PASS` plus `ENGINEERING_REQUEST_CHANGES`. Engineering verified `EPS-ER17-0001` through `EPS-ER17-0004`, `EPS-ER17-0006`, and `EPS-ER17-0007`, left the access-posture portion of `EPS-ER17-0005` unverified, and raised `EPS-ER17-0008`: the publication record's `public_repository_authenticated_actions_artifact` value inaccurately described the private repository as public and was not independently bound to live repository visibility. Yuri Frusin acting as `OWNER_PI` issued a fourth correction limited to `EPS-ER17-0005` and `EPS-ER17-0008`. The fourth-correction source candidate uses a versioned typed publication record that separates actual repository visibility from connected authenticated/public artifact access, independently resolves repository metadata, and detects visibility changes during acquisition. `PUBLIC_REPOSITORY_ONLY` continues to admit repository/CI evidence through public or connected GitHub records, not unpublished off-platform evidence. The verified implementations, replacement lock, and locked scientific inputs remain preservation constraints. Fresh exact-head WGL/OSMesa evidence and renewed independent dual review are required; no owner implementation approval, merge, freeze, closeout, gate action, model work, or scientific result is authorised.
+- 2026-09-03: PR #17 exact final head `4d47595ede0f1690f1d9d96075df9a3ff7ab60d9` and tree `ba112bcc4be4396648305bb1d1529cc002755ea1` completed exact-head CI run `33706715326`, both locked renderer qualifications, independent `SCIENTIFIC_PASS` and `ENGINEERING_PASS`, and exact-head approval issued by Yuri Frusin acting as `OWNER_PI`. `EPS-SR17-0001` and `EPS-ER17-0001` through `EPS-ER17-0008` were recorded as verified by their respective reviewers. PR #17 was merged by normal merge commit `4851bfc195a977f1bf9f29005b2579341dc75c38`. The owner-authorised linked closeout makes Appearance Benchmark Input Freeze v0 canonical only when the closeout commit is present on `main` and final readback succeeds. Replacement-lock commit `d4072f912cc58bbc1ca41ceb2652e41783dbf3e1` and root `28acd2c340b3ef1e2b8b2b7b31ca69356cd9baa35b94ff8a598e020099883435` remain unchanged and authoritative for five selected profiles, two retained excluded profiles, two scene families, and sixteen final roots. Durable receipts and credential-free GitHub metadata are preserved under `docs/reviews/`; the four verified raw ZIPs remain Actions-retained and uncommitted. No tag or Release was created; full Gate 0B is not claimed; Gate 0C, Gate 0D, comparative model-result access, model work, empirical-gate evaluation, and a next work package remain unauthorised or unperformed; scientific result is `NONE`.
 
-## Current PR #17 status
+Before this final event, the historical source-only status was
+`EXACT_HEAD_REQUALIFICATION_PENDING`, `EXTERNAL_TO_SOURCE_COMMIT`,
+`FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW`,
+`RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED`,
+`FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN`, `NOT_PERFORMED`,
+`NOT_FROZEN`, `NOT_ADVANCED`, and `NONE`. Those values remain historical pre-closeout evidence.
+
+## Current PR #17 closeout status
 
 | Boundary | Current source-record status |
 | --- | --- |
-| Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
-| Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
-| Implementation status | `FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
-| Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
-| Owner status | `FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
-| Benchmark-freeze status | `NOT_PERFORMED` |
+| Apparatus status | `QUALIFICATION_COMPLETE_BOTH_LOCKED_RENDERERS` |
+| Post-commit exact-head CI evidence | `SUCCESS_AT_APPROVED_HEAD` |
+| Implementation status | `MERGED_BY_NORMAL_MERGE_COMMIT` |
+| Review status | `EXACT_HEAD_DUAL_REVIEW_RECORDED` |
+| Owner status | `EXACT_HEAD_APPROVED_FOR_MERGE_AND_BENCHMARK_FREEZE_CLOSEOUT` |
+| Benchmark-freeze status | `FROZEN_BY_LINKED_CLOSEOUT_ON_CANONICAL_MAIN` |
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |
 | Scientific result | `NONE` |

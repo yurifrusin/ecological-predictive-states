@@ -1,0 +1,161 @@
+{
+  "schema_version": "eps_pr17_closeout_evidence_manifest_v1",
+  "repository": "yurifrusin/ecological-predictive-states",
+  "repository_id": 1346269440,
+  "repository_visibility": "private",
+  "artifact_access_mechanism": "connected_authenticated_github_actions",
+  "evidence_class": "PUBLIC_REPOSITORY_ONLY",
+  "implementation_pr": 17,
+  "approved_implementation_sha": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+  "approved_implementation_tree": "ba112bcc4be4396648305bb1d1529cc002755ea1",
+  "implementation_merge_commit": "4851bfc195a977f1bf9f29005b2579341dc75c38",
+  "canonical_main_immediately_after_implementation_merge": "4851bfc195a977f1bf9f29005b2579341dc75c38",
+  "historical_original_lock_commit": "1a5929307dfcba1d726c650f5e1ce68771f66801",
+  "replacement_lock_commit": "d4072f912cc58bbc1ca41ceb2652e41783dbf3e1",
+  "replacement_lock_root_sha256": "28acd2c340b3ef1e2b8b2b7b31ca69356cd9baa35b94ff8a598e020099883435",
+  "workflow": {
+    "name": "CI",
+    "run_id": 33706715326,
+    "attempt": 1,
+    "head_sha": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+    "head_tree": "ba112bcc4be4396648305bb1d1529cc002755ea1",
+    "status": "completed",
+    "conclusion": "success",
+    "created_at": "2026-09-03T02:12:06Z",
+    "updated_at": "2026-09-03T06:34:15Z",
+    "jobs": [
+      {
+        "id": 100497296367,
+        "name": "qualify-wgl",
+        "conclusion": "success"
+      },
+      {
+        "id": 100497296558,
+        "name": "quality",
+        "conclusion": "success"
+      },
+      {
+        "id": 100509579302,
+        "name": "qualify-osmesa",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "id": 9876515995,
+      "name": "appearance-freeze-wgl-packet-4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+      "role": "windows_wgl_packet",
+      "raw_zip_size_in_bytes": 21803973,
+      "raw_zip_sha256": "6618f9fe265912cb3bc67c99af1a56207a382fb84f20675e6d7dcad5b53a096e",
+      "created_at": "2026-09-03T03:01:42Z",
+      "expires_at": "2026-12-02T02:12:06Z",
+      "expired_at_preservation": false,
+      "independently_downloaded_and_verified": true,
+      "raw_zip_committed": false
+    },
+    {
+      "id": 9876815245,
+      "name": "appearance-freeze-wgl-evidence-4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+      "role": "windows_wgl_evidence",
+      "raw_zip_size_in_bytes": 6527,
+      "raw_zip_sha256": "29f988417cc20fca3885b5122db01976296058151cf99e03ad7166e7b54ff473",
+      "created_at": "2026-09-03T03:16:35Z",
+      "expires_at": "2026-12-02T02:12:06Z",
+      "expired_at_preservation": false,
+      "independently_downloaded_and_verified": true,
+      "raw_zip_committed": false,
+      "exact_archive_members": [
+        "publication_record.json",
+        "renderer_receipt.json"
+      ]
+    },
+    {
+      "id": 9880381284,
+      "name": "appearance-freeze-osmesa-packet-4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+      "role": "ubuntu_osmesa_packet",
+      "raw_zip_size_in_bytes": 22346269,
+      "raw_zip_sha256": "67ecd1a7e695e3b6fd36930258497ec7a92a89f76e22d0ee962891dcc50b6e18",
+      "created_at": "2026-09-03T06:03:36Z",
+      "expires_at": "2026-12-02T02:12:06Z",
+      "expired_at_preservation": false,
+      "independently_downloaded_and_verified": true,
+      "raw_zip_committed": false
+    },
+    {
+      "id": 9881190409,
+      "name": "appearance-freeze-osmesa-evidence-4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+      "role": "ubuntu_osmesa_evidence",
+      "raw_zip_size_in_bytes": 6515,
+      "raw_zip_sha256": "4c756aefce7f350c4b50a4af77ead85cc7032ea7ba0e88dc37107237aeeda53c",
+      "created_at": "2026-09-03T06:34:11Z",
+      "expires_at": "2026-12-02T02:12:06Z",
+      "expired_at_preservation": false,
+      "independently_downloaded_and_verified": true,
+      "raw_zip_committed": false,
+      "exact_archive_members": [
+        "publication_record.json",
+        "renderer_receipt.json"
+      ]
+    }
+  ],
+  "committed_evidence_files": [
+    {
+      "path": "docs/reviews/pr-0017-github-artifacts-33706715326.json",
+      "size_in_bytes": 4320,
+      "sha256": "7d109b4020d03a90304d814dc7406bbb870b81a7b4cf158f0bb01712e8b176f1"
+    },
+    {
+      "path": "docs/reviews/pr-0017-github-repository-metadata.json",
+      "size_in_bytes": 853,
+      "sha256": "fde02ad80c3f13f1e9544d08a7b72c82c15c0b1baf094793f2fee70724e5fcf9"
+    },
+    {
+      "path": "docs/reviews/pr-0017-github-workflow-jobs-33706715326.json",
+      "size_in_bytes": 17536,
+      "sha256": "c983cb9d0c5149a56d5ed537a4e557a890c4d3d73e4ec5a44e48ab6249ea6bed"
+    },
+    {
+      "path": "docs/reviews/pr-0017-github-workflow-run-33706715326.json",
+      "size_in_bytes": 2115,
+      "sha256": "235f41c109224eab4423f26ff08b04613568d5340f49b2a323f56574ba5f15a3"
+    },
+    {
+      "path": "docs/reviews/pr-0017-osmesa-publication-record.json",
+      "size_in_bytes": 2773,
+      "sha256": "1c9d01197cf1b0ce7ac6f9b6652b771134c447a21d408962f24a3c8bade5fcc4"
+    },
+    {
+      "path": "docs/reviews/pr-0017-osmesa-renderer-receipt.json",
+      "size_in_bytes": 63031,
+      "sha256": "a3b091d359cffb3e2a18394b2bf1df9ab051310f3a566d012e5221addabf79f4"
+    },
+    {
+      "path": "docs/reviews/pr-0017-wgl-publication-record.json",
+      "size_in_bytes": 2767,
+      "sha256": "d099c7b64a50bffbfbd792a4df7a09f432ad17f773b3fc8c1e11057d6654eb56"
+    },
+    {
+      "path": "docs/reviews/pr-0017-wgl-renderer-receipt.json",
+      "size_in_bytes": 63051,
+      "sha256": "b8589d6724942fd84e597910cc828523814bc4429a3b6fec39e063487c76708b"
+    }
+  ],
+  "raw_zip_preservation": {
+    "all_four_independently_downloaded_and_verified_before_extraction": true,
+    "raw_zips_committed": false,
+    "current_storage": "github_actions_retained_artifacts",
+    "indefinite_retention": false,
+    "credential_or_signed_download_url_committed": false
+  },
+  "freeze_effect": "effective_only_after_linked_closeout_merge_and_final_canonical_main_readback",
+  "tag_created": false,
+  "release_published": false,
+  "full_gate_0b_complete": false,
+  "gate_0c_authorised": false,
+  "gate_0d_authorised": false,
+  "model_work_performed": false,
+  "empirical_gate_evaluated": false,
+  "scientific_result": null,
+  "next_work_package_begun": false
+}

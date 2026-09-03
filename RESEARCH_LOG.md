@@ -305,16 +305,54 @@ and outcomes remain preservation constraints. Fresh exact-head WGL/OSMesa eviden
 independent dual review are required; no owner implementation approval, merge, freeze, closeout,
 gate, model, comparative-result, or scientific-result authority follows.
 
-### Current PR #17 status
+## 2026-09-03 — PR #17 merge and Appearance Benchmark Input Freeze v0 closeout
+
+Final fourth-correction head `4d47595ede0f1690f1d9d96075df9a3ff7ab60d9` and tree
+`ba112bcc4be4396648305bb1d1529cc002755ea1` completed exact-head CI run `33706715326` and both
+locked renderer qualification paths. Independent review returned `SCIENTIFIC_PASS` with
+`EPS-SR17-0001` verified and `ENGINEERING_PASS` with `EPS-ER17-0001` through `EPS-ER17-0008`
+verified. These are reviewer dispositions recorded by closeout, not executor adjudications. Yuri
+Frusin acting as `OWNER_PI` issued disposition
+`EXACT_HEAD_APPROVED_FOR_MERGE_AND_BENCHMARK_FREEZE_CLOSEOUT`, and PR #17 was merged by normal
+merge commit `4851bfc195a977f1bf9f29005b2579341dc75c38`.
+
+The owner-authorised linked closeout freezes the five selected profile roles and exact sixteen final
+evaluation roots only when this closeout commit is present on canonical `main` and final readback
+succeeds. The two excluded profiles remain retained negative evidence. Authoritative replacement
+lock `d4072f912cc58bbc1ca41ceb2652e41783dbf3e1`, root
+`28acd2c340b3ef1e2b8b2b7b31ca69356cd9baa35b94ff8a598e020099883435`, and all three protected
+freeze snapshots remain unchanged. The repository remains private; exact evidence requires
+connected authenticated GitHub Actions access. Both renderer receipts, both publication records,
+and credential-free repository/run/job/artifact metadata are preserved under `docs/reviews/`. All
+four raw ZIPs were independently downloaded and verified, but remain Actions-retained rather than
+committed.
+
+The freeze preserves the two-scene/sixteen-root limitation, the absence of admitted isolated
+stripe-only and illumination-only profiles, checker-high's frequency-only interpretation relative
+to checker-low, the compound combined-stress interpretation, the need for future non-adaptive
+packet-exposure governance, and the distinction between apparatus qualification and model-efficacy
+evidence. The model protocol is not frozen; primary and other-renderer roles and aggregation remain
+unselected; comparative model-result access is not authorised. Full Gate 0B is not claimed, Gate 0C
+and Gate 0D are not authorised, no model or empirical-gate work occurred, no tag or Release was
+created, no next work package began, and scientific result remains `NONE`.
+
+Before final review and closeout, the historical source-only status was
+`EXACT_HEAD_REQUALIFICATION_PENDING`, `EXTERNAL_TO_SOURCE_COMMIT`,
+`FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW`,
+`RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED`,
+`FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN`, `NOT_PERFORMED`,
+`NOT_FROZEN`, `NOT_ADVANCED`, and `NONE`. Those values remain historical pre-closeout evidence.
+
+### Current PR #17 closeout status
 
 | Boundary | Current source-record status |
 | --- | --- |
-| Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
-| Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
-| Implementation status | `FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
-| Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
-| Owner status | `FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
-| Benchmark-freeze status | `NOT_PERFORMED` |
+| Apparatus status | `QUALIFICATION_COMPLETE_BOTH_LOCKED_RENDERERS` |
+| Post-commit exact-head CI evidence | `SUCCESS_AT_APPROVED_HEAD` |
+| Implementation status | `MERGED_BY_NORMAL_MERGE_COMMIT` |
+| Review status | `EXACT_HEAD_DUAL_REVIEW_RECORDED` |
+| Owner status | `EXACT_HEAD_APPROVED_FOR_MERGE_AND_BENCHMARK_FREEZE_CLOSEOUT` |
+| Benchmark-freeze status | `FROZEN_BY_LINKED_CLOSEOUT_ON_CANONICAL_MAIN` |
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |
 | Scientific result | `NONE` |

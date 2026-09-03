@@ -1,0 +1,45 @@
+{
+  "schema_version": "eps_pr17_closeout_github_workflow_run_metadata_v1",
+  "source_endpoint": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/runs/33706715326",
+  "repository": "yurifrusin/ecological-predictive-states",
+  "workflow_run": {
+    "id": 33706715326,
+    "node_id": "WFR_kwLOUD5xAM8AAAAH2ROovg",
+    "name": "CI",
+    "path": ".github/workflows/ci.yml",
+    "workflow_id": 342216641,
+    "run_number": 75,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "status": "completed",
+    "conclusion": "success",
+    "head_branch": "codex/gate-0b-appearance-benchmark-freeze-v0",
+    "head_sha": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+    "check_suite_id": 91345735639,
+    "html_url": "https://github.com/yurifrusin/ecological-predictive-states/actions/runs/33706715326",
+    "pull_requests": [],
+    "created_at": "2026-09-03T02:12:06Z",
+    "updated_at": "2026-09-03T06:34:15Z",
+    "run_started_at": "2026-09-03T02:12:06Z",
+    "jobs_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/runs/33706715326/jobs",
+    "logs_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/runs/33706715326/logs",
+    "artifacts_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/runs/33706715326/artifacts",
+    "cancel_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/runs/33706715326/cancel",
+    "rerun_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/runs/33706715326/rerun",
+    "previous_attempt_url": null,
+    "head_commit": {
+      "id": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+      "tree_id": "ba112bcc4be4396648305bb1d1529cc002755ea1",
+      "message": "Correct GitHub evidence access posture",
+      "timestamp": "2026-09-03T02:11:47Z",
+      "author": {
+        "name": "yurifrusin",
+        "email": "123339398+yurifrusin@users.noreply.github.com"
+      },
+      "committer": {
+        "name": "yurifrusin",
+        "email": "123339398+yurifrusin@users.noreply.github.com"
+      }
+    }
+  }
+}

@@ -9,15 +9,23 @@ public and does not permit unpublished private off-platform evidence. PR #17 is 
 GitHub access and reviewers must have corresponding repository and artifact access.
 A genuinely public repository would instead use public GitHub Actions access. Repository visibility
 and artifact accessibility are separate from expiry/retention and reviewer access.
-The current 90-day artifact expiry is a nonblocking closeout dependency; it does not authorise or
-perform permanent archival publication, a tag, Release, benchmark freeze, closeout, or gate
-advancement.
+The exact PR #17 Actions artifacts remain subject to 90-day retention and expire on
+`2026-12-02T02:12:06Z`. The linked closeout durably preserves both renderer receipts, both
+publication records, credential-free repository/run/job/artifact metadata, and the four exact raw
+ZIP identities. The raw ZIPs remain Actions-retained rather than committed. This preservation does
+not authorise permanent public archival publication, a tag, Release, full Gate 0B completion, gate
+advancement, model work, or a scientific-result claim.
+
+Appearance Benchmark Input Freeze v0 is canonical only when the owner-authorised linked closeout
+commit is present on `main` and final canonical-main readback has succeeded. It retains five
+selected profiles, two excluded profiles, two scene families, and sixteen final evaluation roots.
+Its accepted limitations include no admitted isolated stripe-only or illumination-only profile,
+checker-high as frequency-only only relative to checker-low, and combined stress as a compound
+intervention. Apparatus qualification is not model-efficacy evidence.
 
 These questions require owner review or later gate work:
 
 1. Which repository, documentation, code, and future dataset licence or licences should apply? No licence has been selected.
 2. Does the separately hashed analytic transport remain identical beyond the tested Windows/WGL and exact-head Ubuntu/OSMesa locked environments, and what posture should later platforms or dependency versions use? Complete raster-derived ecological hashes may remain backend-specific.
-3. Will engineering and scientific review accept the apparatus-qualified five-profile freeze candidate despite the explicit absence of admitted stripe-only and illumination-only conditions?
-4. If both reviews pass, will the owner approve this exact-head candidate for a separately authorised benchmark-freeze closeout?
-5. Before any comparative model-result access, which locked renderer should a future authorised Gate 0D/0E protocol prospectively select as primary, how should it classify the other renderer (`replication`, `robustness`, `sensitivity`, or `unsupported`), and will it preregister any renderer aggregation rule?
-6. Which separate training, validation, and model-randomness roots and full model protocol should a later authorised Gate 0D/0E preregistration define?
+3. Before any comparative model-result access, which locked renderer should a future authorised Gate 0D/0E protocol prospectively select as primary, how should it classify the other renderer (`replication`, `robustness`, `sensitivity`, or `unsupported`), and will it preregister any renderer aggregation rule?
+4. Which separate training, validation, and model-randomness roots and full model protocol should a later authorised Gate 0D/0E preregistration define?
