@@ -132,3 +132,189 @@ immutable definition-lock commit. Neither committed prospective record changes. 
 correction changes no profile, seed, control, threshold, renderer, admission rule, or experimental
 outcome. The agreed admitted set supports only a later freeze proposal. Full Gate 0B, Gate 0C,
 Gate 0D, models, benchmark freeze, and scientific results remain unauthorised.
+
+## 2026-08-31 — Appearance Benchmark Input Freeze v0 candidate
+
+The five cross-renderer admitted Revision 1 profiles are proposed as one development reference and
+four held-out Appearance-OOD profiles. The rejected stripe-only and illumination-only candidates
+remain excluded negative evidence and explicit coverage limitations; they are not silently removed
+or evidence against the EPS hypothesis.
+
+Sixteen new public evaluation-only episode roots were deterministically derived and prospectively
+locked before any selected profile was rendered on them. They are distinct from apparatus-design,
+candidate-qualification, training, validation, and model-randomness roots. If any selected profile
+fails on either locked renderer, the entire sixteen-root registry is retired from future final
+evaluation use for a revised profile set.
+
+The pushed immutable lock commit is `1a5929307dfcba1d726c650f5e1ce68771f66801`. The subsequent
+complete Windows/WGL audit admitted all 160 selected cells, with every selected profile passing
+32/32 cells; all 32 legacy controls were retained. Exact-head Ubuntu/OSMesa CI independently
+repeated the same 160/160 selected and 16/16 admitted/rejected control counts. Every profile passed
+32/32 cells in both renderers, all portable apparatus roots matched, and the cross-renderer
+readiness root is `da9aad546bf6223d1802cf57990779f952d410340e7bd37d1b07c83c081e65d5`.
+The candidate is therefore `ready_for_dual_review`, with the seed registry
+`eligible_for_owner_freeze_if_approved`.
+
+Successful apparatus qualification creates only a freeze candidate. A benchmark freeze still
+requires exact-head engineering and scientific passes, owner approval, and separately authorised
+benchmark-freeze closeout. No model protocol, gate, or scientific result follows.
+
+## 2026-09-01 — PR #17 bounded correction and replacement lock
+
+The reviewed head `8b34b78d5488af7103119697a286cfb8757cc125` received immutable
+`SCIENTIFIC_REQUEST_CHANGES` and `ENGINEERING_REQUEST_CHANGES`. The owner accepted
+`EPS-SR17-0001` and `EPS-ER17-0001` through `EPS-ER17-0004` for one bounded correction wave and
+specifically authorised a prospective replacement lock because the prior logical-root domains were
+not unique and versioned.
+
+The earlier lock commit `1a5929307dfcba1d726c650f5e1ce68771f66801` and root
+`a373a4742a6b5a3057b820b7d925c2e19fbddc0a83cc45384b8b81ea4e8b1464` remain immutable
+historical evidence. The corrected v1 replacement-lock root is
+`28acd2c340b3ef1e2b8b2b7b31ca69356cd9baa35b94ff8a598e020099883435`. It retains the exact
+profiles, roles, episode roots, scenes, comparisons, thresholds, renderers, exclusions, and failure
+rules while adding the prospective model-result renderer-selection dependency, unique domain
+envelopes, retained independently reconstructible cell-source evidence, and strict source-bound
+renderer receipts with exclusive no-replace publication.
+
+Corrected qualification remains prohibited until the replacement-lock commit has been pushed and
+read back remotely. The obsolete v0 WGL receipt is removed from the corrected candidate; its
+historical commit remains in Git. No benchmark freeze, model-result access, model work, gate
+advancement, approval, merge, closeout, or scientific result follows from this correction stage.
+
+## 2026-09-01 — Corrected WGL execution after replacement-lock readback
+
+Replacement-lock commit `d4072f912cc58bbc1ca41ceb2652e41783dbf3e1` was pushed and read back
+from the branch, fetched remote reference, and GitHub commit API before corrected final-root
+execution. The first WGL execution then failed closed because the final seed registry's canonical
+dataset-artifact identity had been conflated with its new freeze-domain identity. No packet or
+receipt was published. This failed execution is retained as engineering evidence. Source-only
+commit `f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2` separated the two identities and added a real
+retained-dataset regression; the replacement lock and all locked scientific content remained
+unchanged.
+
+The complete clean-source WGL rerun published packet root
+`630d23cf791983977bdd9e92ba33ccedb6a18d1faf819c5d2df139c83dac9310`: all 160 selected cells
+were admitted and all 32 legacy controls were retained as 16 admitted and 16 rejected. Independent
+validation and all complete-packet adversarial regressions succeeded. The strict receipt root is
+`28036d50634b9521b62fa9ceb00d24fe32c3b94d7bb2182d984f2df49c8c76ac`; it binds clean source
+commit `f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2`, Git tree
+`bbc29863fd4efef24c3d74cc8a99caff15ada504`, 6,550 packet artifacts, complete outcome maps,
+portable and renderer-local roots, and threshold-margin root
+`eb23b2e2724f1603293e06a25d43344c87d5f954219c66ccdb8c5e5dd292c097`.
+
+This is one-renderer apparatus evidence only. Status remains `qualification_incomplete` pending
+exact-head Ubuntu/OSMesa and cross-renderer reconstruction. The benchmark is not frozen; no finding
+is self-verified; and no review, owner, merge, closeout, gate, model, or scientific-result authority
+follows.
+
+## 2026-09-01 — PR #17 second correction authority and current source state
+
+Historical exact head `62e09a920c10d50c62643543f6ebcbd26570b1d4` subsequently completed
+two-renderer execution and received renewed scientific pass plus engineering request changes. Those
+results, reviews, and owner dispositions remain exact-head historical evidence only. The owner
+authorised a bounded second correction for `EPS-ER17-0001`, `EPS-ER17-0002`, `EPS-ER17-0003`,
+`EPS-ER17-0005`, and `EPS-ER17-0006`; the verified domain-separation correction
+`EPS-ER17-0004` and the complete replacement-lock boundary must remain unchanged.
+
+The source correction requires a counterpart receipt to resolve a complete immutable packet plus a
+live-verifiable CI publication record before any cross-renderer readiness can be constructed. It
+reconstructs the nine compatibility hashes from retained source datasets, makes typed reconstructed
+identities authoritative for admission/pairing/roots, and uses directory-handle-relative Windows
+and Linux publication primitives. Fresh exact-head WGL and OSMesa packet artifacts are generated
+only after the source commit exists. Their run, job, artifact ID, digest, source commit/tree,
+availability, and 90-day retention record therefore cannot be embedded in the commit they evaluate;
+they remain external exact-head CI evidence for independent review.
+
+Exact head `2dec901f1465bff59f1a2507d3ed0a87235fca8b` completed the local WGL matrix and
+corrected adversarial corpus, then Actions run `33522600616` failed before qualification and
+published no packet or receipt. The hosted Windows runner had no usable WGL driver; Linux mypy also
+identified platform-specific `ctypes` attributes that needed explicit portability handling. The
+next source candidate uses a single-job ephemeral self-hosted Windows/WGL label for the locked WGL
+apparatus and retains hosted Ubuntu/OSMesa CI. Because the source head changes, the successful local
+execution at `2dec901f` is historical diagnostic evidence only and must be repeated.
+
+Exact head `b63121cdc7ef11340e0275498fda0f0b32213637` then completed the full WGL matrix
+and packet adversarial corpus in Actions run `33524945210`, publishing immutable packet artifact
+`9809315485`. The first publication-record attempt rejected the live GitHub timestamps because the
+validator incorrectly anchored the configured 90-day retention to the later artifact-upload time
+rather than the workflow-run creation time. PowerShell continued to the receipt command and exposed
+only that final exit status, so evidence artifact `9809732826` contained a receipt but no publication
+record. Packet-bound OSMesa processing rejected the downloaded WGL evidence during independent
+Linux recomputation before generating any OSMesa cell or artifact. This is retained failed evidence,
+not qualification evidence. The source correction binds retention to the live run creation time,
+keeps the artifact creation and expiry times exact, separates publication and receipt into distinct
+fail-fast CI steps, and adds strict difference-path diagnostics for cross-platform reconstruction.
+Changing the source head invalidates the successful WGL execution for qualification purposes.
+
+Exact head `98d6b33e5f39e5ac1ef4a115b5fef364a7737937` subsequently produced a fresh local
+192-cell WGL packet, passed standalone validation and every complete-packet adversarial case, and
+reported packet root `ab840376b6d1af2b904c5c8ce26ecc6656b96e2f27f2b44dd4374826fe1cfabb`.
+Exact-head Actions run `33536577509` nevertheless failed in its quality job before renderer
+qualification because portable normalization had been applied to the shared historical Slice 5
+audit and therefore no longer reproduced that immutable negative-evidence packet. The concurrent
+WGL job was cancelled and no packet artifact was published. This failed run is retained. The
+follow-up source correction restores the shared historical audit byte semantics and applies
+portable float and signed-frequency normalization only to copied PR #17 freeze-layer evidence.
+Changing the source head again invalidates the local WGL result for qualification purposes.
+
+## 2026-09-02 — PR #17 third correction authority and source boundary
+
+Second-correction exact head `dc17d8453bed2583c085aa7441255ca476d3e1f0` completed the WGL and
+OSMesa paths and received renewed `SCIENTIFIC_PASS` plus `ENGINEERING_REQUEST_CHANGES`. Engineering
+verified `EPS-ER17-0002` through `EPS-ER17-0005`, did not verify `EPS-ER17-0001` or
+`EPS-ER17-0006`, and raised `EPS-ER17-0007`. Its joint-substitution test showed that a different
+valid packet and jointly resealed receipt/publication records could retain the original live
+artifact digest while the validator consumed unrelated extracted bytes.
+
+Yuri Frusin acting as `OWNER_PI` issued one consolidated third correction limited to those three
+findings. The source correction makes the raw GitHub packet and evidence ZIPs the consumed
+authority: each archive is resolved live, downloaded without forwarding credentials to the signed
+storage redirect, rechecked for disappearance or expiry, hashed against live metadata, and safely
+extracted into a new isolated destination. Exact evidence membership and regular, non-colliding
+packet members are required before the existing complete packet, receipt, publication, and
+readiness validators run. Equivalent credential-free GitHub HTTPS origins with and without terminal
+`.git` now produce one canonical `yurifrusin/ecological-predictive-states` identity. The verified
+findings and byte-identical replacement lock remain preservation constraints. Fresh exact-head
+WGL/OSMesa evidence and renewed independent scientific and engineering review are required; no
+merge, freeze, gate, model, or scientific-result authority follows.
+
+## 2026-09-03 — PR #17 fourth correction authority and source boundary
+
+Third-correction exact head `53b988372634e8a7d2d006021af5b5aadbf96d3c` completed exact-head
+WGL and OSMesa qualification and received `SCIENTIFIC_PASS` plus
+`ENGINEERING_REQUEST_CHANGES`. Engineering verified `EPS-ER17-0001` through
+`EPS-ER17-0004`, `EPS-ER17-0006`, and `EPS-ER17-0007`, left the access-posture portion of
+`EPS-ER17-0005` unverified, and raised `EPS-ER17-0008`. Although the artifacts actually require
+connected authenticated access to this private GitHub repository, the v1 publication record
+combined repository visibility and access mechanism in a value that called the repository public.
+
+Yuri Frusin acting as `OWNER_PI` issued one consolidated fourth correction limited to
+`EPS-ER17-0005` and `EPS-ER17-0008`. The source correction versions the publication record and
+separately records canonical repository identity, repository API/HTML identity, actual visibility,
+the live `private` flag, availability, and either connected authenticated or public GitHub Actions
+artifact access. The production resolver fetches repository metadata before and after the raw
+artifact resolution and rejects a changed visibility or availability; packet and evidence
+validation independently compare their live repository metadata to the record. For this repository
+the truthful posture is `private` with `connected_authenticated_github_actions` access.
+`PUBLIC_REPOSITORY_ONLY` retains its governing meaning: evidence must remain accessible through
+repository content, reproducible artifacts, CI, and public or connected GitHub records. It does not
+admit unpublished private off-platform material. Reviewers need connected repository and Actions
+artifact access, and the recorded 90-day retention remains a nonblocking closeout dependency only.
+The verified findings, byte-identical replacement lock, locked scientific inputs, packet science,
+and outcomes remain preservation constraints. Fresh exact-head WGL/OSMesa evidence and renewed
+independent dual review are required; no owner implementation approval, merge, freeze, closeout,
+gate, model, comparative-result, or scientific-result authority follows.
+
+### Current PR #17 status
+
+| Boundary | Current source-record status |
+| --- | --- |
+| Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
+| Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
+| Implementation status | `FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
+| Owner status | `FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Benchmark-freeze status | `NOT_PERFORMED` |
+| Model-protocol status | `NOT_FROZEN` |
+| Gate status | `NOT_ADVANCED` |
+| Scientific result | `NONE` |

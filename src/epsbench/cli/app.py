@@ -10,6 +10,12 @@ from epsbench.audit import create_appearance_audit, validate_appearance_audit
 from epsbench.config import load_config
 from epsbench.data import DatasetLoader, create_inspection_image, generate_dataset, validate_dataset
 from epsbench.failure_analysis import create_failure_analysis, validate_failure_analysis
+from epsbench.freeze import (
+    create_freeze_audit,
+    create_publication_record,
+    create_renderer_receipt,
+    validate_freeze_audit,
+)
 from epsbench.revision import create_revision_audit, validate_revision_audit
 from epsbench.schema import DatasetManifest, ModalityPermissionSet
 
@@ -212,6 +218,135 @@ def appearance_revision_audit_command(
         f"audit={roots['renderer_specific_audit_root_sha256']}"
     )
     typer.echo(f"Revision candidate packet: {output}")
+
+
+@app.command(name="appearance-freeze-audit")
+def appearance_freeze_audit_command(
+    benchmark_definition: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    evaluation_seeds: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    definition_lock: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    revision_registry: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    single_config: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    corridor_config: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    output: Annotated[Path, typer.Option(file_okay=False)],
+    counterpart_evidence: Annotated[
+        Path | None, typer.Option(exists=True, file_okay=False, readable=True)
+    ] = None,
+) -> None:
+    """Build and independently validate the 192-cell freeze-candidate packet."""
+
+    try:
+        packet = create_freeze_audit(
+            benchmark_definition,
+            evaluation_seeds,
+            definition_lock,
+            revision_registry,
+            single_config,
+            corridor_config,
+            output,
+            counterpart_evidence,
+        )
+        validate_freeze_audit(output, counterpart_evidence)
+    except Exception as error:
+        typer.echo(f"Appearance freeze audit failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(f"Freeze candidate packet root: {packet['complete_packet_root_sha256']}")
+    typer.echo(
+        f"Selected outcomes: {packet['selected_matrix_counts']}; "
+        f"legacy control outcomes: {packet['control_matrix_counts']}"
+    )
+    typer.echo(
+        f"Freeze candidate status: {packet['freeze_candidate_status']}; "
+        f"seed disposition: {packet['seed_set_disposition']}"
+    )
+    typer.echo(f"Portable definition roots: {packet['portable_definition_roots']}")
+    typer.echo(f"Portable apparatus roots: {packet['portable_apparatus_roots']}")
+    typer.echo(
+        f"Portable profile-readiness root: {packet['portable_profile_readiness_root_sha256']}"
+    )
+    typer.echo(f"Renderer-local roots: {packet['renderer_local_roots']}")
+    typer.echo(f"Threshold margins: {packet['threshold_margin_summary']}")
+    typer.echo(f"Freeze candidate packet: {output}")
+
+
+@app.command(name="appearance-freeze-validate")
+def appearance_freeze_validate_command(
+    packet: Annotated[Path, typer.Argument(exists=True, file_okay=False, readable=True)],
+    counterpart_evidence: Annotated[
+        Path | None, typer.Option(exists=True, file_okay=False, readable=True)
+    ] = None,
+) -> None:
+    """Independently validate a complete appearance freeze-candidate packet."""
+
+    try:
+        validated = validate_freeze_audit(packet, counterpart_evidence)
+    except Exception as error:
+        typer.echo(f"Appearance freeze validation failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(
+        f"Valid {validated['renderer_environment_id']} freeze packet: "
+        f"{validated['complete_packet_root_sha256']}"
+    )
+
+
+@app.command(name="appearance-freeze-receipt")
+def appearance_freeze_receipt_command(
+    packet: Annotated[Path, typer.Argument(exists=True, file_okay=False, readable=True)],
+    output: Annotated[Path, typer.Option(dir_okay=False)],
+    counterpart_evidence: Annotated[
+        Path | None, typer.Option(exists=True, file_okay=False, readable=True)
+    ] = None,
+) -> None:
+    """Create a canonical one-renderer receipt from a validated freeze packet."""
+
+    try:
+        receipt = create_renderer_receipt(packet, output, counterpart_evidence)
+    except Exception as error:
+        typer.echo(f"Appearance freeze receipt failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(f"Renderer qualification receipt: {receipt['receipt_sha256']}")
+
+
+@app.command(name="appearance-freeze-publication-record")
+def appearance_freeze_publication_record_command(
+    packet: Annotated[Path, typer.Argument(exists=True, file_okay=False, readable=True)],
+    artifact_archive: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    artifact_metadata: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    repository_metadata: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    workflow_run_metadata: Annotated[
+        Path, typer.Option(exists=True, dir_okay=False, readable=True)
+    ],
+    workflow_jobs_metadata: Annotated[
+        Path, typer.Option(exists=True, dir_okay=False, readable=True)
+    ],
+    job_name: Annotated[str, typer.Option()],
+    artifact_digest_sha256: Annotated[str, typer.Option()],
+    artifact_url: Annotated[str, typer.Option()],
+    output: Annotated[Path, typer.Option(dir_okay=False)],
+    counterpart_evidence: Annotated[
+        Path | None, typer.Option(exists=True, file_okay=False, readable=True)
+    ] = None,
+) -> None:
+    """Record exact connected/public CI provenance for one validated packet."""
+
+    try:
+        record = create_publication_record(
+            packet,
+            artifact_archive,
+            artifact_metadata,
+            repository_metadata,
+            workflow_run_metadata,
+            workflow_jobs_metadata,
+            job_name=job_name,
+            artifact_digest_sha256=artifact_digest_sha256,
+            artifact_url=artifact_url,
+            output=output,
+            counterpart_evidence_root=counterpart_evidence,
+        )
+    except Exception as error:
+        typer.echo(f"Appearance freeze publication record failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(f"CI packet publication record: {record['record_sha256']}")
 
 
 def main() -> None:

@@ -30,6 +30,51 @@ LOCAL_REPOSITORY_REDACTION = "local-repository-redacted"
 UNCLASSIFIED_REPOSITORY_REDACTION = "unclassified-repository-redacted"
 _WINDOWS_DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
 _SCP_STYLE_ORIGIN = re.compile(r"^(?:[^@/:]+@)?(?P<host>[^@/:]+):(?P<path>.+)$")
+_GITHUB_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
+_GITHUB_REPOSITORY = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+
+
+def canonical_github_repository_identity(value: str) -> str:
+    """Parse one credential-free GitHub HTTPS reference into an owner/repository slug."""
+
+    candidate = value.strip()
+    bare_parts = candidate.split("/")
+    if (
+        len(bare_parts) == 2
+        and _GITHUB_OWNER.fullmatch(bare_parts[0])
+        and _GITHUB_REPOSITORY.fullmatch(bare_parts[1])
+        and not bare_parts[1].endswith(".git")
+    ):
+        return f"{bare_parts[0].lower()}/{bare_parts[1].lower()}"
+
+    try:
+        parsed = urlsplit(candidate)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("GitHub repository reference is malformed") from error
+    if (
+        parsed.scheme.lower() != "https"
+        or hostname is None
+        or hostname.lower() != "github.com"
+        or port is not None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path.startswith("/")
+        or parsed.path.endswith("/")
+    ):
+        raise ValueError("GitHub repository reference is not credential-free canonical HTTPS")
+    path_parts = parsed.path[1:].split("/")
+    if len(path_parts) != 2:
+        raise ValueError("GitHub repository reference must contain exactly owner/repository")
+    owner, repository = path_parts
+    if repository.endswith(".git"):
+        repository = repository[:-4]
+    if not _GITHUB_OWNER.fullmatch(owner) or not _GITHUB_REPOSITORY.fullmatch(repository):
+        raise ValueError("GitHub owner or repository name is invalid")
+    return f"{owner.lower()}/{repository.lower()}"
 
 
 def sanitize_git_repository(value: str) -> str:
@@ -47,6 +92,16 @@ def sanitize_git_repository(value: str) -> str:
     ):
         return LOCAL_REPOSITORY_REDACTION
 
+    if (
+        "/" in candidate
+        and "://" not in candidate
+        and _SCP_STYLE_ORIGIN.fullmatch(candidate) is None
+    ):
+        try:
+            return canonical_github_repository_identity(candidate)
+        except ValueError:
+            return UNCLASSIFIED_REPOSITORY_REDACTION
+
     scp_match = _SCP_STYLE_ORIGIN.fullmatch(candidate)
     if scp_match is not None and "://" not in candidate:
         host = scp_match.group("host")
@@ -61,7 +116,12 @@ def sanitize_git_repository(value: str) -> str:
         return UNCLASSIFIED_REPOSITORY_REDACTION
     if parsed.scheme not in {"http", "https", "ssh", "git"} or hostname is None:
         return UNCLASSIFIED_REPOSITORY_REDACTION
-    host = f"[{hostname}]" if ":" in hostname else hostname
+    if hostname.lower() == "github.com":
+        try:
+            return canonical_github_repository_identity(candidate)
+        except ValueError:
+            return UNCLASSIFIED_REPOSITORY_REDACTION
+    host = f"[{hostname}]" if ":" in hostname else hostname.lower()
     netloc = f"{host}:{port}" if port is not None else host
     return urlunsplit((parsed.scheme.lower(), netloc, parsed.path, "", ""))
 

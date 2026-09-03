@@ -34,6 +34,9 @@ APPEARANCE_REGISTRY_VERSION = "appearance_candidate_registry_v1"
 APPEARANCE_REVISION1_REGISTRY_VERSION = "appearance_candidate_registry_v2"
 EVALUATION_SEED_REGISTRY_VERSION = "evaluation_seed_candidate_registry_v0"
 QUALIFICATION_SEED_REGISTRY_VERSION = "appearance_revision1_qualification_seed_registry_v0"
+FINAL_EVALUATION_SEED_REGISTRY_VERSION = (
+    "appearance_benchmark_v0_evaluation_episode_seed_registry_v1"
+)
 APPEARANCE_GENERATOR_VERSION = "repository_procedural_texture_v1"
 APPEARANCE_ASSIGNMENT_VERSION = "balanced_cyclic_permutation_v1"
 LEGACY_ASSIGNMENT_VERSION = "fixed_semantic_regression_v1"
@@ -358,8 +361,47 @@ class QualificationSeedRegistry(StrictAppearanceModel):
         return self
 
 
+class FinalEvaluationSeedRegistry(StrictAppearanceModel):
+    """Prospectively locked public episode roots for Appearance Benchmark v0."""
+
+    registry_version: Literal["appearance_benchmark_v0_evaluation_episode_seed_registry_v1"]
+    root_seed: Literal[314159]
+    derivation_rule: Literal["derive_seed_v1"]
+    namespace: Literal["gate0b-appearance-benchmark-v0-final-evaluation"]
+    indices: tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int]
+    candidate_episode_seeds: tuple[
+        int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int
+    ]
+
+    @model_validator(mode="after")
+    def roots_are_exact_disjoint_uint64_values(self) -> FinalEvaluationSeedRegistry:
+        if self.indices != tuple(range(16)):
+            raise ValueError("final evaluation indices must be exactly 0 through 15")
+        if any(type(value) is not int or value < 0 or value >= 2**64 for value in self.indices):
+            raise ValueError("final evaluation indices must be unsigned JSON integers")
+        if any(
+            type(value) is not int or value < 0 or value >= 2**64
+            for value in self.candidate_episode_seeds
+        ):
+            raise ValueError("final evaluation roots must be unsigned 64-bit JSON integers")
+        expected = tuple(
+            derive_seed(self.root_seed, f"{self.namespace}:{index}") for index in self.indices
+        )
+        if self.candidate_episode_seeds != expected:
+            raise ValueError("final evaluation roots differ from derive_seed_v1 recomputation")
+        if len(set(self.candidate_episode_seeds)) != 16:
+            raise ValueError("final evaluation roots must be unique")
+        protected = set(CANONICAL_DESIGN_SEEDS) | {
+            derive_seed(271828, f"gate0b-appearance-revision1-qualification:{index}")
+            for index in range(8)
+        }
+        if set(self.candidate_episode_seeds) & protected:
+            raise ValueError("final evaluation roots collide with protected apparatus roots")
+        return self
+
+
 AppearanceRegistryType = AppearanceRegistry | AppearanceRevision1Registry
-SeedRegistryType = EvaluationSeedRegistry | QualificationSeedRegistry
+SeedRegistryType = EvaluationSeedRegistry | QualificationSeedRegistry | FinalEvaluationSeedRegistry
 
 
 class AppearanceSeeds(StrictAppearanceModel):
@@ -368,7 +410,7 @@ class AppearanceSeeds(StrictAppearanceModel):
     texture_phase_seed: int = Field(ge=0)
     texture_slot_seed: int = Field(ge=0)
     illumination_seed: int = Field(ge=0)
-    candidate_schedule_index: int | None = Field(default=None, ge=0, le=7)
+    candidate_schedule_index: int | None = Field(default=None, ge=0, le=15)
 
 
 class ProceduralTextureRecord(StrictAppearanceModel):
@@ -401,6 +443,7 @@ class AppearanceInstanceRecord(StrictAppearanceModel):
     evaluation_seed_registry_version: Literal[
         "evaluation_seed_candidate_registry_v0",
         "appearance_revision1_qualification_seed_registry_v0",
+        "appearance_benchmark_v0_evaluation_episode_seed_registry_v1",
     ]
     evaluation_seed_registry_sha256: Sha256
     assignment_schedule_source: Literal[
@@ -507,6 +550,8 @@ def parse_seed_registry(payload: object) -> SeedRegistryType:
         if version == EVALUATION_SEED_REGISTRY_VERSION
         else QualificationSeedRegistry
         if version == QUALIFICATION_SEED_REGISTRY_VERSION
+        else FinalEvaluationSeedRegistry
+        if version == FINAL_EVALUATION_SEED_REGISTRY_VERSION
         else None
     )
     if model is None:

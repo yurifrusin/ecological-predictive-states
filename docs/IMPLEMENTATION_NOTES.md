@@ -18,6 +18,98 @@ separately from renderer-local cell outcomes. The exact baseline diagnosis snaps
 recomputed roots, its three child-root receipts, and its lock bindings are validated against the
 immutable definition-lock commit.
 
+Appearance Benchmark Input Freeze v0 proposes the five cross-renderer admitted Revision 1
+profiles as one development reference and four public evaluation-only Appearance-OOD roles, plus
+sixteen final-evaluation episode roots disjoint from apparatus-design and candidate-qualification
+roots. PR #17 head `8b34b78d5488af7103119697a286cfb8757cc125` was not accepted: it received scientific and
+engineering requests for changes. Its original prospective lock
+`1a5929307dfcba1d726c650f5e1ce68771f66801` remains immutable historical evidence.
+
+The owner-authorised correction creates a distinct v1 replacement lock with unique domain
+envelopes, retains complete typed source datasets for independent reconstruction of every pairing
+identity, binds strict renderer receipts to clean source revision/tree and complete packet
+evidence, publishes receipts atomically without replacement or aliases, and requires prospective
+primary/secondary renderer treatment before comparative model-result access. Corrected
+replacement-lock commit `d4072f912cc58bbc1ca41ceb2652e41783dbf3e1` and root
+`28acd2c340b3ef1e2b8b2b7b31ca69356cd9baa35b94ff8a598e020099883435` were
+pushed and remotely read back before corrected execution. The first execution failed closed on an
+artifact/freeze identity conflation and produced no packet or receipt; source-only correction
+`f7b1e61b07a86ff021a73d6a4236fcfe0ea295d2` separated those identities without changing the lock.
+Historical exact head `62e09a920c10d50c62643543f6ebcbd26570b1d4` completed WGL and OSMesa
+apparatus execution after the clean-source WGL rerun admitted 160/160 selected cells and retained
+32 controls. That head later received renewed scientific pass and engineering request changes, so
+its apparatus evidence and reviews do not carry forward. The bounded second correction requires
+full exact-head packet publication and requalification after the new source commit. Counterpart
+readiness now requires the complete validated packet, strict receipt, CI publication record, and
+live repository/artifact/run/job resolution; all nine compatibility hashes are independently
+reconstructed from retained source datasets; and receipt publication uses stable
+directory-handle-relative Windows and Linux primitives. The replacement lock and locked scientific
+inputs remain unchanged.
+
+Exact head `b63121cdc7ef11340e0275498fda0f0b32213637` exposed two further fail-closed
+portability defects before OSMesa generation: Actions retention is anchored to workflow-run
+creation rather than the later packet upload, and freeze-layer NumPy metrics can differ in their
+final floating-point bits or choose opposite signed bins from one symmetric real-FFT peak. Publication
+records now bind the exact live run-creation, artifact-creation, and expiry timestamps, with the
+configured 90-day interval measured from run creation. PR #17 freeze-layer audit copies serialize
+derived floats to twelve decimal places and sign-normalize real-FFT row aliases; the shared
+historical Slice 5 audit semantics remain unchanged.
+Threshold decisions still use the unrounded values and every threshold is unchanged; the smallest
+historically observed absolute margin was greater than `0.012`, so this representation rule is far
+below a decision boundary. CI publication and receipt commands are separate fail-fast steps.
+
+Second-correction exact head `dc17d8453bed2583c085aa7441255ca476d3e1f0` completed exact-head
+qualification and received scientific pass but engineering request changes. The owner-issued third
+correction retains the independently verified source reconstruction, publication atomicity, domain
+separation, lock integrity, and lifecycle reporting. It replaces detached counterpart directories
+with exact raw packet and evidence archives, recomputes each archive SHA-256 against independently
+resolved live GitHub metadata before safe extraction, admits only exact regular non-colliding member
+sets, and derives readiness only from those extracted bytes. GitHub HTTPS origins with or without a
+terminal `.git` now serialize as the same canonical owner/repository identity. Fresh exact-head
+WGL/OSMesa evidence and renewed independent dual review remain required.
+
+Third-correction exact head `53b988372634e8a7d2d006021af5b5aadbf96d3c` completed both renderer
+paths and received `SCIENTIFIC_PASS` plus `ENGINEERING_REQUEST_CHANGES`. Engineering verified the
+raw-archive binding and canonical-repository corrections but left the access-posture portion of
+`EPS-ER17-0005` unverified and raised `EPS-ER17-0008`: the v1 publication record called the private
+repository public. The owner-authorised fourth correction uses strict
+`appearance_benchmark_public_ci_packet_record_v2` records. They separately bind canonical
+repository identity and API/HTML URLs; visibility (`private`, `public`, or `internal`); the live
+`private` flag; non-archived/non-disabled availability; and either
+`connected_authenticated_github_actions` or `public_github_actions` artifact access. Public
+repositories require the public mechanism; private and internal repositories require connected
+authenticated access.
+
+The production resolver fetches repository metadata before and after each raw artifact acquisition
+and rejects visibility or availability changes. Packet and evidence validation independently
+compare that metadata to the record, so an internal hash or coherent self-reseal cannot replace the
+live authority. This repository records `private` visibility with connected authenticated Actions
+access. `PUBLIC_REPOSITORY_ONLY` covers public or connected GitHub records, not unpublished
+off-platform evidence. Repository visibility, artifact accessibility, 90-day retention, and
+reviewer access are distinct; reviewers require connected repository and artifact access. The
+verified implementations, replacement lock, packet science, and locked scientific inputs remain
+unchanged. Fresh exact-head WGL/OSMesa evidence and renewed independent dual review are required.
+
+Post-commit CI evidence cannot be embedded into the exact commit it evaluates. Reviewers must
+resolve the immutable WGL and OSMesa packet artifacts and their 90-day publication records before
+assessing apparatus status. Neither apparatus qualification nor a replacement lock freezes the
+benchmark: renewed dual review, exact-head owner approval, and separately authorised closeout
+remain mandatory.
+
+### Current PR #17 status
+
+| Boundary | Current source-record status |
+| --- | --- |
+| Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
+| Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
+| Implementation status | `FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
+| Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
+| Owner status | `FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
+| Benchmark-freeze status | `NOT_PERFORMED` |
+| Model-protocol status | `NOT_FROZEN` |
+| Gate status | `NOT_ADVANCED` |
+| Scientific result | `NONE` |
+
 The path is intentionally short:
 
 ```text

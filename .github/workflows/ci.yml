@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   quality:
@@ -41,6 +42,9 @@ jobs:
 
       - name: Type-check
         run: uv run mypy src tests
+
+      - name: Check freeze documentation status and preserved lock boundary
+        run: uv run python scripts/check_freeze_documentation_consistency.py
 
       - name: Test
         run: uv run pytest
@@ -322,3 +326,239 @@ jobs:
             --baseline-packet artifacts/gate-0b-slice-5-candidates \
             --analysis artifacts/appearance-revision1-analysis \
             --revision-packet artifacts/gate-0b-appearance-revision1
+
+  qualify-wgl:
+    name: qualify-wgl
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: [self-hosted, Windows, X64, eps-wgl-ephemeral]
+    outputs:
+      packet-artifact-id: ${{ steps.upload-packet.outputs.artifact-id }}
+      packet-artifact-name: ${{ steps.names.outputs.packet }}
+      evidence-artifact-id: ${{ steps.upload-evidence.outputs.artifact-id }}
+      evidence-artifact-name: ${{ steps.names.outputs.evidence }}
+    steps:
+      - name: Check out exact pull-request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.26"
+          enable-cache: true
+
+      - name: Install locked Python environment
+        run: uv sync --locked
+
+      - name: Exercise Windows stable-handle publication regressions
+        run: uv run pytest tests/unit/test_freeze.py
+
+      - name: Check freeze documentation status and preserved lock boundary
+        run: uv run python scripts/check_freeze_documentation_consistency.py
+
+      - name: Qualify all 192 Windows/WGL cells
+        run: >-
+          uv run epsbench appearance-freeze-audit
+          --benchmark-definition configs/appearance_benchmark_freeze_v0.yaml
+          --evaluation-seeds configs/appearance_benchmark_v0_evaluation_episode_seeds.yaml
+          --definition-lock configs/appearance_benchmark_freeze_v0_lock.json
+          --revision-registry configs/appearance_candidates_revision1.yaml
+          --single-config configs/benchmark_v0.yaml
+          --corridor-config configs/corridor_v0.yaml
+          --output artifacts/appearance-benchmark-freeze-v0-wgl
+
+      - name: Validate and attack the complete WGL packet
+        run: |
+          uv run epsbench appearance-freeze-validate artifacts/appearance-benchmark-freeze-v0-wgl
+          uv run python scripts/check_freeze_adversarial_packets.py artifacts/appearance-benchmark-freeze-v0-wgl
+
+      - name: Define immutable artifact names
+        id: names
+        shell: pwsh
+        run: |
+          "packet=appearance-freeze-wgl-packet-${{ github.event.pull_request.head.sha }}" >> $env:GITHUB_OUTPUT
+          "evidence=appearance-freeze-wgl-evidence-${{ github.event.pull_request.head.sha }}" >> $env:GITHUB_OUTPUT
+
+      - name: Upload immutable complete WGL packet
+        id: upload-packet
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.names.outputs.packet }}
+          path: artifacts/appearance-benchmark-freeze-v0-wgl/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+          overwrite: false
+
+      - name: Resolve live WGL artifact, run, and job identities
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          uv run python scripts/fetch_github_actions_evidence.py
+          --repository "${{ github.repository }}"
+          --run-id "${{ github.run_id }}"
+          --artifact-id "${{ steps.upload-packet.outputs.artifact-id }}"
+          --output artifacts/appearance-freeze-wgl-evidence
+
+      - name: Create WGL publication record
+        run: >-
+          uv run epsbench appearance-freeze-publication-record
+          artifacts/appearance-benchmark-freeze-v0-wgl
+          --artifact-archive artifacts/appearance-freeze-wgl-evidence/artifact.zip
+          --artifact-metadata artifacts/appearance-freeze-wgl-evidence/live_artifact.json
+          --repository-metadata artifacts/appearance-freeze-wgl-evidence/live_repository.json
+          --workflow-run-metadata artifacts/appearance-freeze-wgl-evidence/live_workflow_run.json
+          --workflow-jobs-metadata artifacts/appearance-freeze-wgl-evidence/live_workflow_jobs.json
+          --job-name qualify-wgl
+          --artifact-digest-sha256 "${{ steps.upload-packet.outputs.artifact-digest }}"
+          --artifact-url "${{ steps.upload-packet.outputs.artifact-url }}"
+          --output artifacts/appearance-freeze-wgl-evidence/publication_record.json
+
+      - name: Create strict WGL receipt
+        run: >-
+          uv run epsbench appearance-freeze-receipt
+          artifacts/appearance-benchmark-freeze-v0-wgl
+          --output artifacts/appearance-freeze-wgl-evidence/renderer_receipt.json
+
+      - name: Upload WGL receipt and publication record
+        id: upload-evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.names.outputs.evidence }}
+          path: |
+            artifacts/appearance-freeze-wgl-evidence/renderer_receipt.json
+            artifacts/appearance-freeze-wgl-evidence/publication_record.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+          overwrite: false
+
+  qualify-osmesa:
+    name: qualify-osmesa
+    if: ${{ github.event_name == 'pull_request' }}
+    needs: [quality, qualify-wgl]
+    runs-on: ubuntu-latest
+    env:
+      MUJOCO_GL: osmesa
+    steps:
+      - name: Check out exact pull-request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install offscreen rendering libraries
+        run: sudo apt-get update && sudo apt-get install --yes libgl1-mesa-dri libglfw3 libosmesa6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.26"
+          enable-cache: true
+
+      - name: Install locked Python environment
+        run: uv sync --locked
+
+      - name: Resolve live WGL packet identity and exact raw archive bytes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          uv run python scripts/fetch_github_actions_evidence.py
+          --repository "${{ github.repository }}"
+          --run-id "${{ github.run_id }}"
+          --artifact-id "${{ needs.qualify-wgl.outputs.packet-artifact-id }}"
+          --role packet
+          --output artifacts/counterpart-evidence
+
+      - name: Resolve live WGL evidence identity and exact raw archive bytes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          uv run python scripts/fetch_github_actions_evidence.py
+          --repository "${{ github.repository }}"
+          --run-id "${{ github.run_id }}"
+          --artifact-id "${{ needs.qualify-wgl.outputs.evidence-artifact-id }}"
+          --role evidence
+          --output artifacts/counterpart-evidence
+
+      - name: Qualify all 192 Ubuntu/OSMesa cells through packet-bound counterpart evidence
+        run: |
+          uv run epsbench appearance-freeze-audit \
+            --benchmark-definition configs/appearance_benchmark_freeze_v0.yaml \
+            --evaluation-seeds configs/appearance_benchmark_v0_evaluation_episode_seeds.yaml \
+            --definition-lock configs/appearance_benchmark_freeze_v0_lock.json \
+            --revision-registry configs/appearance_candidates_revision1.yaml \
+            --single-config configs/benchmark_v0.yaml \
+            --corridor-config configs/corridor_v0.yaml \
+            --counterpart-evidence artifacts/counterpart-evidence \
+            --output artifacts/appearance-benchmark-freeze-v0-osmesa
+
+      - name: Validate and attack complete OSMesa and counterpart evidence
+        run: |
+          uv run epsbench appearance-freeze-validate artifacts/appearance-benchmark-freeze-v0-osmesa \
+            --counterpart-evidence artifacts/counterpart-evidence
+          uv run python scripts/check_freeze_adversarial_packets.py \
+            artifacts/appearance-benchmark-freeze-v0-osmesa \
+            --counterpart-evidence artifacts/counterpart-evidence
+          uv run python scripts/check_freeze_counterpart_adversarial.py \
+            artifacts/appearance-benchmark-freeze-v0-osmesa \
+            artifacts/counterpart-evidence
+
+      - name: Upload immutable complete OSMesa packet
+        id: upload-packet
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appearance-freeze-osmesa-packet-${{ github.event.pull_request.head.sha }}
+          path: artifacts/appearance-benchmark-freeze-v0-osmesa/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+          overwrite: false
+
+      - name: Resolve live OSMesa artifact, run, and job identities
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          uv run python scripts/fetch_github_actions_evidence.py
+          --repository "${{ github.repository }}"
+          --run-id "${{ github.run_id }}"
+          --artifact-id "${{ steps.upload-packet.outputs.artifact-id }}"
+          --output artifacts/appearance-freeze-osmesa-evidence
+
+      - name: Create OSMesa publication record
+        run: >-
+          uv run epsbench appearance-freeze-publication-record
+          artifacts/appearance-benchmark-freeze-v0-osmesa
+          --artifact-archive artifacts/appearance-freeze-osmesa-evidence/artifact.zip
+          --artifact-metadata artifacts/appearance-freeze-osmesa-evidence/live_artifact.json
+          --repository-metadata artifacts/appearance-freeze-osmesa-evidence/live_repository.json
+          --workflow-run-metadata artifacts/appearance-freeze-osmesa-evidence/live_workflow_run.json
+          --workflow-jobs-metadata artifacts/appearance-freeze-osmesa-evidence/live_workflow_jobs.json
+          --job-name qualify-osmesa
+          --artifact-digest-sha256 "${{ steps.upload-packet.outputs.artifact-digest }}"
+          --artifact-url "${{ steps.upload-packet.outputs.artifact-url }}"
+          --counterpart-evidence artifacts/counterpart-evidence
+          --output artifacts/appearance-freeze-osmesa-evidence/publication_record.json
+
+      - name: Create strict OSMesa receipt
+        run: >-
+          uv run epsbench appearance-freeze-receipt
+          artifacts/appearance-benchmark-freeze-v0-osmesa
+          --counterpart-evidence artifacts/counterpart-evidence
+          --output artifacts/appearance-freeze-osmesa-evidence/renderer_receipt.json
+
+      - name: Upload OSMesa receipt and publication record
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appearance-freeze-osmesa-evidence-${{ github.event.pull_request.head.sha }}
+          path: |
+            artifacts/appearance-freeze-osmesa-evidence/renderer_receipt.json
+            artifacts/appearance-freeze-osmesa-evidence/publication_record.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+          overwrite: false
