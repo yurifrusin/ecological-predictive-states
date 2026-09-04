@@ -1,17 +1,22 @@
-# Gate 0B Appearance Benchmark Input Freeze v0 correction candidate
+# Gate 0B Appearance Benchmark Input Freeze v0
 
 ## Authority and status
 
-This PR #17 correction wave is bounded to `EPS-SR17-0001` and `EPS-ER17-0001` through
-`EPS-ER17-0004`. Its review profile is `DUAL_REVIEW`, evidence class is
-`PUBLIC_REPOSITORY_ONLY`, and closeout boundary is `BENCHMARK_OR_PREREGISTRATION_FREEZE`.
-It starts from canonical base `08179fbdce909e9a0d6dbb2939c58f7ab5d0d8a7` and preserves the
-reviewed request-changes head `8b34b78d5488af7103119697a286cfb8757cc125` as historical evidence.
+PR #17's implementation review profile was `DUAL_REVIEW`, its evidence class is
+`PUBLIC_REPOSITORY_ONLY`, and its closeout boundary is `BENCHMARK_OR_PREREGISTRATION_FREEZE`.
+Final reviewed head `4d47595ede0f1690f1d9d96075df9a3ff7ab60d9` and tree
+`ba112bcc4be4396648305bb1d1529cc002755ea1` received independent `SCIENTIFIC_PASS` and
+`ENGINEERING_PASS`. `EPS-SR17-0001` and `EPS-ER17-0001` through `EPS-ER17-0008` were recorded as
+verified by their respective reviewers. Yuri Frusin acting as `OWNER_PI` issued exact-head
+disposition `EXACT_HEAD_APPROVED_FOR_MERGE_AND_BENCHMARK_FREEZE_CLOSEOUT`. PR #17 was merged by
+normal merge commit `4851bfc195a977f1bf9f29005b2579341dc75c38`.
 
-This remains an implementation candidate. It does not freeze the benchmark, approve an exact
-head, authorise merge or closeout, complete Gate 0B, advance Gate 0C or Gate 0D, authorise model
-work, or establish a scientific result. A corrected head requires renewed independent engineering
-and scientific review naming the same exact SHA.
+The linked closeout operates under review profile `CLOSEOUT_ONLY` and freezes only the benchmark
+input scope bound below. Appearance Benchmark Input Freeze v0 is `FROZEN` only when this
+owner-authorised linked closeout commit is present on canonical `main` and final canonical-main
+readback has succeeded. It does not complete Gate 0B, advance Gate 0C or Gate 0D, freeze a model
+protocol, authorise comparative model-result access or model work, evaluate an empirical gate, or
+establish a scientific result. It creates no tag or Release and begins no next work package.
 
 ## Lock supersession and preserved scientific content
 
@@ -237,16 +242,37 @@ inputs remain preservation constraints. The versioned access metadata does not c
 science, roots, profiles, seeds, scenes, thresholds, outcomes, pairing, authority flags, or the
 replacement lock. Complete exact-head evidence must be regenerated.
 
-## Current PR #17 status
+Final exact head `4d47595ede0f1690f1d9d96075df9a3ff7ab60d9` completed all 192 Windows/WGL
+and all 192 Ubuntu/OSMesa cells in exact-head CI run `33706715326`. Each renderer admitted all 160
+selected cells and retained the 32 controls as 16 admitted and 16 rejected. The final packet,
+packet-tree, receipt, publication-record, threshold, portable-root, run, job, artifact, and
+retention identities are preserved in `docs/reviews/pr-0017-closeout.md` and
+`docs/reviews/pr-0017-evidence-manifest.json`. The repository is private and current evidence
+requires connected authenticated GitHub Actions access. Both renderer receipts and publication
+records plus credential-free GitHub metadata are committed; all four raw ZIPs were independently
+downloaded and verified and remain Actions-retained rather than committed.
+
+The immutable prospective lock and qualification receipts correctly retain
+`benchmark_frozen=false` as a pre-freeze candidate-state fact. They are not rewritten. The later
+owner-approved linked closeout is the canonical freeze event.
+
+Historically, before exact-head requalification, independent review, owner issuance, merge, and
+linked closeout, the source-only table recorded `EXACT_HEAD_REQUALIFICATION_PENDING`,
+`EXTERNAL_TO_SOURCE_COMMIT`, `FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW`,
+`RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED`,
+`FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN`, `NOT_PERFORMED`,
+`NOT_FROZEN`, `NOT_ADVANCED`, and `NONE`. Those values remain historical pre-closeout evidence.
+
+## Current PR #17 closeout status
 
 | Boundary | Current source-record status |
 | --- | --- |
-| Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
-| Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
-| Implementation status | `FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
-| Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
-| Owner status | `FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
-| Benchmark-freeze status | `NOT_PERFORMED` |
+| Apparatus status | `QUALIFICATION_COMPLETE_BOTH_LOCKED_RENDERERS` |
+| Post-commit exact-head CI evidence | `SUCCESS_AT_APPROVED_HEAD` |
+| Implementation status | `MERGED_BY_NORMAL_MERGE_COMMIT` |
+| Review status | `EXACT_HEAD_DUAL_REVIEW_RECORDED` |
+| Owner status | `EXACT_HEAD_APPROVED_FOR_MERGE_AND_BENCHMARK_FREEZE_CLOSEOUT` |
+| Benchmark-freeze status | `FROZEN_BY_LINKED_CLOSEOUT_ON_CANONICAL_MAIN` |
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |
 | Scientific result | `NONE` |

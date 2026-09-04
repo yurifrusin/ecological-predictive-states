@@ -18,7 +18,7 @@ separately from renderer-local cell outcomes. The exact baseline diagnosis snaps
 recomputed roots, its three child-root receipts, and its lock bindings are validated against the
 immutable definition-lock commit.
 
-Appearance Benchmark Input Freeze v0 proposes the five cross-renderer admitted Revision 1
+Appearance Benchmark Input Freeze v0 fixes the five cross-renderer admitted Revision 1
 profiles as one development reference and four public evaluation-only Appearance-OOD roles, plus
 sixteen final-evaluation episode roots disjoint from apparatus-design and candidate-qualification
 roots. PR #17 head `8b34b78d5488af7103119697a286cfb8757cc125` was not accepted: it received scientific and
@@ -88,24 +88,39 @@ access. `PUBLIC_REPOSITORY_ONLY` covers public or connected GitHub records, not 
 off-platform evidence. Repository visibility, artifact accessibility, 90-day retention, and
 reviewer access are distinct; reviewers require connected repository and artifact access. The
 verified implementations, replacement lock, packet science, and locked scientific inputs remain
-unchanged. Fresh exact-head WGL/OSMesa evidence and renewed independent dual review are required.
+unchanged. Final fourth-correction head `4d47595ede0f1690f1d9d96075df9a3ff7ab60d9` and tree
+`ba112bcc4be4396648305bb1d1529cc002755ea1` completed exact-head WGL/OSMesa evidence and received
+independent `SCIENTIFIC_PASS` and `ENGINEERING_PASS`. `EPS-SR17-0001` and `EPS-ER17-0001` through
+`EPS-ER17-0008` were recorded as verified by their respective reviewers. Yuri Frusin acting as
+`OWNER_PI` issued exact-head merge and benchmark-freeze closeout approval, and PR #17 was merged by
+normal merge commit `4851bfc195a977f1bf9f29005b2579341dc75c38`.
 
 Post-commit CI evidence cannot be embedded into the exact commit it evaluates. Reviewers must
 resolve the immutable WGL and OSMesa packet artifacts and their 90-day publication records before
-assessing apparatus status. Neither apparatus qualification nor a replacement lock freezes the
-benchmark: renewed dual review, exact-head owner approval, and separately authorised closeout
-remain mandatory.
+assessing apparatus status. Apparatus qualification and the replacement lock did not themselves
+freeze the benchmark. The later exact-head dual review, issued owner approval, implementation merge,
+and linked closeout together establish the canonical input freeze only after the linked closeout is
+present on `main` and final readback succeeds. The replacement lock remains unchanged. Final
+renderer receipts, publication records, and credential-free GitHub metadata are preserved in
+`docs/reviews/`; the four independently verified raw ZIPs remain Actions-retained and uncommitted.
 
-### Current PR #17 status
+Before these final events, the historical source-only status was
+`EXACT_HEAD_REQUALIFICATION_PENDING`, `EXTERNAL_TO_SOURCE_COMMIT`,
+`FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW`,
+`RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED`,
+`FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN`, `NOT_PERFORMED`,
+`NOT_FROZEN`, `NOT_ADVANCED`, and `NONE`. Those values remain historical pre-closeout evidence.
+
+### Current PR #17 closeout status
 
 | Boundary | Current source-record status |
 | --- | --- |
-| Apparatus status | `EXACT_HEAD_REQUALIFICATION_PENDING` |
-| Post-commit exact-head CI evidence | `EXTERNAL_TO_SOURCE_COMMIT` |
-| Implementation status | `FOURTH_CORRECTION_SOURCE_CANDIDATE_PENDING_INDEPENDENT_REVIEW` |
-| Review status | `RENEWED_EXACT_HEAD_DUAL_REVIEW_REQUIRED` |
-| Owner status | `FOURTH_CORRECTION_AUTHORISED; IMPLEMENTATION_MERGE_APPROVAL_NOT_GIVEN` |
-| Benchmark-freeze status | `NOT_PERFORMED` |
+| Apparatus status | `QUALIFICATION_COMPLETE_BOTH_LOCKED_RENDERERS` |
+| Post-commit exact-head CI evidence | `SUCCESS_AT_APPROVED_HEAD` |
+| Implementation status | `MERGED_BY_NORMAL_MERGE_COMMIT` |
+| Review status | `EXACT_HEAD_DUAL_REVIEW_RECORDED` |
+| Owner status | `EXACT_HEAD_APPROVED_FOR_MERGE_AND_BENCHMARK_FREEZE_CLOSEOUT` |
+| Benchmark-freeze status | `FROZEN_BY_LINKED_CLOSEOUT_ON_CANONICAL_MAIN` |
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |
 | Scientific result | `NONE` |
@@ -410,7 +425,7 @@ incomplete.
 - Complete the remaining Gate 0B exit-criterion evidence and obtain separate owner authority before any full Gate 0B completion decision.
 - Decide whether later authorised work should define component topology, continuous boundary-component attribution, or broader scene geometry. Slice 4 deliberately leaves these unavailable.
 - Extend the reviewed cross-platform posture beyond the locked Windows/WGL and Ubuntu/OSMesa environments.
-- Decide under separate owner/scientific authority whether the five-profile Revision 1 admitted set is sufficient for a later freeze proposal or whether a separately authorised Candidate Revision 2 should seek isolated stripe and illumination candidates.
+- Decide under separate owner/scientific authority whether a future benchmark revision should seek isolated stripe and illumination candidates beyond the frozen five-profile v0 input scope.
 
 Gate 0B completion is therefore not claimed. Gate 0C should not begin until these items and every Gate 0B exit criterion have owner-reviewed evidence.
 

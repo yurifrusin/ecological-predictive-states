@@ -1,0 +1,91 @@
+{
+  "schema_version": "eps_pr17_closeout_github_artifacts_metadata_v1",
+  "source_endpoint": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/runs/33706715326/artifacts",
+  "repository": "yurifrusin/ecological-predictive-states",
+  "workflow_run_id": 33706715326,
+  "workflow_run_attempt": 1,
+  "head_sha": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+  "total_count": 4,
+  "artifacts": [
+    {
+      "id": 9876515995,
+      "node_id": "MDg6QXJ0aWZhY3Q5ODc2NTE1OTk1",
+      "name": "appearance-freeze-wgl-packet-4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+      "size_in_bytes": 21803973,
+      "digest": "sha256:6618f9fe265912cb3bc67c99af1a56207a382fb84f20675e6d7dcad5b53a096e",
+      "url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/artifacts/9876515995",
+      "archive_download_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/artifacts/9876515995/zip",
+      "expired": false,
+      "created_at": "2026-09-03T03:01:42Z",
+      "updated_at": "2026-09-03T03:01:42Z",
+      "expires_at": "2026-12-02T02:12:06Z",
+      "workflow_run": {
+        "id": 33706715326,
+        "repository_id": 1346269440,
+        "head_repository_id": 1346269440,
+        "head_branch": "codex/gate-0b-appearance-benchmark-freeze-v0",
+        "head_sha": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9"
+      }
+    },
+    {
+      "id": 9876815245,
+      "node_id": "MDg6QXJ0aWZhY3Q5ODc2ODE1MjQ1",
+      "name": "appearance-freeze-wgl-evidence-4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+      "size_in_bytes": 6527,
+      "digest": "sha256:29f988417cc20fca3885b5122db01976296058151cf99e03ad7166e7b54ff473",
+      "url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/artifacts/9876815245",
+      "archive_download_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/artifacts/9876815245/zip",
+      "expired": false,
+      "created_at": "2026-09-03T03:16:35Z",
+      "updated_at": "2026-09-03T03:16:35Z",
+      "expires_at": "2026-12-02T02:12:06Z",
+      "workflow_run": {
+        "id": 33706715326,
+        "repository_id": 1346269440,
+        "head_repository_id": 1346269440,
+        "head_branch": "codex/gate-0b-appearance-benchmark-freeze-v0",
+        "head_sha": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9"
+      }
+    },
+    {
+      "id": 9880381284,
+      "node_id": "MDg6QXJ0aWZhY3Q5ODgwMzgxMjg0",
+      "name": "appearance-freeze-osmesa-packet-4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+      "size_in_bytes": 22346269,
+      "digest": "sha256:67ecd1a7e695e3b6fd36930258497ec7a92a89f76e22d0ee962891dcc50b6e18",
+      "url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/artifacts/9880381284",
+      "archive_download_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/artifacts/9880381284/zip",
+      "expired": false,
+      "created_at": "2026-09-03T06:03:36Z",
+      "updated_at": "2026-09-03T06:03:36Z",
+      "expires_at": "2026-12-02T02:12:06Z",
+      "workflow_run": {
+        "id": 33706715326,
+        "repository_id": 1346269440,
+        "head_repository_id": 1346269440,
+        "head_branch": "codex/gate-0b-appearance-benchmark-freeze-v0",
+        "head_sha": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9"
+      }
+    },
+    {
+      "id": 9881190409,
+      "node_id": "MDg6QXJ0aWZhY3Q5ODgxMTkwNDA5",
+      "name": "appearance-freeze-osmesa-evidence-4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+      "size_in_bytes": 6515,
+      "digest": "sha256:4c756aefce7f350c4b50a4af77ead85cc7032ea7ba0e88dc37107237aeeda53c",
+      "url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/artifacts/9881190409",
+      "archive_download_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/artifacts/9881190409/zip",
+      "expired": false,
+      "created_at": "2026-09-03T06:34:11Z",
+      "updated_at": "2026-09-03T06:34:11Z",
+      "expires_at": "2026-12-02T02:12:06Z",
+      "workflow_run": {
+        "id": 33706715326,
+        "repository_id": 1346269440,
+        "head_repository_id": 1346269440,
+        "head_branch": "codex/gate-0b-appearance-benchmark-freeze-v0",
+        "head_sha": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9"
+      }
+    }
+  ]
+}

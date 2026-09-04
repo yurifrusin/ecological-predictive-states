@@ -1,0 +1,23 @@
+{
+  "schema_version": "eps_pr17_closeout_github_repository_metadata_v1",
+  "source_endpoint": "https://api.github.com/repos/yurifrusin/ecological-predictive-states",
+  "repository": {
+    "id": 1346269440,
+    "node_id": "R_kgDOUD5xAA",
+    "name": "ecological-predictive-states",
+    "full_name": "yurifrusin/ecological-predictive-states",
+    "html_url": "https://github.com/yurifrusin/ecological-predictive-states",
+    "private": true,
+    "visibility": "private",
+    "archived": false,
+    "disabled": false,
+    "default_branch": "main",
+    "allow_merge_commit": true,
+    "allow_squash_merge": true,
+    "allow_rebase_merge": true,
+    "created_at": "2026-08-25T14:57:01Z",
+    "updated_at": "2026-08-31T02:56:20Z",
+    "pushed_at": "2026-09-03T12:54:16Z"
+  },
+  "recorded_artifact_access_mechanism": "connected_authenticated_github_actions"
+}

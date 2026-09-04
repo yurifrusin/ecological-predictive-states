@@ -1,0 +1,505 @@
+{
+  "schema_version": "eps_pr17_closeout_github_workflow_jobs_metadata_v1",
+  "source_endpoint": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/runs/33706715326/attempts/1/jobs",
+  "repository": "yurifrusin/ecological-predictive-states",
+  "workflow_run_id": 33706715326,
+  "workflow_run_attempt": 1,
+  "head_sha": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+  "total_count": 3,
+  "jobs": [
+    {
+      "id": 100497296367,
+      "run_id": 33706715326,
+      "run_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/runs/33706715326",
+      "node_id": "CR_kwDOUD5xAM8AAAAXZhsL7w",
+      "head_sha": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+      "url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/jobs/100497296367",
+      "html_url": "https://github.com/yurifrusin/ecological-predictive-states/actions/runs/33706715326/job/100497296367",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-09-03T02:12:06Z",
+      "started_at": "2026-09-03T02:13:04Z",
+      "completed_at": "2026-09-03T03:16:44Z",
+      "name": "qualify-wgl",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-09-03T02:13:07Z",
+          "completed_at": "2026-09-03T02:13:13Z"
+        },
+        {
+          "name": "Check out exact pull-request head",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-09-03T02:13:13Z",
+          "completed_at": "2026-09-03T02:13:24Z"
+        },
+        {
+          "name": "Install uv",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-09-03T02:13:24Z",
+          "completed_at": "2026-09-03T02:13:25Z"
+        },
+        {
+          "name": "Install locked Python environment",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-09-03T02:13:25Z",
+          "completed_at": "2026-09-03T02:13:30Z"
+        },
+        {
+          "name": "Exercise Windows stable-handle publication regressions",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-09-03T02:13:30Z",
+          "completed_at": "2026-09-03T02:13:44Z"
+        },
+        {
+          "name": "Check freeze documentation status and preserved lock boundary",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-09-03T02:13:44Z",
+          "completed_at": "2026-09-03T02:13:44Z"
+        },
+        {
+          "name": "Qualify all 192 Windows/WGL cells",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-09-03T02:13:44Z",
+          "completed_at": "2026-09-03T02:26:52Z"
+        },
+        {
+          "name": "Validate and attack the complete WGL packet",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-09-03T02:26:52Z",
+          "completed_at": "2026-09-03T03:00:36Z"
+        },
+        {
+          "name": "Define immutable artifact names",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-09-03T03:00:36Z",
+          "completed_at": "2026-09-03T03:00:36Z"
+        },
+        {
+          "name": "Upload immutable complete WGL packet",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-09-03T03:00:36Z",
+          "completed_at": "2026-09-03T03:01:42Z"
+        },
+        {
+          "name": "Resolve live WGL artifact, run, and job identities",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-09-03T03:01:42Z",
+          "completed_at": "2026-09-03T03:02:25Z"
+        },
+        {
+          "name": "Create WGL publication record",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-09-03T03:02:25Z",
+          "completed_at": "2026-09-03T03:08:22Z"
+        },
+        {
+          "name": "Create strict WGL receipt",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-09-03T03:08:22Z",
+          "completed_at": "2026-09-03T03:16:32Z"
+        },
+        {
+          "name": "Upload WGL receipt and publication record",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-09-03T03:16:32Z",
+          "completed_at": "2026-09-03T03:16:35Z"
+        },
+        {
+          "name": "Post Install uv",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 27,
+          "started_at": "2026-09-03T03:16:35Z",
+          "completed_at": "2026-09-03T03:16:36Z"
+        },
+        {
+          "name": "Post Check out exact pull-request head",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 28,
+          "started_at": "2026-09-03T03:16:36Z",
+          "completed_at": "2026-09-03T03:16:38Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 29,
+          "started_at": "2026-09-03T03:16:38Z",
+          "completed_at": "2026-09-03T03:16:38Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/check-runs/100497296367",
+      "labels": [
+        "self-hosted",
+        "Windows",
+        "X64",
+        "eps-wgl-ephemeral"
+      ],
+      "runner_id": 26,
+      "runner_name": "eps-pr17-4d47595e",
+      "runner_group_id": 1,
+      "runner_group_name": "Default"
+    },
+    {
+      "id": 100497296558,
+      "run_id": 33706715326,
+      "run_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/runs/33706715326",
+      "node_id": "CR_kwDOUD5xAM8AAAAXZhsMrg",
+      "head_sha": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+      "url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/jobs/100497296558",
+      "html_url": "https://github.com/yurifrusin/ecological-predictive-states/actions/runs/33706715326/job/100497296558",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-09-03T02:12:06Z",
+      "started_at": "2026-09-03T02:12:09Z",
+      "completed_at": "2026-09-03T02:35:18Z",
+      "name": "quality",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-09-03T02:12:10Z",
+          "completed_at": "2026-09-03T02:12:11Z"
+        },
+        {
+          "name": "Check out repository",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-09-03T02:12:11Z",
+          "completed_at": "2026-09-03T02:12:13Z"
+        },
+        {
+          "name": "Install offscreen rendering libraries",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-09-03T02:12:13Z",
+          "completed_at": "2026-09-03T02:12:25Z"
+        },
+        {
+          "name": "Install uv",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-09-03T02:12:25Z",
+          "completed_at": "2026-09-03T02:12:29Z"
+        },
+        {
+          "name": "Install locked Python environment",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-09-03T02:12:29Z",
+          "completed_at": "2026-09-03T02:12:31Z"
+        },
+        {
+          "name": "Lint",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-09-03T02:12:31Z",
+          "completed_at": "2026-09-03T02:12:32Z"
+        },
+        {
+          "name": "Check formatting",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-09-03T02:12:32Z",
+          "completed_at": "2026-09-03T02:12:32Z"
+        },
+        {
+          "name": "Type-check",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-09-03T02:12:32Z",
+          "completed_at": "2026-09-03T02:12:40Z"
+        },
+        {
+          "name": "Check freeze documentation status and preserved lock boundary",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-09-03T02:12:40Z",
+          "completed_at": "2026-09-03T02:12:40Z"
+        },
+        {
+          "name": "Test",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-09-03T02:12:40Z",
+          "completed_at": "2026-09-03T02:16:10Z"
+        },
+        {
+          "name": "Exercise both scene families and print transport boundary event identities",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-09-03T02:16:10Z",
+          "completed_at": "2026-09-03T02:16:22Z"
+        },
+        {
+          "name": "Audit the complete appearance candidate matrix",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-09-03T02:16:22Z",
+          "completed_at": "2026-09-03T02:22:55Z"
+        },
+        {
+          "name": "Analyse the canonical negative evidence and validate the definition lock",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-09-03T02:22:55Z",
+          "completed_at": "2026-09-03T02:23:04Z"
+        },
+        {
+          "name": "Qualify every locked Revision 1 profile in both seed partitions",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-09-03T02:23:04Z",
+          "completed_at": "2026-09-03T02:33:41Z"
+        },
+        {
+          "name": "Reject complete-packet adversarial mutations",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 15,
+          "started_at": "2026-09-03T02:33:41Z",
+          "completed_at": "2026-09-03T02:35:15Z"
+        },
+        {
+          "name": "Post Install uv",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 29,
+          "started_at": "2026-09-03T02:35:15Z",
+          "completed_at": "2026-09-03T02:35:15Z"
+        },
+        {
+          "name": "Post Check out repository",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 30,
+          "started_at": "2026-09-03T02:35:15Z",
+          "completed_at": "2026-09-03T02:35:16Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 31,
+          "started_at": "2026-09-03T02:35:16Z",
+          "completed_at": "2026-09-03T02:35:16Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/check-runs/100497296558",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000004679,
+      "runner_name": "GitHub Actions 1000004679",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    },
+    {
+      "id": 100509579302,
+      "run_id": 33706715326,
+      "run_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/runs/33706715326",
+      "node_id": "CR_kwDOUD5xAM8AAAAXZtZ4Jg",
+      "head_sha": "4d47595ede0f1690f1d9d96075df9a3ff7ab60d9",
+      "url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/actions/jobs/100509579302",
+      "html_url": "https://github.com/yurifrusin/ecological-predictive-states/actions/runs/33706715326/job/100509579302",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-09-03T03:16:44Z",
+      "started_at": "2026-09-03T03:16:46Z",
+      "completed_at": "2026-09-03T06:34:14Z",
+      "name": "qualify-osmesa",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-09-03T03:16:47Z",
+          "completed_at": "2026-09-03T03:16:51Z"
+        },
+        {
+          "name": "Check out exact pull-request head",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-09-03T03:16:51Z",
+          "completed_at": "2026-09-03T03:16:54Z"
+        },
+        {
+          "name": "Install offscreen rendering libraries",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-09-03T03:16:54Z",
+          "completed_at": "2026-09-03T03:17:10Z"
+        },
+        {
+          "name": "Install uv",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-09-03T03:17:10Z",
+          "completed_at": "2026-09-03T03:17:15Z"
+        },
+        {
+          "name": "Install locked Python environment",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-09-03T03:17:15Z",
+          "completed_at": "2026-09-03T03:17:18Z"
+        },
+        {
+          "name": "Resolve live WGL packet identity and exact raw archive bytes",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-09-03T03:17:18Z",
+          "completed_at": "2026-09-03T03:17:22Z"
+        },
+        {
+          "name": "Resolve live WGL evidence identity and exact raw archive bytes",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-09-03T03:17:22Z",
+          "completed_at": "2026-09-03T03:17:25Z"
+        },
+        {
+          "name": "Qualify all 192 Ubuntu/OSMesa cells through packet-bound counterpart evidence",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-09-03T03:17:25Z",
+          "completed_at": "2026-09-03T03:40:24Z"
+        },
+        {
+          "name": "Validate and attack complete OSMesa and counterpart evidence",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-09-03T03:40:24Z",
+          "completed_at": "2026-09-03T06:03:27Z"
+        },
+        {
+          "name": "Upload immutable complete OSMesa packet",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-09-03T06:03:27Z",
+          "completed_at": "2026-09-03T06:03:36Z"
+        },
+        {
+          "name": "Resolve live OSMesa artifact, run, and job identities",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-09-03T06:03:36Z",
+          "completed_at": "2026-09-03T06:03:40Z"
+        },
+        {
+          "name": "Create OSMesa publication record",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-09-03T06:03:40Z",
+          "completed_at": "2026-09-03T06:15:57Z"
+        },
+        {
+          "name": "Create strict OSMesa receipt",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-09-03T06:15:57Z",
+          "completed_at": "2026-09-03T06:34:10Z"
+        },
+        {
+          "name": "Upload OSMesa receipt and publication record",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-09-03T06:34:10Z",
+          "completed_at": "2026-09-03T06:34:11Z"
+        },
+        {
+          "name": "Post Install uv",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 27,
+          "started_at": "2026-09-03T06:34:11Z",
+          "completed_at": "2026-09-03T06:34:11Z"
+        },
+        {
+          "name": "Post Check out exact pull-request head",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 28,
+          "started_at": "2026-09-03T06:34:11Z",
+          "completed_at": "2026-09-03T06:34:12Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 29,
+          "started_at": "2026-09-03T06:34:12Z",
+          "completed_at": "2026-09-03T06:34:12Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/yurifrusin/ecological-predictive-states/check-runs/100509579302",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000004683,
+      "runner_name": "GitHub Actions 1000004683",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    }
+  ]
+}
