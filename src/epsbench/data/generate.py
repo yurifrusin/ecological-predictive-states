@@ -59,6 +59,12 @@ from epsbench.annotations import (
     derive_boundary_structure,
     derive_visibility,
 )
+from epsbench.annotations.component_topology import (
+    ByteMap,
+    FrameIndex,
+    IntMap,
+    derive_component_topology,
+)
 from epsbench.appearance import (
     APPEARANCE_REVISION1_REGISTRY_VERSION,
     ASSIGNMENT_SCHEDULE_SOURCE,
@@ -789,12 +795,54 @@ def _analytic_transport_diagnostics(
     )
 
 
+def _with_component_topology(
+    root: Path,
+    directory: Path,
+    events: AvailableEcologicalVisibilityEvents,
+    segmentations: tuple[IntMap, IntMap],
+    surfaces: tuple[SurfaceReference, ...],
+    vectors: tuple[IntMap, IntMap],
+    validity: tuple[ByteMap, ByteMap],
+    reasons: tuple[ByteMap, ByteMap],
+    codes: tuple[ByteMap, ByteMap],
+) -> AvailableEcologicalVisibilityEvents:
+    def publish(frame: FrameIndex, array: IntMap) -> ArtifactRecord:
+        path = directory / f"component_labels_{frame}.npy"
+        np.save(path, array, allow_pickle=False)
+        return _array_artifact(path, root, array, Modality.COMPONENT_TOPOLOGY, "application/x-npy")
+
+    topology = derive_component_topology(
+        segmentations,
+        surfaces,
+        vectors,
+        validity,
+        reasons,
+        codes,
+        events.analytic_transport_sha256,
+        publish,
+    )
+    result = AvailableEcologicalVisibilityEvents.model_validate(
+        {
+            **events.model_dump(mode="python"),
+            "method": "analytic_transport_boundary_causal_events_with_component_topology_v3",
+            "capabilities": {
+                **events.capabilities.model_dump(mode="python"),
+                "component_topology": topology,
+            },
+        }
+    )
+    return result.model_copy(
+        update={"visibility_event_sha256": compute_visibility_event_hash(result)}
+    )
+
+
 def _generate_single_occluder_episode(
     root: Path,
     config: SingleOccluderConfig,
     episode_index: int,
     appearance_registry: AppearanceRegistryType,
     seed_registry: SeedRegistryType,
+    component_topology: bool,
 ) -> EpisodeManifest:
     episode_id = f"episode-{episode_index:06d}"
     episode_seed = derive_seed(config.seed, f"episode:{episode_index}")
@@ -878,6 +926,22 @@ def _generate_single_occluder_episode(
         oriented_boundaries,
         analytic_transport,
     )
+    if component_topology:
+        transport = rendered.analytic_transport
+        visibility_events = _with_component_topology(
+            root,
+            episode_directory,
+            visibility_events,
+            (before_segmentation, after_segmentation),
+            surfaces,
+            (transport.forward.vectors_fixed, transport.backward.vectors_fixed),
+            (transport.forward.validity, transport.backward.validity),
+            (transport.forward.reasons, transport.backward.reasons),
+            (
+                rendered.boundary_visibility.before_fate_codes,
+                rendered.boundary_visibility.after_origin_codes,
+            ),
+        )
     occluder_raw_id = rendered.raw_geom_ids["occluding_surface"]
     occluded_raw_id = rendered.raw_geom_ids["background_surface"]
     occlusion_frame_evidence: list[OcclusionFrameEvidence] = []
@@ -914,7 +978,7 @@ def _generate_single_occluder_episode(
     if not relation_frame_indices:
         raise RuntimeError("counterfactual oracle found no foreground/background occlusion")
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.9",
+        schema_version="0.1.0-dev.10" if component_topology else "0.1.0-dev.9",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -1012,6 +1076,7 @@ def _generate_corridor_episode(
     episode_index: int,
     appearance_registry: AppearanceRegistryType,
     seed_registry: SeedRegistryType,
+    component_topology: bool,
 ) -> EpisodeManifest:
     episode_id = f"episode-{episode_index:06d}"
     episode_seed = derive_seed(config.seed, f"episode:{episode_index}")
@@ -1099,8 +1164,24 @@ def _generate_corridor_episode(
         oriented_boundaries,
         analytic_transport,
     )
+    if component_topology:
+        transport = rendered.analytic_transport
+        visibility_events = _with_component_topology(
+            root,
+            episode_directory,
+            visibility_events,
+            (before_segmentation, after_segmentation),
+            surfaces,
+            (transport.forward.vectors_fixed, transport.backward.vectors_fixed),
+            (transport.forward.validity, transport.backward.validity),
+            (transport.forward.reasons, transport.backward.reasons),
+            (
+                rendered.boundary_visibility.before_fate_codes,
+                rendered.boundary_visibility.after_origin_codes,
+            ),
+        )
     transition = TransitionRecord(
-        schema_version="0.1.0-dev.9",
+        schema_version="0.1.0-dev.10" if component_topology else "0.1.0-dev.9",
         episode_id=episode_id,
         action=Action(**config.action.model_dump()),
         surfaces=surfaces,
@@ -1228,14 +1309,15 @@ def _generate_episode(
     episode_index: int,
     appearance_registry: AppearanceRegistryType,
     seed_registry: SeedRegistryType,
+    component_topology: bool,
 ) -> EpisodeManifest:
     if isinstance(config, SingleOccluderConfig):
         return _generate_single_occluder_episode(
-            root, config, episode_index, appearance_registry, seed_registry
+            root, config, episode_index, appearance_registry, seed_registry, component_topology
         )
     if isinstance(config, CorridorConfig):
         return _generate_corridor_episode(
-            root, config, episode_index, appearance_registry, seed_registry
+            root, config, episode_index, appearance_registry, seed_registry, component_topology
         )
     raise TypeError(f"unsupported scene configuration: {type(config).__name__}")
 
@@ -1260,6 +1342,7 @@ def generate_dataset(
     *,
     appearance_registry: AppearanceRegistryType | None = None,
     seed_registry: SeedRegistryType | None = None,
+    component_topology: bool = False,
 ) -> DatasetManifest:
     """Generate a new dataset directory, refusing to overwrite existing content."""
 
@@ -1313,6 +1396,7 @@ def generate_dataset(
             episode_index,
             appearance_registry,
             seed_registry,
+            component_topology,
         )
         for episode_index in range(episodes)
     )
@@ -1322,7 +1406,11 @@ def generate_dataset(
     )
     revision1 = appearance_registry.registry_version == APPEARANCE_REVISION1_REGISTRY_VERSION
     manifest = DatasetManifest(
-        schema_version="0.1.0-dev.8" if revision1 else "0.1.0-dev.7",
+        schema_version=(
+            ("0.1.0-dev.10" if revision1 else "0.1.0-dev.9")
+            if component_topology
+            else ("0.1.0-dev.8" if revision1 else "0.1.0-dev.7")
+        ),
         generator_version="0.1.0",
         scene_family=config.scene_family,
         root_seed=config.seed,

@@ -17,7 +17,8 @@ from epsbench.freeze import (
     validate_freeze_audit,
 )
 from epsbench.revision import create_revision_audit, validate_revision_audit
-from epsbench.schema import DatasetManifest, ModalityPermissionSet
+from epsbench.schema import ComponentTopologyAnnotation, DatasetManifest, ModalityPermissionSet
+from epsbench.topology_qualification import qualify_topology, validate_topology_packet
 
 app = typer.Typer(
     add_completion=False,
@@ -43,6 +44,14 @@ def _print_oracle_evidence(dataset: Path, manifest: DatasetManifest) -> None:
         before_counts = Counter(int(value) for value in events.before_fate_codes.reshape(-1))
         after_counts = Counter(int(value) for value in events.after_origin_codes.reshape(-1))
         boundary_summary = dict(sorted(boundary_counts.items()))
+        topology = events.annotation.capabilities.component_topology
+        if isinstance(topology, ComponentTopologyAnnotation):
+            typer.echo(
+                f"Episode {episode.episode_index} component capability {topology.status}; "
+                f"identity {topology.component_topology_sha256}; "
+                f"portable graph {topology.portable_graph_sha256}; "
+                f"events {dict(sorted(Counter(e.kind.value for e in topology.events).items()))}"
+            )
         typer.echo(
             f"Episode {episode.episode_index} boundary counts {boundary_summary}; "
             f"before-event counts {dict(sorted(before_counts.items()))}; "
@@ -74,6 +83,22 @@ def generate(
     _print_oracle_evidence(output, manifest)
 
 
+@app.command(name="component-topology-audit")
+def component_topology_audit(
+    config: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    output: Annotated[Path, typer.Option(file_okay=False)],
+    episodes: Annotated[int, typer.Option(min=1)] = 2,
+) -> None:
+    """Generate and independently validate complete component-topology evidence."""
+    try:
+        generate_dataset(load_config(config), episodes, output, component_topology=True)
+        manifest = validate_dataset(output)
+    except Exception as error:
+        typer.echo(f"Component topology audit failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    _print_oracle_evidence(output, manifest)
+
+
 @app.command(name="validate")
 def validate_command(
     dataset: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
@@ -94,6 +119,37 @@ def validate_command(
         + ", ".join(episode.analytic_transport_sha256 for episode in manifest.episodes)
     )
     _print_oracle_evidence(dataset, manifest)
+
+
+@app.command(name="component-topology-qualify")
+def component_topology_qualify(
+    output: Annotated[Path, typer.Option(file_okay=False)],
+    lock_commit: Annotated[str, typer.Option()],
+) -> None:
+    """Execute exactly 192 cells only after verifying the clean pushed prospective lock."""
+    try:
+        packet = qualify_topology(output, lock_commit)
+    except Exception as error:
+        typer.echo(f"Frozen topology qualification failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(
+        f"Complete packet {packet.packet_sha256}; qualification {packet.local_qualification}"
+    )
+
+
+@app.command(name="component-topology-validate")
+def component_topology_validate(
+    dataset: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
+) -> None:
+    """Reconstruct all 192 sources and exact membership, including retained failures."""
+    try:
+        packet = validate_topology_packet(dataset)
+    except Exception as error:
+        typer.echo(f"Topology packet validation failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(
+        f"Valid evidence packet {packet.packet_sha256}; qualification {packet.local_qualification}"
+    )
 
 
 @app.command(name="inspect")

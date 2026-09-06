@@ -154,6 +154,7 @@ class Modality(StrEnum):
     REGION_CORRESPONDENCE = "region_correspondence"
     REGION_MASK_CHANGES = "region_mask_changes"
     ECOLOGICAL_VISIBILITY_EVENTS = "ecological_visibility_events"
+    COMPONENT_TOPOLOGY = "component_topology"
     ORIENTED_BOUNDARY_OWNERSHIP = "oriented_boundary_ownership"
     OCCLUSION_ANNOTATION = "occlusion_annotation"
     ANALYTIC_OPTICAL_TRANSPORT = "analytic_optical_transport"
@@ -179,6 +180,7 @@ class Modality(StrEnum):
             Modality.REGION_CORRESPONDENCE,
             Modality.REGION_MASK_CHANGES,
             Modality.ECOLOGICAL_VISIBILITY_EVENTS,
+            Modality.COMPONENT_TOPOLOGY,
             Modality.ORIENTED_BOUNDARY_OWNERSHIP,
             Modality.OCCLUSION_ANNOTATION,
             Modality.ANALYTIC_OPTICAL_TRANSPORT,
@@ -574,10 +576,189 @@ class UnavailableComponentTopologyCapability(StrictModel):
     reason: Literal["canonical Slice 4 does not define a component-topology oracle"]
 
 
+ComponentId = Annotated[str, Field(pattern=r"^component-[0-9a-f]{64}$")]
+
+
+class ComponentRecord(StrictModel):
+    frame_index: Literal[0, 1]
+    component_id: ComponentId
+    surface_id: SurfaceId
+    surface_component_index: int = Field(ge=0)
+    map_label: int = Field(gt=0)
+    pixel_count: int = Field(gt=0)
+    minimum_row_column: tuple[int, int]
+    bounds_top_left_bottom_right_exclusive: tuple[int, int, int, int]
+    mask_sha256: Sha256
+
+    @model_validator(mode="after")
+    def extent_is_nonempty(self) -> ComponentRecord:
+        top, left, bottom, right = self.bounds_top_left_bottom_right_exclusive
+        row, column = self.minimum_row_column
+        if not (0 <= top == row < bottom and 0 <= left <= column < right):
+            raise ValueError("component extent and minimum coordinate disagree")
+        if self.pixel_count > (bottom - top) * (right - left):
+            raise ValueError("component count exceeds its extent")
+        return self
+
+
+class ComponentFrame(StrictModel):
+    frame_index: Literal[0, 1]
+    components: tuple[ComponentRecord, ...]
+    component_labels: ArtifactRecord
+    component_map_sha256: Sha256
+    component_set_sha256: Sha256
+
+    @model_validator(mode="after")
+    def components_are_canonical(self) -> ComponentFrame:
+        artifact = self.component_labels
+        if artifact.modality != Modality.COMPONENT_TOPOLOGY:
+            raise ValueError("component map must have the component-topology modality")
+        if artifact.dtype != "int32" or len(artifact.shape) != 2:
+            raise ValueError("component map must be a two-dimensional int32 array")
+        keys = [(c.surface_id, c.minimum_row_column) for c in self.components]
+        if keys != sorted(set(keys)):
+            raise ValueError("components must have unique canonical surface/coordinate order")
+        indices: dict[str, int] = {}
+        for label, component in enumerate(self.components, 1):
+            index = indices.get(component.surface_id, 0)
+            if (component.frame_index, component.map_label, component.surface_component_index) != (
+                self.frame_index,
+                label,
+                index,
+            ):
+                raise ValueError("component frame, label or surface index is not canonical")
+            indices[component.surface_id] = index + 1
+        ids = [c.component_id for c in self.components]
+        if len(ids) != len(set(ids)):
+            raise ValueError("component IDs must be unique")
+        return self
+
+
+class ComponentSupport(StrictModel):
+    surface_id: SurfaceId
+    before_component_id: ComponentId
+    after_component_id: ComponentId
+    forward_count: int = Field(ge=0)
+    backward_count: int = Field(ge=0)
+    edge: bool
+
+    @model_validator(mode="after")
+    def edge_has_support(self) -> ComponentSupport:
+        if self.edge != (self.forward_count + self.backward_count > 0):
+            raise ValueError("component edge must have support in at least one direction")
+        return self
+
+
+class ComponentEventKind(StrEnum):
+    CONTINUATION = "one_to_one_continuation"
+    SPLIT = "one_to_many_split"
+    MERGE = "many_to_one_merge"
+    APPEARANCE = "component_appearance"
+    DISAPPEARANCE = "component_disappearance"
+    COMPLEX = "complex_many_to_many"
+    INDETERMINATE = "indeterminate_insufficient_transport_support"
+
+
+class ComponentTopologyEvent(StrictModel):
+    event_id: Sha256
+    surface_id: SurfaceId
+    kind: ComponentEventKind
+    before_component_ids: tuple[ComponentId, ...]
+    after_component_ids: tuple[ComponentId, ...]
+
+    @model_validator(mode="after")
+    def members_are_canonical(self) -> ComponentTopologyEvent:
+        if not (self.before_component_ids or self.after_component_ids):
+            raise ValueError("component event must contain at least one component")
+        for ids in (self.before_component_ids, self.after_component_ids):
+            if list(ids) != sorted(set(ids)):
+                raise ValueError("event component IDs must be uniquely ordered")
+        return self
+
+
+class ComponentTopologyAnnotation(StrictModel):
+    # Indeterminate retains the complete evidence while withholding capability qualification.
+    status: Literal["available", "indeterminate"]
+    schema_version: Literal["component_topology_annotation_v1"]
+    connectivity: Literal["four_neighbour_equal_opaque_label_v1"]
+    coordinates: Literal["row_column_zero_based_half_open_extents_v1"]
+    component_id_domain: Literal["epsbench.component_topology.v1.component_id"]
+    map_domain: Literal["epsbench.component_topology.v1.component_map"]
+    set_domain: Literal["epsbench.component_topology.v1.component_set"]
+    support_domain: Literal["epsbench.component_topology.v1.supports"]
+    event_domain: Literal["epsbench.component_topology.v1.events"]
+    annotation_domain: Literal["epsbench.component_topology.v1.annotation"]
+    portable_domain: Literal["epsbench.component_topology.v1.portable_graph"]
+    target_cell_rule: Literal["floor_source_center_plus_fixed1024_transport_v1"]
+    support_rule: Literal["valid_reason_zero_either_direction_same_surface_v1"]
+    classification_rule: Literal["connected_bipartite_graph_or_proven_isolate_v1"]
+    acceptance_rule: Literal["complex_retained_indeterminate_capability_fail_closed_v1"]
+    frames: tuple[ComponentFrame, ComponentFrame]
+    supports: tuple[ComponentSupport, ...]
+    events: tuple[ComponentTopologyEvent, ...]
+    segmentation_logical_sha256: tuple[Sha256, Sha256]
+    event_codes_logical_sha256: tuple[Sha256, Sha256]
+    analytic_transport_sha256: Sha256
+    supports_sha256: Sha256
+    events_sha256: Sha256
+    portable_graph_sha256: Sha256
+    component_topology_sha256: Sha256
+
+    @model_validator(mode="after")
+    def graph_is_complete_and_canonical(self) -> ComponentTopologyAnnotation:
+        if tuple(f.frame_index for f in self.frames) != (0, 1):
+            raise ValueError("component frames must be ordered before then after")
+        if self.frames[0].component_labels.shape != self.frames[1].component_labels.shape:
+            raise ValueError("component maps must align")
+        nodes = {c.component_id: c for f in self.frames for c in f.components}
+        if len(nodes) != sum(len(f.components) for f in self.frames):
+            raise ValueError("frame-local component IDs must be distinct across frames")
+        expected_pairs = sorted(
+            (a.surface_id, a.component_id, b.component_id)
+            for a in self.frames[0].components
+            for b in self.frames[1].components
+            if a.surface_id == b.surface_id
+        )
+        actual_pairs = [
+            (s.surface_id, s.before_component_id, s.after_component_id) for s in self.supports
+        ]
+        if actual_pairs != expected_pairs:
+            raise ValueError("support records must exactly cover all same-surface pairs")
+        event_keys = [
+            (e.surface_id, e.before_component_ids, e.after_component_ids) for e in self.events
+        ]
+        if event_keys != sorted(set(event_keys)):
+            raise ValueError("component events must be uniquely canonical-ordered")
+        covered: list[str] = []
+        for event in self.events:
+            for frame, ids in enumerate((event.before_component_ids, event.after_component_ids)):
+                for identity in ids:
+                    node = nodes.get(identity)
+                    if node is None or (node.frame_index, node.surface_id) != (
+                        frame,
+                        event.surface_id,
+                    ):
+                        raise ValueError("component event has a foreign frame or surface member")
+                    covered.append(identity)
+        if sorted(covered) != sorted(nodes):
+            raise ValueError("component events must partition every component exactly once")
+        expected_status = (
+            "indeterminate"
+            if any(e.kind == ComponentEventKind.INDETERMINATE for e in self.events)
+            else "available"
+        )
+        if self.status != expected_status:
+            raise ValueError("component capability must fail closed on indeterminate support")
+        return self
+
+
 class VisibilityEventCapabilities(StrictModel):
     transport_causal_pixel_events: Literal["available"]
     whole_surface_events: Literal["available"]
-    component_topology: UnavailableComponentTopologyCapability
+    component_topology: Annotated[
+        UnavailableComponentTopologyCapability | ComponentTopologyAnnotation,
+        Field(discriminator="status"),
+    ]
 
 
 class OccludingVisibilityEventSummary(StrictModel):
@@ -626,7 +807,10 @@ class WholeSurfaceVisibilityEvent(StrictModel):
 
 class AvailableEcologicalVisibilityEvents(StrictModel):
     status: Literal["available"]
-    method: Literal["analytic_transport_boundary_causal_events_v2"]
+    method: Literal[
+        "analytic_transport_boundary_causal_events_v2",
+        "analytic_transport_boundary_causal_events_with_component_topology_v3",
+    ]
     capabilities: VisibilityEventCapabilities
     before_event_code_domain: Literal["before_frame_fate_codes_v1"]
     after_event_code_domain: Literal["after_frame_origin_codes_v1"]
@@ -640,6 +824,22 @@ class AvailableEcologicalVisibilityEvents(StrictModel):
 
     @model_validator(mode="after")
     def directions_and_summaries_are_canonical(self) -> AvailableEcologicalVisibilityEvents:
+        topology = self.capabilities.component_topology
+        if isinstance(topology, ComponentTopologyAnnotation):
+            if (
+                self.method
+                != "analytic_transport_boundary_causal_events_with_component_topology_v3"
+            ):
+                raise ValueError("component topology requires visibility-event method v3")
+            if topology.analytic_transport_sha256 != self.analytic_transport_sha256:
+                raise ValueError("component topology must bind the same analytic transport")
+            if topology.event_codes_logical_sha256 != (
+                self.before_fate.event_codes.logical_sha256,
+                self.after_origin.event_codes.logical_sha256,
+            ):
+                raise ValueError("component topology must bind the public event code maps")
+        elif self.method != "analytic_transport_boundary_causal_events_v2":
+            raise ValueError("legacy unavailable topology requires visibility-event method v2")
         if self.before_fate.frame_index != 0 or self.after_origin.frame_index != 1:
             raise ValueError("visibility-event maps must cover ordered before/after source frames")
         if self.before_fate.event_codes.shape != self.after_origin.event_codes.shape:
@@ -796,7 +996,7 @@ DenseOpticalTransport = Annotated[
 
 
 class TransitionRecord(StrictModel):
-    schema_version: Literal["0.1.0-dev.9"]
+    schema_version: Literal["0.1.0-dev.9", "0.1.0-dev.10"]
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     action: Action
     surfaces: tuple[SurfaceReference, ...] = Field(min_length=1)
@@ -814,6 +1014,23 @@ class TransitionRecord(StrictModel):
 
     @model_validator(mode="after")
     def references_are_consistent(self) -> TransitionRecord:
+        topology = self.ecological_visibility_events.capabilities.component_topology
+        has_topology = isinstance(topology, ComponentTopologyAnnotation)
+        if self.schema_version != ("0.1.0-dev.10" if has_topology else "0.1.0-dev.9"):
+            raise ValueError("transition schema must agree with component-topology contract")
+        if isinstance(topology, ComponentTopologyAnnotation):
+            if topology.segmentation_logical_sha256 != (
+                self.before.segmentation.logical_sha256,
+                self.after.segmentation.logical_sha256,
+            ):
+                raise ValueError("component topology must bind both public segmentation maps")
+            known_surfaces = {s.surface_id for s in self.surfaces}
+            if any(
+                c.surface_id not in known_surfaces for f in topology.frames for c in f.components
+            ):
+                raise ValueError("component references an unknown opaque surface")
+            if topology.frames[0].component_labels.shape != (self.before.height, self.before.width):
+                raise ValueError("component maps must align with raster frames")
         surface_ids = [surface.surface_id for surface in self.surfaces]
         labels = [surface.segmentation_label for surface in self.surfaces]
         if len(surface_ids) != len(set(surface_ids)):
@@ -1482,7 +1699,7 @@ class RendererProvenance(StrictModel):
 
 
 class DatasetManifest(StrictModel):
-    schema_version: Literal["0.1.0-dev.7", "0.1.0-dev.8"]
+    schema_version: Literal["0.1.0-dev.7", "0.1.0-dev.8", "0.1.0-dev.9", "0.1.0-dev.10"]
     generator_version: Literal["0.1.0"]
     scene_family: SceneFamily
     root_seed: int = Field(ge=0)
@@ -1511,7 +1728,9 @@ class DatasetManifest(StrictModel):
         revision1 = self.appearance_assignment_schedule_source == (
             "snapshotted_revision_partition_seed_registry_v1"
         )
-        if self.schema_version != ("0.1.0-dev.8" if revision1 else "0.1.0-dev.7"):
+        if self.schema_version not in (
+            ("0.1.0-dev.8", "0.1.0-dev.10") if revision1 else ("0.1.0-dev.7", "0.1.0-dev.9")
+        ):
             raise ValueError("dataset schema and appearance assignment versions disagree")
         if self.resolved_config.modality != Modality.PRIVILEGED_GENERATION_RECORDS:
             raise ValueError("resolved configuration must be privileged generation data")

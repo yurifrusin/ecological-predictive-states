@@ -36,6 +36,7 @@ from epsbench.schema import (
     AvailableEcologicalVisibilityEvents,
     AvailableOrientedBoundaryOwnership,
     CameraInstrumentation,
+    ComponentTopologyAnnotation,
     CorridorInstrumentation,
     CorridorSampledGeometry,
     DatasetManifest,
@@ -98,6 +99,13 @@ class LoadedEcologicalVisibilityEvents:
     surface_ids_by_label: dict[int, str]
 
 
+@dataclass(frozen=True)
+class LoadedComponentTopology:
+    annotation: ComponentTopologyAnnotation
+    before_component_labels: npt.NDArray[np.int32]
+    after_component_labels: npt.NDArray[np.int32]
+
+
 class DatasetLoader:
     """Dataset reader that requires a declared permission set at construction."""
 
@@ -155,10 +163,17 @@ class DatasetLoader:
 
     def _transition(self, episode_index: int) -> TransitionRecord:
         episode = self._episode(episode_index)
-        return self._load_json(
+        transition = self._load_json(
             episode.transition,
             TransitionRecord.model_validate_json,
         )
+        has_topology = isinstance(
+            transition.ecological_visibility_events.capabilities.component_topology,
+            ComponentTopologyAnnotation,
+        )
+        if has_topology != (self._manifest.schema_version in {"0.1.0-dev.9", "0.1.0-dev.10"}):
+            raise ValueError("dataset schema and component topology disagree")
+        return transition
 
     @staticmethod
     def _frame(transition: TransitionRecord, frame_index: int) -> FrameRecord:
@@ -188,6 +203,7 @@ class DatasetLoader:
         return self._manifest.model_copy(deep=True)
 
     def read_ecological_transition(self, episode_index: int) -> EcologicalTransitionView:
+        self._require_topology_if_present()
         self._require(
             Modality.EXECUTED_ACTION,
             Modality.SURFACE_REGIONS,
@@ -228,6 +244,7 @@ class DatasetLoader:
         episode_index: int,
     ) -> LoadedEcologicalVisibilityEvents:
         self._require(Modality.ECOLOGICAL_VISIBILITY_EVENTS)
+        self._require_topology_if_present()
         transition = self._transition(episode_index)
         events = transition.ecological_visibility_events
 
@@ -254,6 +271,23 @@ class DatasetLoader:
             surface_ids_by_label={
                 surface.segmentation_label: surface.surface_id for surface in transition.surfaces
             },
+        )
+
+    def _require_topology_if_present(self) -> None:
+        if self._manifest.schema_version in {"0.1.0-dev.9", "0.1.0-dev.10"}:
+            self._require(Modality.COMPONENT_TOPOLOGY)
+
+    def read_component_topology(self, episode_index: int) -> LoadedComponentTopology:
+        self._require(Modality.COMPONENT_TOPOLOGY)
+        topology = self._transition(
+            episode_index
+        ).ecological_visibility_events.capabilities.component_topology
+        if not isinstance(topology, ComponentTopologyAnnotation):
+            raise ValueError("component topology was not generated for this legacy dataset")
+        return LoadedComponentTopology(
+            annotation=topology.model_copy(deep=True),
+            before_component_labels=self._load_npy(topology.frames[0].component_labels),
+            after_component_labels=self._load_npy(topology.frames[1].component_labels),
         )
 
     def read_analytic_optical_transport(

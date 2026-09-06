@@ -52,3 +52,24 @@ Before this final event, the historical source-only status was
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |
 | Scientific result | `NONE` |
+
+## Gate 0B Slice 6 implementation in progress
+
+Owner-authorised Slice 6 adds a prospective public image-plane component-topology
+contract on `codex/gate-0b-slice-6-component-topology`, from canonical base
+`0e9e0593cc7a0f445718575152eca5fc6651edc4` and tree
+`ec98e8bcc8ed62686ccc0f98a0fe8956690be698`. Review profile: `DUAL_REVIEW`; evidence
+class: `PUBLIC_REPOSITORY_ONLY`; closeout: `WORK_PACKAGE`. The definition, exact
+four-neighbour and transport rules, retained uncertainty, prospective lock and
+non-adaptation boundary are documented in
+[the Slice 6 contract](docs/GATE_0B_SLICE_6_COMPONENT_TOPOLOGY.md).
+
+Phase A uses only synthetic cases, ordinary smoke seeds and non-final regressions.
+The final sixteen roots require a pushed, read-back complete implementation lock
+before execution. Exact-head qualification evidence is reported in the implementation
+PR and worker report. Indeterminate components remain present and withhold capability
+qualification. Legacy schemas, identities, frozen input files, excluded candidates
+and prior negative evidence remain preserved. Independent dual review and owner merge
+approval remain outstanding. This work does not complete Gate 0B, authorise Gate 0C,
+Gate 0D or model work, freeze a model protocol, grant comparative-result access, or
+establish a scientific result.

@@ -39,6 +39,11 @@ from epsbench.annotations import (
     derive_boundary_structure,
     derive_visibility,
 )
+from epsbench.annotations.component_topology import (
+    ByteMap,
+    IntMap,
+    validate_component_topology,
+)
 from epsbench.appearance import (
     appearance_profile_hash,
     appearance_registry_hash,
@@ -93,6 +98,7 @@ from epsbench.schema import (
     BoundaryOwnerSide,
     BoundaryVisibilityDiagnostics,
     CameraInstrumentation,
+    ComponentTopologyAnnotation,
     CorridorInstrumentation,
     DatasetManifest,
     DirectionalOpticalTransport,
@@ -443,7 +449,7 @@ def _require_boundary_and_event_recomputation(
     expected: RawBoundaryVisibilityAnalysis,
     expected_shape: tuple[int, int],
     registry: _ArtifactRegistry,
-) -> None:
+) -> tuple[ByteMap, ByteMap]:
     raw_surfaces = _raw_surface_records(transition, instrumentation)
     expected_boundary = _expected_oriented_boundary(
         expected,
@@ -521,6 +527,40 @@ def _require_boundary_and_event_recomputation(
         after[0] == int(AfterOriginCode.UNRESOLVED_OCCLUSION)
     ):
         raise DatasetValidationError("canonical visibility events contain unresolved occlusion")
+    return before[0], after[0]
+
+
+def _require_component_topology_recomputation(
+    root: Path,
+    transition: TransitionRecord,
+    manifest: DatasetManifest,
+    segmentations: tuple[IntMap, IntMap],
+    transport: tuple[DirectionalTransportArrays, DirectionalTransportArrays],
+    codes: tuple[ByteMap, ByteMap],
+    registry: _ArtifactRegistry,
+) -> None:
+    topology = transition.ecological_visibility_events.capabilities.component_topology
+    required = manifest.schema_version in {"0.1.0-dev.9", "0.1.0-dev.10"}
+    if required != isinstance(topology, ComponentTopologyAnnotation):
+        raise DatasetValidationError("dataset schema and component topology disagree")
+    if not isinstance(topology, ComponentTopologyAnnotation):
+        return
+    arrays = tuple(_load_npy(root, f.component_labels, registry) for f in topology.frames)
+
+    try:
+        validate_component_topology(
+            topology,
+            segmentations,
+            transition.surfaces,
+            (transport[0].vectors_fixed, transport[1].vectors_fixed),
+            (transport[0].validity, transport[1].validity),
+            (transport[0].reasons, transport[1].reasons),
+            codes,
+            transition.ecological_visibility_events.analytic_transport_sha256,
+            (arrays[0], arrays[1]),
+        )
+    except ValueError as error:
+        raise DatasetValidationError(str(error)) from error
 
 
 def _expected_attachment_contract(
@@ -1403,12 +1443,21 @@ def validate_dataset(root: Path) -> DatasetManifest:
             observed_analytic_transport,
             expected_analytic_transport,
         )
-        _require_boundary_and_event_recomputation(
+        public_event_codes = _require_boundary_and_event_recomputation(
             resolved_root,
             transition,
             instrumentation,
             expected_boundary_visibility,
             expected_raster_shape,
+            registry,
+        )
+        _require_component_topology_recomputation(
+            resolved_root,
+            transition,
+            manifest,
+            (frame_arrays[0][2], frame_arrays[1][2]),
+            observed_analytic_transport,
+            public_event_codes,
             registry,
         )
         if instrumentation.attachment_contract != _expected_attachment_contract(

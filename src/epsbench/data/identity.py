@@ -14,6 +14,7 @@ from epsbench.schema import (
     AvailableDenseOpticalTransport,
     AvailableEcologicalVisibilityEvents,
     AvailableOrientedBoundaryOwnership,
+    ComponentTopologyAnnotation,
     CorridorSampledGeometry,
     DatasetManifest,
     RendererProvenance,
@@ -178,9 +179,18 @@ def visibility_event_domain(events: AvailableEcologicalVisibilityEvents) -> dict
             "owner_surface_labels_logical_sha256": direction.owner_surface_labels.logical_sha256,
         }
 
+    capabilities = events.capabilities.model_dump(mode="json")
+    topology = events.capabilities.component_topology
+    if isinstance(topology, ComponentTopologyAnnotation):
+        from epsbench.annotations.component_topology import annotation_domain
+
+        capabilities["component_topology"] = {
+            **annotation_domain(topology),
+            "component_topology_sha256": topology.component_topology_sha256,
+        }
     return {
         "method": events.method,
-        "capabilities": events.capabilities.model_dump(mode="json"),
+        "capabilities": capabilities,
         "before_event_code_domain": events.before_event_code_domain,
         "after_event_code_domain": events.after_event_code_domain,
         "before_fate": direction_domain(events.before_fate),

@@ -6,6 +6,8 @@ import hashlib
 import io
 import os
 import tempfile
+import textwrap
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +15,7 @@ from PIL import Image, ImageDraw
 
 from epsbench.data.loader import DatasetLoader
 from epsbench.data.validate import validate_dataset
-from epsbench.schema import ModalityPermissionSet
+from epsbench.schema import ComponentTopologyAnnotation, ModalityPermissionSet
 
 
 def _segmentation_image(segmentation: np.ndarray) -> Image.Image:
@@ -173,7 +175,7 @@ def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> 
     before_events = _event_image(visibility_events.before_fate_codes)
     after_events = _event_image(visibility_events.after_origin_codes)
     ecological = loader.read_ecological_transition(episode_index)
-    panels = (
+    panels: tuple[tuple[str, Image.Image], ...] = (
         ("RGB - before", before_rgb),
         ("RGB - after", after_rgb),
         ("Opaque segmentation - before", before_segmentation),
@@ -187,14 +189,70 @@ def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> 
         ("Event fate - before frame", before_events),
         ("Event origin - after frame", after_events),
     )
+    topology = visibility_events.annotation.capabilities.component_topology
+    topology_lines: list[str] = []
+    if isinstance(topology, ComponentTopologyAnnotation):
+        loaded = loader.read_component_topology(episode_index)
+        panels += (
+            (
+                "Four-neighbour components - before",
+                _segmentation_image(loaded.before_component_labels),
+            ),
+            (
+                "Four-neighbour components - after",
+                _segmentation_image(loaded.after_component_labels),
+            ),
+        )
+        topology_lines = [
+            f"Component capability: {topology.status}; four-neighbour; background excluded",
+            f"Component topology SHA-256: {topology.component_topology_sha256}",
+            f"Portable graph SHA-256: {topology.portable_graph_sha256}",
+            f"Events: {dict(sorted(Counter(e.kind.value for e in topology.events).items()))}",
+        ]
+        aliases = {
+            c.component_id: f"F{f.frame_index}:L{c.map_label}"
+            for f in topology.frames
+            for c in f.components
+        }
+        for frame in topology.frames:
+            for component in frame.components:
+                topology_lines.extend(
+                    [
+                        f"{aliases[component.component_id]} surface {component.surface_id}; "
+                        f"pixels {component.pixel_count}; "
+                        f"min(row,col) {component.minimum_row_column}; "
+                        f"bounds {component.bounds_top_left_bottom_right_exclusive}",
+                        f"  {component.component_id}",
+                    ]
+                )
+        topology_lines.append(
+            f"Support pairs {len(topology.supports)}; zero support "
+            f"{sum(not s.edge for s in topology.supports)}; one direction only "
+            f"{sum((s.forward_count == 0) != (s.backward_count == 0) for s in topology.supports)}. "
+            "All pairs retained in source; supported edges below."
+        )
+        topology_lines.extend(
+            f"{aliases[s.before_component_id]} -> {aliases[s.after_component_id]} "
+            f"forward={s.forward_count} backward={s.backward_count} edge={s.edge}"
+            for s in topology.supports
+            if s.edge
+        )
+        topology_lines.extend(
+            f"{e.kind.value}: {[aliases[i] for i in e.before_component_ids]} -> "
+            f"{[aliases[i] for i in e.after_component_ids]}"
+            for e in topology.events
+        )
     width, height = before_rgb.size
-    panel_width = max(width, 240)
+    panel_width = max(width, 360 if topology_lines else 240)
     panel_height = round(height * panel_width / width)
     label_height = 24
     header_height = 224
+    detail_lines = [line for text in topology_lines for line in textwrap.wrap(text, width=110)]
+    panel_rows = len(panels) // 2
+    details_y = header_height + panel_rows * (panel_height + label_height)
     canvas = Image.new(
         "RGB",
-        (2 * panel_width, header_height + 6 * (panel_height + label_height)),
+        (2 * panel_width, details_y + (len(detail_lines) * 18 + 12 if detail_lines else 0)),
         "white",
     )
     draw = ImageDraw.Draw(canvas)
@@ -239,7 +297,7 @@ def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> 
         draw.text((6, 180), f"                    {summary_lines[1]}", fill="black")
     draw.text(
         (6, 196),
-        f"Occlusion: {ecological.occlusion.status}; component split/merge: unavailable",
+        f"Occlusion: {ecological.occlusion.status}; component topology: {topology.status}",
         fill="black",
     )
     for panel_index, (label, panel) in enumerate(panels):
@@ -250,5 +308,17 @@ def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> 
         draw.text((x + 6, y + 5), label, fill="black")
         resized = panel.resize((panel_width, panel_height), resample=Image.Resampling.NEAREST)
         canvas.paste(resized, (x, y + label_height))
+        if isinstance(topology, ComponentTopologyAnnotation) and panel_index >= 12:
+            for component in topology.frames[panel_index - 12].components:
+                r, c = component.minimum_row_column
+                draw.text(
+                    (x + c * panel_width // width, y + label_height + r * panel_height // height),
+                    str(component.map_label),
+                    fill="white",
+                    stroke_width=1,
+                    stroke_fill="black",
+                )
+    for index, line in enumerate(detail_lines):
+        draw.text((6, details_y + index * 18), line, fill="black")
     _write_png_atomically_no_clobber(canvas, output)
     return output
