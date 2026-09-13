@@ -12,3 +12,7 @@
 Live revalidation before merge confirmed the implementation head, base, clean merge state, completed successful CI run 34094328833, all final job conclusions, retained artifact availability, and no new blocking review finding. The optional engineering recommendation `EPS-ER19-0001` remains a future non-scientific hardening proposal; it was neither implemented nor marked verified by this closeout.
 
 This closeout preserves the merged apparatus and its negative outcome: `FAILED_CLOSED`, 96 WGL indeterminate corridor cases, 96 differences across 192 cross-renderer comparisons, and no rendered split/merge/complex event in the frozen matrix. No source, test, fixture, workflow, dependency, locked definition, protected appearance input, historical review, tag, Release, benchmark freeze, model protocol, empirical gate, or scientific-result claim changes here.
+
+## Linked closeout record
+
+The separately authorised linked documentation PR is [#20](https://github.com/yurifrusin/ecological-predictive-states/pull/20), opened from `codex/pr19-closeout-records` at closeout-record commit `acbd66f0da383b921b296d9441d24f51e7b3f1b5`. It contains no implementation change relative to `f8a1b8584889fb955085517a7b51a4ad9a63ade9`.
