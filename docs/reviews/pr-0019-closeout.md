@@ -16,3 +16,7 @@ This closeout preserves the merged apparatus and its negative outcome: `FAILED_C
 ## Linked closeout record
 
 The separately authorised linked documentation PR is [#20](https://github.com/yurifrusin/ecological-predictive-states/pull/20), opened from `codex/pr19-closeout-records` at closeout-record commit `acbd66f0da383b921b296d9441d24f51e7b3f1b5`. It contains no implementation change relative to `f8a1b8584889fb955085517a7b51a4ad9a63ade9`.
+
+## Linked PR check applicability
+
+PR #20 triggered CI because the unchanged workflow runs on every pull request. Its WGL and dependent OSMesa jobs are a renderer-qualification campaign whose inputs and scientific source remain identical to the already accepted implementation; no new campaign is required or used by this documentation-only closeout. The applicable `CLOSEOUT_ONLY` checks are documentation/consistency validation, a source-and-protected-input unchanged proof, and diff hygiene. The closeout does not call queued workflow jobs passed or waived. Repository branch-protection configuration was unavailable because GitHub reports the feature unavailable for this private plan; no separate required-check rule was identified.
