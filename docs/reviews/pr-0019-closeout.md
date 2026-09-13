@@ -1,0 +1,14 @@
+# Work-package closeout — EPS PR #19
+
+- **Implementation PR:** [#19](https://github.com/yurifrusin/ecological-predictive-states/pull/19)
+- **Reviewed head/tree:** `d7b7ce8f04426e5869ef6e063f97c421fd10fffc` / `8ef8f5552750e322c01538fdf7be30a1855c0a63`
+- **Pre-merge base:** `0e9e0593cc7a0f445718575152eca5fc6651edc4`
+- **Prospective lock:** `cacdcb8ed0227c0d484d93178606b7fc01b3bf4c`
+- **Implementation merge:** normal merge commit `f8a1b8584889fb955085517a7b51a4ad9a63ade9`, 2026-09-13T00:58:22Z
+- **Review convergence:** exact-head `ENGINEERING_PASS` and fresh 2026-09-13 `SCIENTIFIC_PASS`; the latter is distinct from the unrecovered historical 2026-09-08 response.
+- **Owner authority:** recorded in [`pr-0019-owner-approval.md`](pr-0019-owner-approval.md).
+- **Closeout profile:** `CLOSEOUT_ONLY`, boundary `WORK_PACKAGE`.
+
+Live revalidation before merge confirmed the implementation head, base, clean merge state, completed successful CI run 34094328833, all final job conclusions, retained artifact availability, and no new blocking review finding. The optional engineering recommendation `EPS-ER19-0001` remains a future non-scientific hardening proposal; it was neither implemented nor marked verified by this closeout.
+
+This closeout preserves the merged apparatus and its negative outcome: `FAILED_CLOSED`, 96 WGL indeterminate corridor cases, 96 differences across 192 cross-renderer comparisons, and no rendered split/merge/complex event in the frozen matrix. No source, test, fixture, workflow, dependency, locked definition, protected appearance input, historical review, tag, Release, benchmark freeze, model protocol, empirical gate, or scientific-result claim changes here.

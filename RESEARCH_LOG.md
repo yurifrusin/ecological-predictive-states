@@ -420,3 +420,12 @@ Subsequent qualification and CI must bind the new head. Earlier local results an
 CI run `34034710421` remain identifiable, superseded execution evidence. Dual
 independent review remains required, owner merge approval is not given, and no
 Gate 0B completion, Gate 0C/0D/model authority or scientific result is claimed.
+
+
+## PR #19 Gate 0B Slice 6 work-package closeout
+
+PR [#19](https://github.com/yurifrusin/ecological-predictive-states/pull/19) merged by normal merge commit `f8a1b8584889fb955085517a7b51a4ad9a63ade9` after independent exact-head `ENGINEERING_PASS` and `SCIENTIFIC_PASS` at `d7b7ce8f04426e5869ef6e063f97c421fd10fffc`. The linked closeout retains the reviews, owner context, and digest-verified CI receipts.
+
+The topology apparatus is retained with its actual outcome: `FAILED_CLOSED`. WGL retains 96 indeterminate corridor cases; the 192-cell cross-renderer comparison retains 96 differences; the frozen matrix contains no rendered split, merge, or complex event. These limitations are not repaired or relabelled by this closeout.
+
+This is a `WORK_PACKAGE` closeout only. It does not complete Gate 0B, authorise Gate 0C or Gate 0D, select a renderer, change the canonical appearance-input freeze, freeze a benchmark or model protocol, authorise model work, create a tag or Release, or establish a scientific result. A separate bounded ordinary-development investigation and a later owner decision about Gate 0B before Gate 0C remain outside this record.
