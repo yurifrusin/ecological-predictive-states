@@ -29,3 +29,10 @@ These questions require owner review or later gate work:
 2. Does the separately hashed analytic transport remain identical beyond the tested Windows/WGL and exact-head Ubuntu/OSMesa locked environments, and what posture should later platforms or dependency versions use? Complete raster-derived ecological hashes may remain backend-specific.
 3. Before any comparative model-result access, which locked renderer should a future authorised Gate 0D/0E protocol prospectively select as primary, how should it classify the other renderer (`replication`, `robustness`, `sensitivity`, or `unsupported`), and will it preregister any renderer aggregation rule?
 4. Which separate training, validation, and model-randomness roots and full model protocol should a later authorised Gate 0D/0E preregistration define?
+
+5. After the owner-authorised Slice 6 work package has exact-head dual review, what
+   separately authorised response is warranted if complete four-neighbour topology
+   evidence is indeterminate or differs across the locked renderers? The
+   [prospective Slice 6 contract](GATE_0B_SLICE_6_COMPONENT_TOPOLOGY.md) prohibits
+   adapting the rule or replacing roots after final-root execution. Retained
+   uncertainty does not authorise Gate 0C conversion or scientific advancement.

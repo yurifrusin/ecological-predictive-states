@@ -356,3 +356,67 @@ Before final review and closeout, the historical source-only status was
 | Model-protocol status | `NOT_FROZEN` |
 | Gate status | `NOT_ADVANCED` |
 | Scientific result | `NONE` |
+
+## Gate 0B Slice 6 implementation in progress
+
+Owner-authorised Slice 6 adds a prospective public image-plane component-topology
+contract on `codex/gate-0b-slice-6-component-topology`, from canonical base
+`0e9e0593cc7a0f445718575152eca5fc6651edc4` and tree
+`ec98e8bcc8ed62686ccc0f98a0fe8956690be698`. Review profile: `DUAL_REVIEW`; evidence
+class: `PUBLIC_REPOSITORY_ONLY`; closeout: `WORK_PACKAGE`. The definition, exact
+four-neighbour and transport rules, retained uncertainty, prospective lock and
+non-adaptation boundary are documented in
+[the Slice 6 contract](docs/GATE_0B_SLICE_6_COMPONENT_TOPOLOGY.md).
+
+Phase A uses only synthetic cases, ordinary smoke seeds and non-final regressions.
+The final sixteen roots require a pushed, read-back complete implementation lock
+before execution. Exact-head qualification evidence is reported in the implementation
+PR and worker report. Indeterminate components remain present and withhold capability
+qualification. Legacy schemas, identities, frozen input files, excluded candidates
+and prior negative evidence remain preserved. Independent dual review and owner merge
+approval remain outstanding. This work does not complete Gate 0B, authorise Gate 0C,
+Gate 0D or model work, freeze a model protocol, grant comparative-result access, or
+establish a scientific result.
+
+### Slice 6 operational execution record after prospective lock
+
+The complete scientific implementation was prospectively committed and remotely
+read back at `cacdcb8ed0227c0d484d93178606b7fc01b3bf4c`, tree
+`b55c7c35d250128f7c74ea9fadddc3c3103571d5`, topology-lock root
+`b15c431ac618709c63a5f31636d5024073967d0c3210d75e51ebd7ff925f98ee`, before any final
+root was executed. The owner-authorised implementation is draft PR #19. This
+operational record changes no scientific definition, implementation, tests, lock,
+threshold, selected profile or root.
+
+Post-lock Windows tests at that head passed: 662 passed, 10 skipped. Local WGL
+qualification began at `2026-09-06T13:00:10.756313+00:00`; all 192 exact cells were
+independently validated and within-renderer appearance invariance passed. Its
+complete retained packet root is
+`fb5ffaf6c75a291c4b794a0bd94beb49bd098e5eda7b35e02a9d7d2a8ad3b2aa`.
+Qualification is `failed_closed`: corridor components include indeterminate
+transport support. No outcome is used to change the locked rule.
+
+Operational limitations and repairs are preserved:
+
+- Automatic approval review rejected registering and starting a temporary Windows
+  CI runner, reporting only `blocked by policy`. The runner archive was downloaded
+  and digest-verified, but no runner registration or startup was performed. The
+  user was asked to provide a runner labelled `eps-wgl-ephemeral`.
+- A local Ubuntu qualification launch stopped before rendering because the
+  non-login shell lacked `uv` on its PATH. The repair invokes the existing
+  `/home/sarashera/.local/bin/uv` explicitly. Locked sync and the exact renderer
+  fingerprint/readback preflight then passed. No scientific source was changed.
+- Ubuntu's private-repository readback initially used an incorrectly quoted Git
+  credential-helper command; the stalled read was interrupted. A corrected
+  shell helper and LF-normalised operational script returned the exact remote
+  head. This was authentication/preflight setup, not scientific execution.
+- WSL reported a systemd user-session startup warning. Shell execution, locked
+  dependency sync and renderer-provenance inspection succeeded; the warning is
+  retained rather than treated as renderer evidence.
+
+The handoff requires a new exact implementation head for operational repairs;
+this bounded record supplies it while preserving the original prospective lock.
+Subsequent qualification and CI must bind the new head. Earlier local results and
+CI run `34034710421` remain identifiable, superseded execution evidence. Dual
+independent review remains required, owner merge approval is not given, and no
+Gate 0B completion, Gate 0C/0D/model authority or scientific result is claimed.

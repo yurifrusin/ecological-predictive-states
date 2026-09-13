@@ -49,6 +49,13 @@ jobs:
       - name: Test
         run: uv run pytest
 
+      - name: Exercise both component topology smoke datasets
+        run: |
+          uv run epsbench component-topology-audit --config configs/benchmark_v0.yaml --episodes 2 --output artifacts/topology-single-smoke
+          uv run epsbench component-topology-audit --config configs/corridor_v0.yaml --episodes 2 --output artifacts/topology-corridor-smoke
+          uv run epsbench inspect artifacts/topology-single-smoke --output artifacts/topology-single-smoke.png
+          uv run epsbench inspect artifacts/topology-corridor-smoke --output artifacts/topology-corridor-smoke.png
+
       - name: Exercise both scene families and print transport boundary event identities
         run: |
           uv run epsbench generate --config configs/benchmark_v0.yaml --episodes 2 --output data/ci-smoke
@@ -336,6 +343,7 @@ jobs:
       packet-artifact-name: ${{ steps.names.outputs.packet }}
       evidence-artifact-id: ${{ steps.upload-evidence.outputs.artifact-id }}
       evidence-artifact-name: ${{ steps.names.outputs.evidence }}
+      topology-artifact-id: ${{ steps.upload-topology.outputs.artifact-id }}
     steps:
       - name: Check out exact pull-request head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -434,6 +442,52 @@ jobs:
           if-no-files-found: error
           retention-days: 90
           compression-level: 6
+          overwrite: false
+
+      - name: Verify prospective topology lock and qualify all 192 WGL cells
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $topologyLockCommit = git log --diff-filter=A --format=%H -- configs/component_topology_v0_lock.json
+          uv run epsbench component-topology-qualify --lock-commit $topologyLockCommit --output artifacts/component-topology-wgl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload complete WGL topology evidence including failed outcomes
+        id: upload-topology
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: component-topology-wgl-packet-${{ github.event.pull_request.head.sha }}
+          path: artifacts/component-topology-wgl/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+          overwrite: false
+
+      - name: Resolve live WGL topology archive and publication identities
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          uv run python scripts/fetch_github_actions_evidence.py
+          --repository "${{ github.repository }}"
+          --run-id "${{ github.run_id }}"
+          --artifact-id "${{ steps.upload-topology.outputs.artifact-id }}"
+          --output artifacts/component-topology-wgl-publication
+
+      - name: Independently reconstruct published WGL topology sources
+        run: >-
+          uv run python scripts/check_topology_publication.py
+          --evidence artifacts/component-topology-wgl-publication
+          --output artifacts/component-topology-wgl-publication/receipt.json
+
+      - name: Upload WGL topology publication receipt and live metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: component-topology-wgl-publication-${{ github.event.pull_request.head.sha }}
+          path: artifacts/component-topology-wgl-publication/*.json
+          if-no-files-found: error
+          retention-days: 90
           overwrite: false
 
   qualify-osmesa:
@@ -561,4 +615,67 @@ jobs:
           if-no-files-found: error
           retention-days: 90
           compression-level: 6
+          overwrite: false
+
+      - name: Verify prospective topology lock and qualify all 192 OSMesa cells
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          topology_lock_commit=$(git log --diff-filter=A --format=%H -- configs/component_topology_v0_lock.json)
+          uv run epsbench component-topology-qualify --lock-commit "$topology_lock_commit" --output artifacts/component-topology-osmesa
+
+      - name: Upload complete OSMesa topology evidence including failed outcomes
+        id: upload-topology
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: component-topology-osmesa-packet-${{ github.event.pull_request.head.sha }}
+          path: artifacts/component-topology-osmesa/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+          overwrite: false
+
+      - name: Resolve live counterpart WGL topology archive
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          uv run python scripts/fetch_github_actions_evidence.py
+          --repository "${{ github.repository }}"
+          --run-id "${{ github.run_id }}"
+          --artifact-id "${{ needs.qualify-wgl.outputs.topology-artifact-id }}"
+          --output artifacts/component-topology-counterpart-publication
+
+      - name: Reconstruct published WGL sources and compare all 192 portable topology identities
+        run: >-
+          uv run python scripts/check_topology_publication.py
+          --evidence artifacts/component-topology-counterpart-publication
+          --compare-with artifacts/component-topology-osmesa
+          --output artifacts/component-topology-cross-renderer.json
+
+      - name: Resolve live OSMesa topology archive and publication identities
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          uv run python scripts/fetch_github_actions_evidence.py
+          --repository "${{ github.repository }}"
+          --run-id "${{ github.run_id }}"
+          --artifact-id "${{ steps.upload-topology.outputs.artifact-id }}"
+          --output artifacts/component-topology-osmesa-publication
+
+      - name: Independently reconstruct published OSMesa topology sources
+        run: >-
+          uv run python scripts/check_topology_publication.py
+          --evidence artifacts/component-topology-osmesa-publication
+          --output artifacts/component-topology-osmesa-publication/receipt.json
+
+      - name: Upload OSMesa topology publication and cross-renderer evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: component-topology-osmesa-publication-${{ github.event.pull_request.head.sha }}
+          path: |
+            artifacts/component-topology-osmesa-publication/*.json
+            artifacts/component-topology-cross-renderer.json
+          if-no-files-found: error
+          retention-days: 90
           overwrite: false
