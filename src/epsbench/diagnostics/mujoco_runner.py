@@ -16,6 +16,7 @@ import numpy.typing as npt
 from epsbench.appearance import AppearanceRenderPlan
 from epsbench.config import CorridorConfig
 from epsbench.diagnostics.capture import DiagnosticFailure
+from epsbench.diagnostics.gl_provenance import inspect_mujoco_offscreen_attachments
 from epsbench.schema import CorridorSampledGeometry
 from epsbench.sim.compiled import extract_compiled_scene_contract
 from epsbench.sim.corridor import CORRIDOR_SURFACE_NAMES, build_corridor_scene_xml
@@ -116,7 +117,9 @@ def capture_corridor_transition(
     appearance: AppearanceRenderPlan,
     expected_compiled_facts: Mapping[str, object],
     requested_offsamples: int,
-    inspect_gl: Callable[[mujoco.Renderer], Mapping[str, object]],
+    inspect_gl: Callable[
+        [mujoco.Renderer], Mapping[str, object]
+    ] = inspect_mujoco_offscreen_attachments,
 ) -> CapturedTransition:
     """Capture RGB/depth/segmentation in historic order after strict scene checks.
 
