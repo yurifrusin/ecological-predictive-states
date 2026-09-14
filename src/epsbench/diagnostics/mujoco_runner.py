@@ -6,6 +6,7 @@ importing it; importing MuJoCo here would make that ordering unsafe.
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import importlib.metadata
 import platform
@@ -20,6 +21,7 @@ from epsbench.diagnostics.capture import (
     CapturedFrame,
     CaptureResult,
     DiagnosticFailure,
+    PartialCapturedFrame,
     PartialCaptureFailure,
 )
 from epsbench.diagnostics.gl_provenance import inspect_mujoco_offscreen_attachments
@@ -78,10 +80,45 @@ def _scene_geom_map(renderer: Any) -> dict[int, tuple[int, int]]:
     return mapping
 
 
-class _SegmentationReadbackFailure(RuntimeError):
-    def __init__(self, encoded_rgb: np.ndarray) -> None:
-        super().__init__("segmentation readback returned no decoded array")
-        self.encoded_rgb = encoded_rgb
+class _FrameFailure(RuntimeError):
+    """Failure after a known subset of a frame has been obtained."""
+
+    def __init__(self, message: str, observations: PartialCapturedFrame, stage: str) -> None:
+        super().__init__(message)
+        self.observations = observations
+        self.stage = stage
+
+
+def _pointer_value(value: Any) -> int:
+    try:
+        return int(ctypes.cast(value, ctypes.c_void_p).value or 0)
+    except (TypeError, ValueError):
+        return int(value)
+
+
+def _observed_backend(renderer: Any) -> str:
+    """Derive and validate the live context backend, independently of CLI text."""
+    context = getattr(renderer, "_gl_context", None)
+    module = type(context).__module__.lower()
+    if module == "mujoco.osmesa":
+        return "osmesa"
+    if platform.system() != "Windows" or module != "mujoco.glfw":
+        raise DiagnosticFailure(f"unsupported or unobservable live renderer context: {module}")
+    try:
+        import glfw
+    except ImportError as exc:
+        raise DiagnosticFailure("GLFW is required to verify the live WGL context") from exc
+    window = getattr(context, "_context", None)
+    current = glfw.get_current_context()
+    if window is None or current is None:
+        raise DiagnosticFailure("MuJoCo GLFW context is not current")
+    if glfw.get_window_attrib(window, glfw.CONTEXT_CREATION_API) != glfw.NATIVE_CONTEXT_API:
+        raise DiagnosticFailure("MuJoCo GLFW context is not a native WGL context")
+    if _pointer_value(glfw.get_wgl_context(window)) == 0 or _pointer_value(
+        glfw.get_wgl_context(window)
+    ) != _pointer_value(glfw.get_wgl_context(current)):
+        raise DiagnosticFailure("MuJoCo GLFW WGL handle does not match the current context")
+    return "wgl"
 
 
 def _frame(
@@ -103,12 +140,27 @@ def _frame(
     renderer.enable_segmentation_rendering()
     renderer.update_scene(data, camera=camera_id)
     encoded = np.zeros((renderer.height, renderer.width, 3), dtype=np.uint8)
+    pairs: np.ndarray | None = None
+    mapping: dict[int, tuple[int, int]] | None = None
+    stage = "segmentation_readback_before_decoded_return"
     try:
         pairs = np.asarray(renderer.render(out=encoded), dtype=np.int32).copy()
+        stage = "segmentation_scene_map"
+        mapping = _scene_geom_map(renderer)
+        stage = "segmentation_disable"
+        renderer.disable_segmentation_rendering()
     except Exception as exc:
-        raise _SegmentationReadbackFailure(encoded.copy()) from exc
-    mapping = _scene_geom_map(renderer)
-    renderer.disable_segmentation_rendering()
+        raise _FrameFailure(
+            str(exc),
+            PartialCapturedFrame(
+                rgb=rgb,
+                depth=depth,
+                encoded_rgb=encoded.copy(),
+                decoded_pairs=pairs,
+                segid_to_object_map=mapping,
+            ),
+            stage,
+        ) from exc
     raw = np.where(pairs[..., 1] == int(mujoco.mjtObj.mjOBJ_GEOM), pairs[..., 0], -1).astype(
         np.int32
     )
@@ -202,13 +254,15 @@ def capture_corridor_transition(
         provenance["requested_offsamples"] = requested_offsamples
         provenance["actual_offsamples"] = int(renderer._mjr_context.offSamples)
         provenance["backend"] = backend
+        provenance["actual_backend"] = _observed_backend(renderer)
         return CaptureResult(before=before, after=after, provenance=provenance)
-    except _SegmentationReadbackFailure as exc:
+    except _FrameFailure as exc:
         raise PartialCaptureFailure(
             str(exc),
             before=before,
-            encoded_rgb=exc.encoded_rgb,
-            stage="segmentation_readback_before_decoded_return",
+            partial_frame=exc.observations,
+            partial_frame_name="before" if before is None else "after",
+            stage=exc.stage,
         ) from exc
     except Exception as exc:
         if before is not None and after is not None:

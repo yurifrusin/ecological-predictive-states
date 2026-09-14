@@ -191,7 +191,8 @@ def main() -> int:
             cell = run_next_capture_cell(
                 output,
                 inputs=paths,
-                capture=_checked_capture(arguments),
+                # Configure/validate the host only after durable reservation.
+                capture=lambda cell: _checked_capture(arguments)(cell),
                 geom_objtype=5,
             )
             print(f"completed exactly one cell: {cell.name}")

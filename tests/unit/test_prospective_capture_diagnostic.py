@@ -52,6 +52,7 @@ def _result(cell: CaptureCell) -> CaptureResult:
             "binary_sha256": "d",
             "renderer_py_sha256": "e",
             "backend": cell.backend,
+            "actual_backend": cell.backend,
             "host": "test",
         },
     )
@@ -220,3 +221,80 @@ def test_gl_inspection_uses_renderbuffer_query_and_restores_bindings(
     )
     assert result["attachment_format"] == 88 and calls == [11, 12]
     assert bindings == {1: 71, 2: 72, 3: 73}
+
+
+def test_observed_backend_mismatch_fails_permanently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_originals(monkeypatch)
+    output = tmp_path / "out"
+    init_capture_ledger(output, inputs=_inputs())
+    expected = capture_module.EXPECTED_CELLS[0]
+    result = _result(expected)
+    bad = dict(result.provenance)
+    bad["actual_backend"] = "osmesa"
+    with pytest.raises(DiagnosticFailure, match="postcapture"):
+        run_next_capture_cell(
+            output,
+            inputs=_inputs(),
+            capture=lambda _: CaptureResult(result.before, result.after, bad),
+            geom_objtype=5,
+        )
+    assert json.loads((output / "ledger.json").read_text())["cells"][0]["state"] == "failed"
+    with pytest.raises(DiagnosticFailure, match="permanently"):
+        run_next_capture_cell(output, inputs=_inputs(), capture=_result, geom_objtype=5)
+
+
+def test_input_preflight_failure_is_reserved_failed_and_never_calls_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_originals(monkeypatch)
+    output = tmp_path / "out"
+    init_capture_ledger(output, inputs=_inputs())
+    monkeypatch.setattr(
+        capture_module,
+        "_verify_original_inputs",
+        lambda _: (_ for _ in ()).throw(DiagnosticFailure("bad fixed input")),
+    )
+    with pytest.raises(DiagnosticFailure, match="capture failed"):
+        run_next_capture_cell(
+            output,
+            inputs=_inputs(),
+            capture=lambda _: pytest.fail("callback must not run"),
+            geom_objtype=5,
+        )
+    assert json.loads((output / "ledger.json").read_text())["cells"][0]["state"] == "failed"
+
+
+def test_partial_frame_keeps_rgb_depth_encoded_and_pairs_on_map_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_originals(monkeypatch)
+    output = tmp_path / "out"
+    init_capture_ledger(output, inputs=_inputs())
+    partial = capture_module.PartialCapturedFrame(
+        rgb=np.array([[[1, 2, 3]]], np.uint8),
+        depth=np.array([[2.5]], np.float32),
+        encoded_rgb=np.array([[[4, 0, 0]]], np.uint8),
+        decoded_pairs=np.array([[[42, 5]]], np.int32),
+        segid_to_object_map=None,
+    )
+    failure = capture_module.PartialCaptureFailure(
+        "map failure",
+        partial_frame=partial,
+        partial_frame_name="after",
+        stage="segmentation_scene_map",
+    )
+    with pytest.raises(DiagnosticFailure, match="capture failed"):
+        run_next_capture_cell(
+            output,
+            inputs=_inputs(),
+            capture=lambda _: (_ for _ in ()).throw(failure),
+            geom_objtype=5,
+        )
+    cell = output / BASELINE_CELLS[0].name
+    assert np.array_equal(np.load(cell / "partial_after_rgb.npy"), partial.rgb)
+    assert np.array_equal(np.load(cell / "partial_after_depth.npy"), partial.depth)
+    assert np.array_equal(np.load(cell / "partial_after_encoded_rgb.npy"), partial.encoded_rgb)
+    assert np.array_equal(np.load(cell / "partial_after_decoded_pairs.npy"), partial.decoded_pairs)
+    assert not (cell / "partial_after_segid_map.json").exists()

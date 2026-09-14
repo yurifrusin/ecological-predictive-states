@@ -68,6 +68,17 @@ class CaptureResult:
     provenance: Mapping[str, object]
 
 
+@dataclass(frozen=True)
+class PartialCapturedFrame:
+    """Only observations actually obtained before a frame-stage failure."""
+
+    rgb: npt.NDArray[np.uint8] | None = None
+    depth: npt.NDArray[np.float32] | None = None
+    encoded_rgb: npt.NDArray[np.uint8] | None = None
+    decoded_pairs: npt.NDArray[np.int32] | None = None
+    segid_to_object_map: Mapping[int, tuple[int, int]] | None = None
+
+
 class PartialCaptureFailure(DiagnosticFailure):
     """A capture failure that carries observations made before the failure."""
 
@@ -78,12 +89,16 @@ class PartialCaptureFailure(DiagnosticFailure):
         *,
         before: CapturedFrame | None = None,
         encoded_rgb: npt.NDArray[np.uint8] | None = None,
+        partial_frame: PartialCapturedFrame | None = None,
+        partial_frame_name: str | None = None,
         stage: str | None = None,
     ) -> None:
         super().__init__(message)
         self.partial = partial
         self.before = before
         self.encoded_rgb = encoded_rgb
+        self.partial_frame = partial_frame
+        self.partial_frame_name = partial_frame_name
         self.stage = stage
 
 
@@ -170,6 +185,7 @@ def require_capture_provenance(provenance: Mapping[str, object], cell: CaptureCe
         "binary_sha256",
         "renderer_py_sha256",
         "backend",
+        "actual_backend",
         "host",
     }
     missing = sorted(key for key in required if provenance.get(key) in (None, ""))
@@ -178,7 +194,9 @@ def require_capture_provenance(provenance: Mapping[str, object], cell: CaptureCe
     if provenance["requested_offsamples"] != cell.requested_offsamples:
         raise DiagnosticFailure("recorded requested_offsamples differs from reserved cell")
     if provenance["backend"] != cell.backend:
-        raise DiagnosticFailure("actual backend differs from reserved cell")
+        raise DiagnosticFailure("caller backend label differs from reserved cell")
+    if provenance["actual_backend"] != cell.backend:
+        raise DiagnosticFailure("observed context backend differs from reserved cell")
 
 
 def _persist_frame(directory: Path, name: str, frame: CapturedFrame) -> None:
@@ -203,6 +221,27 @@ def _persist_frame(directory: Path, name: str, frame: CapturedFrame) -> None:
             for segid, pair in sorted(frame.segid_to_object_map.items())
         },
     )
+
+
+def _persist_partial_frame(directory: Path, name: str, frame: PartialCapturedFrame) -> None:
+    """Persist only material arrays/maps actually available; never invent placeholders."""
+    arrays = {
+        "rgb": frame.rgb,
+        "depth": frame.depth,
+        "encoded_rgb": frame.encoded_rgb,
+        "decoded_pairs": frame.decoded_pairs,
+    }
+    for suffix, value in arrays.items():
+        if value is not None:
+            np.save(directory / f"partial_{name}_{suffix}.npy", value, allow_pickle=False)
+    if frame.segid_to_object_map is not None:
+        _json_write(
+            directory / f"partial_{name}_segid_map.json",
+            {
+                str(segid): [int(pair[0]), int(pair[1])]
+                for segid, pair in sorted(frame.segid_to_object_map.items())
+            },
+        )
 
 
 def _persist_observations(directory: Path, result: CaptureResult) -> None:
@@ -355,7 +394,6 @@ def run_next_capture_cell(
 ) -> CaptureCell:
     """Reserve one cell; any failed or interrupted reservation stops the matrix."""
     ledger = _load_ledger(output_root)
-    originals = _verify_original_inputs(inputs)
     cell = _next_reserved_cell(ledger)
     completed = tuple(
         CaptureCell(str(item["backend"]), int(item["requested_offsamples"]))
@@ -374,6 +412,8 @@ def run_next_capture_cell(
     _set_cell_state(ledger, cell, "reserved")
     _json_write(_ledger_path(output_root), ledger)
     try:
+        # A failed fixed-evidence or host/backend preflight is itself the one attempt.
+        originals = _verify_original_inputs(inputs)
         result = capture(cell)
     except Exception as exc:
         partial = exc.partial if isinstance(exc, PartialCaptureFailure) else None
@@ -383,6 +423,8 @@ def run_next_capture_cell(
             _persist_frame(cell_dir, "partial_before", exc.before)
         if isinstance(exc, PartialCaptureFailure) and exc.encoded_rgb is not None:
             np.save(cell_dir / "partial_encoded_rgb.npy", exc.encoded_rgb, allow_pickle=False)
+        if isinstance(exc, PartialCaptureFailure) and exc.partial_frame is not None:
+            _persist_partial_frame(cell_dir, exc.partial_frame_name or "unknown", exc.partial_frame)
         _set_cell_state(
             ledger, cell, "failed", error_type=type(exc).__name__, error_message=str(exc)
         )
