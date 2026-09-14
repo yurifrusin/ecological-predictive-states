@@ -129,45 +129,65 @@ def _frame(
     camera_id: int,
     forward: float,
 ) -> CapturedFrame:
-    model.cam_pos[camera_id, 1] = forward
-    mujoco.mj_forward(model, data)
-    renderer.update_scene(data, camera=camera_id)
-    rgb = np.asarray(renderer.render(), dtype=np.uint8).copy()
-    renderer.enable_depth_rendering()
-    renderer.update_scene(data, camera=camera_id)
-    depth = np.asarray(renderer.render(), dtype=np.float32).copy()
-    renderer.disable_depth_rendering()
-    renderer.enable_segmentation_rendering()
-    renderer.update_scene(data, camera=camera_id)
-    encoded = np.zeros((renderer.height, renderer.width, 3), dtype=np.uint8)
+    rgb: np.ndarray | None = None
+    depth: np.ndarray | None = None
+    encoded: np.ndarray | None = None
     pairs: np.ndarray | None = None
     mapping: dict[int, tuple[int, int]] | None = None
-    stage = "segmentation_readback_before_decoded_return"
+    stage = "camera_position"
     try:
-        pairs = np.asarray(renderer.render(out=encoded), dtype=np.int32).copy()
+        model.cam_pos[camera_id, 1] = forward
+        stage = "mj_forward"
+        mujoco.mj_forward(model, data)
+        stage = "rgb_scene_update"
+        renderer.update_scene(data, camera=camera_id)
+        stage = "rgb_readback"
+        rgb = np.asarray(renderer.render(), dtype=np.uint8).copy()
+        stage = "depth_enable"
+        renderer.enable_depth_rendering()
+        stage = "depth_scene_update"
+        renderer.update_scene(data, camera=camera_id)
+        stage = "depth_readback"
+        depth = np.asarray(renderer.render(), dtype=np.float32).copy()
+        stage = "depth_disable"
+        renderer.disable_depth_rendering()
+        stage = "segmentation_enable"
+        renderer.enable_segmentation_rendering()
+        stage = "segmentation_scene_update"
+        renderer.update_scene(data, camera=camera_id)
+        stage = "segmentation_readback_before_decoded_return"
+        encoded_buffer = np.zeros((renderer.height, renderer.width, 3), dtype=np.uint8)
+        pairs = np.asarray(renderer.render(out=encoded_buffer), dtype=np.int32).copy()
+        encoded = encoded_buffer.copy()
         stage = "segmentation_scene_map"
         mapping = _scene_geom_map(renderer)
         stage = "segmentation_disable"
         renderer.disable_segmentation_rendering()
+        stage = "raw_geom_ids"
+        raw = np.where(pairs[..., 1] == int(mujoco.mjtObj.mjOBJ_GEOM), pairs[..., 0], -1).astype(
+            np.int32
+        )
     except Exception as exc:
         raise _FrameFailure(
             str(exc),
             PartialCapturedFrame(
                 rgb=rgb,
                 depth=depth,
-                encoded_rgb=encoded.copy(),
+                encoded_rgb=encoded,
                 decoded_pairs=pairs,
                 segid_to_object_map=mapping,
             ),
             stage,
         ) from exc
-    raw = np.where(pairs[..., 1] == int(mujoco.mjtObj.mjOBJ_GEOM), pairs[..., 0], -1).astype(
-        np.int32
-    )
+    assert rgb is not None
+    assert depth is not None
+    assert encoded is not None
+    assert pairs is not None
+    assert mapping is not None
     return CapturedFrame(
         rgb=rgb,
         depth=depth,
-        encoded_rgb=encoded.copy(),
+        encoded_rgb=encoded,
         decoded_pairs=pairs,
         raw_geom_ids=raw,
         segid_to_object_map=mapping,

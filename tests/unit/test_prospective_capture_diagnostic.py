@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import epsbench.diagnostics.capture as capture_module
+import epsbench.diagnostics.mujoco_runner as runner_module
 from epsbench.diagnostics.capture import (
     BASELINE_CELLS,
     CaptureCell,
@@ -298,3 +299,206 @@ def test_partial_frame_keeps_rgb_depth_encoded_and_pairs_on_map_failure(
     assert np.array_equal(np.load(cell / "partial_after_encoded_rgb.npy"), partial.encoded_rgb)
     assert np.array_equal(np.load(cell / "partial_after_decoded_pairs.npy"), partial.decoded_pairs)
     assert not (cell / "partial_after_segid_map.json").exists()
+
+
+class _FaultScene:
+    def __init__(self, renderer: _FaultRenderer) -> None:
+        self.renderer = renderer
+        self.ngeom = 1
+
+    @property
+    def geoms(self) -> list[object]:
+        self.renderer.raise_if_requested("segmentation_scene_map")
+        import types
+
+        return [types.SimpleNamespace(segid=3, objid=42, objtype=5)]
+
+
+class _FaultRenderer:
+    def __init__(self, fault_stage: str | None, fault_frame: int = 1) -> None:
+        self.fault_stage = fault_stage
+        self.fault_frame = fault_frame
+        self.current_frame = 1
+        self.mode = "rgb"
+        self.height = 1
+        self.width = 1
+        self.scene = _FaultScene(self)
+        self.calls: list[str] = []
+        self.closed = False
+        self._mjr_context = type("Context", (), {"offSamples": 4})()
+
+    def raise_if_requested(self, stage: str) -> None:
+        self.calls.append(stage)
+        if self.fault_stage == stage and self.current_frame == self.fault_frame:
+            raise RuntimeError(f"{stage} failed")
+
+    def update_scene(self, _data: object, *, camera: int) -> None:
+        del camera
+        self.raise_if_requested(f"{self.mode}_scene_update")
+
+    def render(self, *, out: np.ndarray | None = None) -> np.ndarray:
+        stage = (
+            "segmentation_readback_before_decoded_return"
+            if self.mode == "segmentation"
+            else f"{self.mode}_readback"
+        )
+        self.raise_if_requested(stage)
+        if self.mode == "rgb":
+            return np.array([[[1, 2, 3]]], dtype=np.uint8)
+        if self.mode == "depth":
+            return np.array([[2.5]], dtype=np.float32)
+        assert out is not None
+        out[...] = np.array([[[4, 0, 0]]], dtype=np.uint8)
+        return np.array([[[42, 5]]], dtype=np.int32)
+
+    def enable_depth_rendering(self) -> None:
+        self.raise_if_requested("depth_enable")
+        self.mode = "depth"
+
+    def disable_depth_rendering(self) -> None:
+        self.raise_if_requested("depth_disable")
+        self.mode = "rgb"
+
+    def enable_segmentation_rendering(self) -> None:
+        self.raise_if_requested("segmentation_enable")
+        self.mode = "segmentation"
+
+    def disable_segmentation_rendering(self) -> None:
+        self.raise_if_requested("segmentation_disable")
+        self.mode = "rgb"
+        self.current_frame += 1
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.parametrize(
+    ("stage", "has_rgb", "has_depth", "has_segmentation", "has_mapping"),
+    [
+        ("rgb_scene_update", False, False, False, False),
+        ("rgb_readback", False, False, False, False),
+        ("depth_enable", True, False, False, False),
+        ("depth_scene_update", True, False, False, False),
+        ("depth_readback", True, False, False, False),
+        ("depth_disable", True, True, False, False),
+        ("segmentation_enable", True, True, False, False),
+        ("segmentation_scene_update", True, True, False, False),
+        ("segmentation_readback_before_decoded_return", True, True, False, False),
+        ("segmentation_scene_map", True, True, True, False),
+        ("segmentation_disable", True, True, True, True),
+    ],
+)
+def test_frame_failure_retains_only_observations_acquired_before_stage(
+    stage: str,
+    has_rgb: bool,
+    has_depth: bool,
+    has_segmentation: bool,
+    has_mapping: bool,
+) -> None:
+    import types
+
+    renderer = _FaultRenderer(stage)
+    mujoco = types.SimpleNamespace(
+        mj_forward=lambda _model, _data: None,
+        mjtObj=types.SimpleNamespace(mjOBJ_GEOM=5),
+    )
+    model = types.SimpleNamespace(cam_pos=np.zeros((1, 3), dtype=np.float64))
+
+    with pytest.raises(runner_module._FrameFailure) as raised:
+        runner_module._frame(mujoco, model, object(), renderer, 0, 1.5)
+
+    failure = raised.value
+    partial = failure.observations
+    assert failure.stage == stage
+    assert (partial.rgb is not None) is has_rgb
+    assert (partial.depth is not None) is has_depth
+    assert (partial.encoded_rgb is not None) is has_segmentation
+    assert (partial.decoded_pairs is not None) is has_segmentation
+    assert (partial.segid_to_object_map is not None) is has_mapping
+    if has_rgb:
+        assert np.array_equal(partial.rgb, np.array([[[1, 2, 3]]], dtype=np.uint8))
+    if has_depth:
+        assert np.array_equal(partial.depth, np.array([[2.5]], dtype=np.float32))
+    if has_segmentation:
+        assert np.array_equal(partial.encoded_rgb, np.array([[[4, 0, 0]]], dtype=np.uint8))
+        assert np.array_equal(partial.decoded_pairs, np.array([[[42, 5]]], dtype=np.int32))
+    if has_mapping:
+        assert partial.segid_to_object_map == {3: (42, 5)}
+
+
+@pytest.mark.parametrize(("fault_frame", "frame_name"), [(1, "before"), (2, "after")])
+def test_capture_runner_propagates_actual_frame_failure(
+    fault_frame: int, frame_name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+    import types
+
+    renderer = _FaultRenderer("depth_disable", fault_frame=fault_frame)
+    model = types.SimpleNamespace(
+        cam_pos=np.zeros((1, 3), dtype=np.float64),
+        vis=types.SimpleNamespace(quality=types.SimpleNamespace(offsamples=0)),
+    )
+    data = types.SimpleNamespace(
+        cam_xpos=np.zeros((1, 3), dtype=np.float64),
+        cam_xmat=np.eye(3, dtype=np.float64).reshape(1, 9),
+    )
+    contract = types.SimpleNamespace(
+        raw_geom_ids=(42,),
+        raw_geom_world_positions=((0.0, 0.0, 0.0),),
+        raw_geom_compiled_sizes=((1.0, 1.0, 1.0),),
+        raw_geom_types=(5,),
+        raw_geom_world_rotations_row_major=((1.0, 0.0, 0.0),),
+        camera_field_of_view_degrees=55.0,
+        camera_world_position=(0.0, 0.0, 0.0),
+        camera_world_rotation_row_major=tuple(np.eye(3).reshape(-1)),
+    )
+    expected_contract = runner_module._contract_mapping(contract)
+    fake_mujoco = types.ModuleType("mujoco")
+    fake_mujoco.mjtObj = types.SimpleNamespace(mjOBJ_CAMERA=6, mjOBJ_GEOM=5)
+    fake_mujoco.MjModel = types.SimpleNamespace(from_xml_string=lambda _xml, _assets: model)
+    fake_mujoco.MjData = lambda _model: data
+    fake_mujoco.mj_name2id = lambda *_args: 0
+    fake_mujoco.mj_forward = lambda _model, _data: None
+    fake_mujoco.mj_saveModel = lambda _model, path, _buffer: Path(path).write_bytes(b"compiled")
+    fake_mujoco.Renderer = lambda _model, *, height, width: renderer
+    monkeypatch.setitem(sys.modules, "mujoco", fake_mujoco)
+
+    import epsbench.sim.compiled as compiled_module
+    import epsbench.sim.corridor as corridor_module
+
+    monkeypatch.setattr(compiled_module, "extract_compiled_scene_contract", lambda *_args: contract)
+    monkeypatch.setattr(corridor_module, "build_corridor_scene_xml", lambda *_args: "<xml/>")
+    config = types.SimpleNamespace(render=types.SimpleNamespace(height=1, width=1))
+    geometry = types.SimpleNamespace(
+        camera_before_forward_position=1.0,
+        camera_after_forward_position=2.0,
+    )
+    appearance = types.SimpleNamespace(asset_bytes={})
+    camera = {
+        "camera_world_position": (0.0, 0.0, 0.0),
+        "camera_world_rotation_row_major": tuple(np.eye(3).reshape(-1)),
+    }
+
+    with pytest.raises(capture_module.PartialCaptureFailure) as raised:
+        runner_module.capture_corridor_transition(
+            config,
+            geometry,
+            appearance,
+            expected_contract,
+            camera,
+            camera,
+            requested_offsamples=4,
+            backend="wgl",
+        )
+
+    failure = raised.value
+    assert failure.stage == "depth_disable"
+    assert failure.partial_frame_name == frame_name
+    assert (failure.before is not None) is (fault_frame == 2)
+    assert failure.partial_frame is not None
+    assert np.array_equal(failure.partial_frame.rgb, np.array([[[1, 2, 3]]], dtype=np.uint8))
+    assert np.array_equal(failure.partial_frame.depth, np.array([[2.5]], dtype=np.float32))
+    assert failure.partial_frame.encoded_rgb is None
+    assert failure.partial_frame.decoded_pairs is None
+    assert failure.partial_frame.segid_to_object_map is None
+    assert renderer.closed
