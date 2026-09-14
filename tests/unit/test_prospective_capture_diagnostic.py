@@ -315,9 +315,15 @@ class _FaultScene:
 
 
 class _FaultRenderer:
-    def __init__(self, fault_stage: str | None, fault_frame: int = 1) -> None:
+    def __init__(
+        self,
+        fault_stage: str | None,
+        fault_frame: int = 1,
+        segmentation_failure_bytes: tuple[int, int, int] | None = None,
+    ) -> None:
         self.fault_stage = fault_stage
         self.fault_frame = fault_frame
+        self.segmentation_failure_bytes = segmentation_failure_bytes
         self.current_frame = 1
         self.mode = "rgb"
         self.height = 1
@@ -342,6 +348,15 @@ class _FaultRenderer:
             if self.mode == "segmentation"
             else f"{self.mode}_readback"
         )
+        if (
+            self.segmentation_failure_bytes is not None
+            and stage == self.fault_stage
+            and self.current_frame == self.fault_frame
+        ):
+            assert out is not None
+            self.calls.append(stage)
+            out[...] = np.array([[self.segmentation_failure_bytes]], dtype=np.uint8)
+            raise RuntimeError(f"{stage} failed after writing encoded bytes")
         self.raise_if_requested(stage)
         if self.mode == "rgb":
             return np.array([[[1, 2, 3]]], dtype=np.uint8)
@@ -373,26 +388,27 @@ class _FaultRenderer:
 
 
 @pytest.mark.parametrize(
-    ("stage", "has_rgb", "has_depth", "has_segmentation", "has_mapping"),
+    ("stage", "has_rgb", "has_depth", "has_encoded", "has_pairs", "has_mapping"),
     [
-        ("rgb_scene_update", False, False, False, False),
-        ("rgb_readback", False, False, False, False),
-        ("depth_enable", True, False, False, False),
-        ("depth_scene_update", True, False, False, False),
-        ("depth_readback", True, False, False, False),
-        ("depth_disable", True, True, False, False),
-        ("segmentation_enable", True, True, False, False),
-        ("segmentation_scene_update", True, True, False, False),
-        ("segmentation_readback_before_decoded_return", True, True, False, False),
-        ("segmentation_scene_map", True, True, True, False),
-        ("segmentation_disable", True, True, True, True),
+        ("rgb_scene_update", False, False, False, False, False),
+        ("rgb_readback", False, False, False, False, False),
+        ("depth_enable", True, False, False, False, False),
+        ("depth_scene_update", True, False, False, False, False),
+        ("depth_readback", True, False, False, False, False),
+        ("depth_disable", True, True, False, False, False),
+        ("segmentation_enable", True, True, False, False, False),
+        ("segmentation_scene_update", True, True, False, False, False),
+        ("segmentation_readback_before_decoded_return", True, True, True, False, False),
+        ("segmentation_scene_map", True, True, True, True, False),
+        ("segmentation_disable", True, True, True, True, True),
     ],
 )
 def test_frame_failure_retains_only_observations_acquired_before_stage(
     stage: str,
     has_rgb: bool,
     has_depth: bool,
-    has_segmentation: bool,
+    has_encoded: bool,
+    has_pairs: bool,
     has_mapping: bool,
 ) -> None:
     import types
@@ -412,18 +428,41 @@ def test_frame_failure_retains_only_observations_acquired_before_stage(
     assert failure.stage == stage
     assert (partial.rgb is not None) is has_rgb
     assert (partial.depth is not None) is has_depth
-    assert (partial.encoded_rgb is not None) is has_segmentation
-    assert (partial.decoded_pairs is not None) is has_segmentation
+    assert (partial.encoded_rgb is not None) is has_encoded
+    assert (partial.decoded_pairs is not None) is has_pairs
     assert (partial.segid_to_object_map is not None) is has_mapping
     if has_rgb:
         assert np.array_equal(partial.rgb, np.array([[[1, 2, 3]]], dtype=np.uint8))
     if has_depth:
         assert np.array_equal(partial.depth, np.array([[2.5]], dtype=np.float32))
-    if has_segmentation:
-        assert np.array_equal(partial.encoded_rgb, np.array([[[4, 0, 0]]], dtype=np.uint8))
+    if has_encoded:
+        expected_encoded = [4, 0, 0] if has_pairs else [0, 0, 0]
+        assert np.array_equal(partial.encoded_rgb, np.array([[expected_encoded]], dtype=np.uint8))
+    if has_pairs:
         assert np.array_equal(partial.decoded_pairs, np.array([[[42, 5]]], dtype=np.int32))
     if has_mapping:
         assert partial.segid_to_object_map == {3: (42, 5)}
+
+
+def test_segmentation_readback_retains_buffer_written_before_decoder_failure() -> None:
+    import types
+
+    stage = "segmentation_readback_before_decoded_return"
+    renderer = _FaultRenderer(stage, segmentation_failure_bytes=(17, 18, 19))
+    mujoco = types.SimpleNamespace(
+        mj_forward=lambda _model, _data: None,
+        mjtObj=types.SimpleNamespace(mjOBJ_GEOM=5),
+    )
+    model = types.SimpleNamespace(cam_pos=np.zeros((1, 3), dtype=np.float64))
+
+    with pytest.raises(runner_module._FrameFailure) as raised:
+        runner_module._frame(mujoco, model, object(), renderer, 0, 1.5)
+
+    partial = raised.value.observations
+    assert raised.value.stage == stage
+    assert np.array_equal(partial.encoded_rgb, np.array([[[17, 18, 19]]], dtype=np.uint8))
+    assert partial.decoded_pairs is None
+    assert partial.segid_to_object_map is None
 
 
 @pytest.mark.parametrize(("fault_frame", "frame_name"), [(1, "before"), (2, "after")])

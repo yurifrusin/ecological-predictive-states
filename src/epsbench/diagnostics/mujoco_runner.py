@@ -157,6 +157,7 @@ def _frame(
         renderer.update_scene(data, camera=camera_id)
         stage = "segmentation_readback_before_decoded_return"
         encoded_buffer = np.zeros((renderer.height, renderer.width, 3), dtype=np.uint8)
+        encoded = encoded_buffer
         pairs = np.asarray(renderer.render(out=encoded_buffer), dtype=np.int32).copy()
         encoded = encoded_buffer.copy()
         stage = "segmentation_scene_map"
@@ -173,7 +174,7 @@ def _frame(
             PartialCapturedFrame(
                 rgb=rgb,
                 depth=depth,
-                encoded_rgb=encoded,
+                encoded_rgb=encoded.copy() if encoded is not None else None,
                 decoded_pairs=pairs,
                 segid_to_object_map=mapping,
             ),
