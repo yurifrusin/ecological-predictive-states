@@ -29,6 +29,7 @@ from epsbench.diagnostics.revision_capture import (
     load_anchor_array,
     publish_bytes,
     validate_ledger,
+    verify_handoff_records,
     verify_input_archive,
 )
 
@@ -354,7 +355,13 @@ def _cleanup(
     receipt: dict[str, Any], stacks: Sequence[RendererStack], original: BaseException | None
 ) -> BaseException | None:
     cleanup_error: BaseException | None = None
-    for stack in reversed(tuple(dict.fromkeys(stacks))):
+    unique: list[RendererStack] = []
+    seen: set[int] = set()
+    for stack in stacks:
+        if id(stack) not in seen:
+            unique.append(stack)
+            seen.add(id(stack))
+    for stack in reversed(unique):
         try:
             _current(receipt, stack, f"{stack.role}.cleanup", stack.close)
         except BaseException as exc:
@@ -495,9 +502,12 @@ def run_attempt(
         append_revision(output_root, "reserved", cell)
         try:
             archive = verify_input_archive(input_archive)
+            handoff = verify_handoff_records(output_root)
             plan = records[0].get("plan_binding", {})
             if plan.get("archive_sha256") != archive["archive_sha256"]:
                 raise RevisionCaptureFailure("ledger archive binding differs")
+            if not all(handoff.get(key) for key in ("windows_root", "wsl_root")):
+                raise RevisionCaptureFailure("handoff did not bind both observed roots")
             prepared, factory = prepare()
             config_hashes = plan.get("config_sha256")
             if not isinstance(config_hashes, Mapping):

@@ -276,6 +276,46 @@ class ArtifactWriter:
         }
 
 
+def publish_analysis_result(root: Path, value: object) -> dict[str, object]:
+    """Publish nested analysis arrays separately so JSON remains finite."""
+    writer = ArtifactWriter(root)
+    counter = 0
+
+    def materialize(item: Any) -> Any:
+        nonlocal counter
+        if isinstance(item, np.ndarray):
+            name = f"array-{counter:06d}.npy"
+            counter += 1
+            # Analytic no-hit maps intentionally contain NaN, unlike captured depth.
+            array = np.asarray(item)
+            if array.dtype.hasobject:
+                raise RevisionCaptureFailure("analysis object arrays are forbidden")
+            dtype = array.dtype.newbyteorder("<")
+            canonical = np.ascontiguousarray(array.astype(dtype, copy=False))
+            stream = io.BytesIO()
+            np.save(stream, canonical, allow_pickle=False)
+            record = publish_bytes(root / name, stream.getvalue())
+            return {
+                **record,
+                "dtype": canonical.dtype.str,
+                "shape": list(canonical.shape),
+                "byte_order": "little",
+                "order": "C",
+                "complete": True,
+                "validated": True,
+            }
+        if isinstance(item, Mapping):
+            return {str(key): materialize(child) for key, child in item.items()}
+        if isinstance(item, (list, tuple)):
+            return [materialize(child) for child in item]
+        if isinstance(item, np.generic):
+            return item.item()
+        return item
+
+    report = materialize(value)
+    return writer.json("capture-revision-analysis.json", report, validated=True)
+
+
 class AttemptLock:
     """O_EXCL lock. Failure intentionally retains the file forever."""
 
@@ -303,6 +343,51 @@ class AttemptLock:
         self.fd = None
         self.path.unlink()
         _directory_fsync(self.root)
+
+
+def verify_handoff_records(root: Path) -> dict[str, object]:
+    """Require the completed two-way Windows/WSL token exchange."""
+    directory = root / "handoff"
+    expected = {
+        "windows.json",
+        "wsl.json",
+        "verified-windows.json",
+        "verified-wsl.json",
+    }
+    if not directory.is_dir() or {item.name for item in directory.iterdir()} != expected:
+        raise RevisionCaptureFailure("complete two-way handoff records are absent")
+    records: dict[str, dict[str, Any]] = {}
+    for runtime in ("windows", "wsl"):
+        source = json.loads((directory / f"{runtime}.json").read_text(encoding="utf-8"))
+        verified = json.loads((directory / f"verified-{runtime}.json").read_text(encoding="utf-8"))
+        if (
+            source.get("schema") != "revision_capture_handoff/v1"
+            or source.get("runtime") != runtime
+            or verified.get("schema") != "revision_capture_handoff_verification/v1"
+            or verified.get("runtime") != runtime
+            or verified.get("own_token") != source.get("token")
+            or not verified.get("expected_peer_root")
+        ):
+            raise RevisionCaptureFailure("invalid handoff record")
+        records[runtime] = source
+        records[f"verified-{runtime}"] = verified
+    if records["windows"]["token"] == records["wsl"]["token"]:
+        raise RevisionCaptureFailure("handoff tokens are not independent")
+    if (
+        records["verified-windows"].get("peer_token") != records["wsl"]["token"]
+        or records["verified-wsl"].get("peer_token") != records["windows"]["token"]
+        or records["verified-windows"].get("expected_peer_root")
+        != records["wsl"].get("observed_root")
+        or records["verified-wsl"].get("expected_peer_root")
+        != records["windows"].get("observed_root")
+    ):
+        raise RevisionCaptureFailure("handoff peer token/root mismatch")
+    return {
+        "windows_root": records["windows"].get("observed_root"),
+        "wsl_root": records["wsl"].get("observed_root"),
+        "windows_token_sha256": sha256_bytes(str(records["windows"]["token"]).encode("utf-8")),
+        "wsl_token_sha256": sha256_bytes(str(records["wsl"]["token"]).encode("utf-8")),
+    }
 
 
 def _revision_path(root: Path, index: int) -> Path:

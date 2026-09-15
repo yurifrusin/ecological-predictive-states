@@ -13,16 +13,14 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 from epsbench.diagnostics.revision_capture import (
     ARCHIVE_SHA256,
-    ArtifactWriter,
     RevisionCaptureFailure,
     canonical_json_bytes,
     fixed_cells,
     initialise_ledger,
     load_cell_result,
+    publish_analysis_result,
     publish_bytes,
     sha256_file,
     validate_ledger,
@@ -105,11 +103,14 @@ def _handoff_verify(args: argparse.Namespace) -> None:
     peer = records["wsl" if args.runtime == "windows" else "windows"]
     if own["token"] != args.own_token or peer["token"] != args.peer_token:
         raise RevisionCaptureFailure("handoff token verification failed")
+    if str(peer.get("observed_root")) != args.expected_peer_root:
+        raise RevisionCaptureFailure("peer root translation does not match expected path")
     record = {
         "schema": "revision_capture_handoff_verification/v1",
         "runtime": args.runtime,
         "own_token": args.own_token,
         "peer_token": args.peer_token,
+        "expected_peer_root": args.expected_peer_root,
         "observed_root": str(args.output_root.resolve()),
     }
     target = args.output_root / "handoff" / f"verified-{args.runtime}.json"
@@ -180,27 +181,10 @@ def _analyse(args: argparse.Namespace) -> None:
         if item["event"] == "complete":
             directory = args.output_root / "cells" / item["cell_name"]
             receipts.append(load_cell_result(directory))
+    if len(receipts) != len(fixed_cells()):
+        raise RevisionCaptureFailure("analysis publication requires all 48 complete cells")
     result = analyze_capture_results(receipts)
-    analysis_root = args.output_root / "analysis"
-    writer = ArtifactWriter(analysis_root)
-    counter = 0
-
-    def materialize(value: Any) -> Any:
-        nonlocal counter
-        if isinstance(value, np.ndarray):
-            name = f"array-{counter:06d}.npy"
-            counter += 1
-            return writer.array(name, value, validated=True)
-        if isinstance(value, dict):
-            return {str(key): materialize(item) for key, item in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [materialize(item) for item in value]
-        if isinstance(value, np.generic):
-            return value.item()
-        return value
-
-    report = materialize(result)
-    reference = writer.json("capture-revision-analysis.json", report, validated=True)
+    reference = publish_analysis_result(args.output_root / "analysis", result)
     print(json.dumps({"status": "complete", "analysis": reference}, sort_keys=True))
 
 
@@ -223,6 +207,7 @@ def _parser() -> argparse.ArgumentParser:
         else:
             command.add_argument("--own-token", required=True)
             command.add_argument("--peer-token", required=True)
+            command.add_argument("--expected-peer-root", required=True)
             command.set_defaults(func=_handoff_verify)
     nxt = sub.add_parser("next")
     nxt.add_argument("--output-root", type=Path, required=True)

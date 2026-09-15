@@ -12,10 +12,14 @@ from epsbench.diagnostics.revision_capture import (
     RevisionCaptureFailure,
     StudyCell,
     append_revision,
+    canonical_json_bytes,
     fixed_cells,
     initialise_ledger,
     load_cell_result,
+    publish_analysis_result,
+    publish_bytes,
     validate_ledger,
+    verify_handoff_records,
 )
 from epsbench.diagnostics.revision_runner import (
     PreparedEpisode,
@@ -29,7 +33,13 @@ class FakeStack:
     width = 3
     height = 2
 
-    def __init__(self, samples: int, role: str, backend: str = "wgl", fail: str | None = None):
+    def __init__(
+        self,
+        samples: int,
+        role: str,
+        backend: str = "wgl",
+        fail: str | set[str] | None = None,
+    ):
         self.samples = samples
         self.role = role
         self.backend = backend
@@ -39,7 +49,7 @@ class FakeStack:
 
     def hit(self, stage: str) -> None:
         self.calls.append(stage)
-        if self.fail == stage:
+        if self.fail == stage or (isinstance(self.fail, set) and stage in self.fail):
             raise RuntimeError(stage)
 
     def make_current(self) -> None:
@@ -327,6 +337,10 @@ def test_preparation_failure_is_durably_failed_and_locked(
         "epsbench.diagnostics.revision_runner.verify_input_archive",
         lambda path: {"archive_sha256": "fixed"},
     )
+    monkeypatch.setattr(
+        "epsbench.diagnostics.revision_runner.verify_handoff_records",
+        lambda root: {"windows_root": "C:\\study", "wsl_root": "/mnt/c/study"},
+    )
 
     def fail_prepare() -> tuple[PreparedEpisode, Any]:
         raise RuntimeError("CPU preparation failed")
@@ -376,3 +390,94 @@ def test_wrong_live_fbo_samples_fail_before_capture(tmp_path: Path) -> None:
         )
     assert "rgb:before" not in made[0].calls
     assert "close" in made[0].calls
+
+
+def test_handoff_requires_cross_checked_tokens_and_roots(tmp_path: Path) -> None:
+    directory = tmp_path / "handoff"
+    sources = {
+        "windows": {"token": "win", "observed_root": r"C:\study"},
+        "wsl": {"token": "linux", "observed_root": "/mnt/c/study"},
+    }
+    for runtime, values in sources.items():
+        publish_bytes(
+            directory / f"{runtime}.json",
+            canonical_json_bytes(
+                {
+                    "schema": "revision_capture_handoff/v1",
+                    "runtime": runtime,
+                    **values,
+                }
+            ),
+        )
+        peer = "wsl" if runtime == "windows" else "windows"
+        publish_bytes(
+            directory / f"verified-{runtime}.json",
+            canonical_json_bytes(
+                {
+                    "schema": "revision_capture_handoff_verification/v1",
+                    "runtime": runtime,
+                    "own_token": values["token"],
+                    "peer_token": sources[peer]["token"],
+                    "expected_peer_root": sources[peer]["observed_root"],
+                }
+            ),
+        )
+    result = verify_handoff_records(tmp_path)
+    assert result["windows_root"] == r"C:\study"
+    (directory / "verified-wsl.json").write_text("{}")
+    with pytest.raises(RevisionCaptureFailure, match="invalid handoff"):
+        verify_handoff_records(tmp_path)
+
+
+def test_foreign_ledger_entry_and_gap_fail_closed(tmp_path: Path) -> None:
+    root = tmp_path / "foreign"
+    initialise_ledger(root, {})
+    (root / "ledger" / "note.txt").write_text("foreign", encoding="utf-8")
+    with pytest.raises(RevisionCaptureFailure, match="foreign ledger"):
+        validate_ledger(root)
+    root2 = tmp_path / "gap"
+    initialise_ledger(root2, {})
+    publish_bytes(
+        root2 / "ledger" / "revision-0002.json",
+        canonical_json_bytes({"schema": "wrong"}),
+    )
+    with pytest.raises(RevisionCaptureFailure, match="gap"):
+        validate_ledger(root2)
+
+
+def test_cleanup_exception_never_replaces_original_failure(tmp_path: Path) -> None:
+    def factory(samples: int, role: str) -> FakeStack:
+        return FakeStack(samples, role, fail={"rgb:before", "close"})
+
+    with pytest.raises(StageFailure) as caught:
+        capture_cell(
+            StudyCell(0, "corridor", 0, "wgl", "joint4"),
+            prepared(),
+            factory,
+            tmp_path,
+            geom_objtype=5,
+        )
+    assert caught.value.stage == "before.rgb_readback"
+    receipt = json.loads((tmp_path / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["failure"]["stage"] == "before.rgb_readback"
+    cleanup = [event for event in receipt["stage_events"] if event["stage"] == "primary.cleanup"]
+    assert cleanup[-1]["state"] == "failed"
+
+
+def test_analysis_publication_separates_nan_arrays_from_finite_json(
+    tmp_path: Path,
+) -> None:
+    reference = publish_analysis_result(
+        tmp_path,
+        {
+            "summary": {"count": 0, "mean": None},
+            "analytic_no_hit_depth": np.array([[np.nan]], dtype=np.float64),
+        },
+    )
+    report = json.loads((tmp_path / reference["path"]).read_text(encoding="utf-8"))
+    array_ref = report["analytic_no_hit_depth"]
+    assert "NaN" not in (tmp_path / reference["path"]).read_text(encoding="utf-8")
+    value = np.load(tmp_path / array_ref["path"], allow_pickle=False)
+    assert np.isnan(value[0, 0])
+    with pytest.raises(FileExistsError):
+        publish_analysis_result(tmp_path, {"again": np.array([1])})
