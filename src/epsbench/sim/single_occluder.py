@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import mujoco
 import numpy as np
@@ -17,6 +18,7 @@ from epsbench.annotations import (
 )
 from epsbench.appearance import AppearanceRenderPlan, configured_appearance_render_plan
 from epsbench.config import SingleOccluderConfig
+from epsbench.sim.canonical_paired import CanonicalPairedRenderer, CanonicalPairedResult
 from epsbench.sim.compiled import CompiledSceneContract, extract_compiled_scene_contract
 
 RGBArray = npt.NDArray[np.uint8]
@@ -55,6 +57,7 @@ class RenderedFrame:
     counterfactual_raw_geom_segmentation: RawSegmentationArray
     camera_world_position: tuple[float, float, float]
     camera_world_rotation_row_major: tuple[float, ...]
+    canonical_pair: CanonicalPairedResult | None = None
 
 
 @dataclass(frozen=True)
@@ -262,18 +265,25 @@ def _render_frame(
     camera_id: int,
     lateral_position: float,
     counterfactual_option: mujoco.MjvOption,
+    capture_mode: Literal["legacy", "canonical_paired"],
 ) -> RenderedFrame:
     model.cam_pos[camera_id, 0] = lateral_position
     mujoco.mj_forward(model, data)
     renderer.update_scene(data, camera=camera_id)
     rgb = np.asarray(renderer.render(), dtype=np.uint8).copy()
 
-    renderer.enable_depth_rendering()
-    renderer.update_scene(data, camera=camera_id)
-    depth = np.asarray(renderer.render(), dtype=np.float32).copy()
-    renderer.disable_depth_rendering()
-
-    raw_geom_segmentation = _render_raw_segmentation(renderer, data, camera_id)
+    canonical_pair: CanonicalPairedResult | None = None
+    if capture_mode == "canonical_paired":
+        renderer.update_scene(data, camera=camera_id)
+        canonical_pair = CanonicalPairedRenderer(renderer).capture()
+        depth = canonical_pair.depth
+        raw_geom_segmentation = canonical_pair.raw_geom_segmentation
+    else:
+        renderer.enable_depth_rendering()
+        renderer.update_scene(data, camera=camera_id)
+        depth = np.asarray(renderer.render(), dtype=np.float32).copy()
+        renderer.disable_depth_rendering()
+        raw_geom_segmentation = _render_raw_segmentation(renderer, data, camera_id)
     counterfactual_raw_geom_segmentation = _render_raw_segmentation(
         renderer,
         data,
@@ -293,12 +303,15 @@ def _render_frame(
         camera_world_rotation_row_major=tuple(
             float(value) for value in data.cam_xmat[camera_id].reshape(-1)
         ),
+        canonical_pair=canonical_pair,
     )
 
 
 def render_transition(
     config: SingleOccluderConfig,
     appearance: AppearanceRenderPlan,
+    *,
+    capture_mode: Literal["legacy", "canonical_paired"] = "legacy",
 ) -> RenderedTransition:
     """Render one before/action/after camera transition with no dynamics or GPU requirement."""
 
@@ -313,6 +326,8 @@ def render_transition(
         SINGLE_OCCLUDER_SURFACE_NAMES,
         "monocular_camera",
     )
+    if capture_mode == "canonical_paired":
+        model.vis.quality.offsamples = 0
     renderer = mujoco.Renderer(
         model,
         height=config.render.height,
@@ -329,6 +344,7 @@ def render_transition(
             camera_id,
             config.camera.before_lateral,
             counterfactual_option,
+            capture_mode,
         )
         after = _render_frame(
             model,
@@ -337,6 +353,7 @@ def render_transition(
             camera_id,
             config.camera.after_lateral,
             counterfactual_option,
+            capture_mode,
         )
     finally:
         renderer.close()

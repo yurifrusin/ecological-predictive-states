@@ -2,7 +2,7 @@
 
 from collections import Counter
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
 import typer
 
@@ -64,11 +64,22 @@ def generate(
     config: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
     output: Annotated[Path, typer.Option(file_okay=False)],
     episodes: Annotated[int, typer.Option(min=1)] = 1,
+    capture_mode: Annotated[
+        str,
+        typer.Option(help="legacy or canonical_paired (qualified OSMesa scope only)"),
+    ] = "legacy",
 ) -> None:
     """Generate a deterministic dataset for the configured scene family."""
 
     try:
-        manifest = generate_dataset(load_config(config), episodes, output)
+        if capture_mode not in {"legacy", "canonical_paired"}:
+            raise ValueError("capture mode must be legacy or canonical_paired")
+        manifest = generate_dataset(
+            load_config(config),
+            episodes,
+            output,
+            capture_mode=cast(Literal["legacy", "canonical_paired"], capture_mode),
+        )
     except Exception as error:
         typer.echo(f"Generation failed: {error}", err=True)
         raise typer.Exit(code=1) from error

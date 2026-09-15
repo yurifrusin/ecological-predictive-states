@@ -36,6 +36,8 @@ from epsbench.schema import (
     AvailableEcologicalVisibilityEvents,
     AvailableOrientedBoundaryOwnership,
     CameraInstrumentation,
+    CanonicalPairedFrameRecord,
+    CanonicalPairedOutputProvenance,
     ComponentTopologyAnnotation,
     CorridorInstrumentation,
     CorridorSampledGeometry,
@@ -104,6 +106,14 @@ class LoadedComponentTopology:
     annotation: ComponentTopologyAnnotation
     before_component_labels: npt.NDArray[np.int32]
     after_component_labels: npt.NDArray[np.int32]
+
+
+@dataclass(frozen=True)
+class LoadedCanonicalPairedOutput:
+    provenance: CanonicalPairedOutputProvenance
+    native_id_rgb: npt.NDArray[np.uint8]
+    native_depth_pre_metric: npt.NDArray[np.float32]
+    producer_state: dict[str, Any]
 
 
 class DatasetLoader:
@@ -341,6 +351,51 @@ class DatasetLoader:
         transition = self._transition(episode_index)
         frame = self._frame(transition, frame_index)
         return np.asarray(self._load_npy(frame.depth), dtype=np.float32)
+
+    def read_canonical_paired_output(
+        self, episode_index: int, frame_index: int
+    ) -> LoadedCanonicalPairedOutput:
+        """Read privileged paired evidence only after all authorities are checked."""
+
+        self._require(
+            Modality.DEPTH,
+            Modality.MUJOCO_GEOM_IDS,
+            Modality.PRIVILEGED_GENERATION_RECORDS,
+        )
+        transition = self._transition(episode_index)
+        frame = self._frame(transition, frame_index)
+        if not isinstance(frame, CanonicalPairedFrameRecord):
+            raise ValueError("canonical paired provenance is absent for this dataset")
+        provenance = self._load_json(
+            frame.paired_output_provenance,
+            CanonicalPairedOutputProvenance.model_validate_json,
+        )
+        from epsbench.data.identity import compute_canonical_paired_endpoint_hash
+        from epsbench.sim.canonical_paired import validate_saved_state
+
+        state = self._load_json(provenance.producer_state, json.loads)
+        if not isinstance(state, dict):
+            raise ValueError("paired producer state must be an object")
+        validate_saved_state(state, frame.width, frame.height)
+        if (
+            provenance.episode_id != transition.episode_id
+            or provenance.frame_index != frame.frame_index
+            or provenance.canonical_segmentation_logical_sha256 != frame.segmentation.logical_sha256
+            or provenance.canonical_depth_logical_sha256 != frame.depth.logical_sha256
+            or provenance.canonical_segmentation_file_sha256 != frame.segmentation.file_sha256
+            or provenance.canonical_depth_file_sha256 != frame.depth.file_sha256
+            or compute_canonical_paired_endpoint_hash(provenance)
+            != provenance.endpoint_logical_sha256
+        ):
+            raise ValueError("paired endpoint provenance binding differs")
+        return LoadedCanonicalPairedOutput(
+            provenance=provenance,
+            native_id_rgb=np.asarray(self._load_npy(provenance.native_id_rgb), dtype=np.uint8),
+            native_depth_pre_metric=np.asarray(
+                self._load_npy(provenance.native_depth_pre_metric), dtype=np.float32
+            ),
+            producer_state=state,
+        )
 
     def read_segmentation(self, episode_index: int, frame_index: int) -> npt.NDArray[np.int32]:
         self._require(Modality.SURFACE_REGIONS)
