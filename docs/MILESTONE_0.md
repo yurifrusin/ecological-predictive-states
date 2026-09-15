@@ -117,3 +117,7 @@ Exit criteria:
 - real-time deployment;
 - claims about biological neural implementation;
 - purchasing robotic hardware.
+
+### Segmentation/depth alignment interpretation
+
+For Milestone 0, “segmentation and depth align pixel-for-pixel” means correspondence evidence that the segmentation identifier and depth value at an image index originate from the same depth-tested draw and use the same orientation in a verified single-sample framebuffer with unchanged scene, camera, viewport, and attachment state. Sequential color and depth readback from that draw is acceptable; hardware-atomic readback is not required. This contract does not itself establish ideal geometric boundary ownership or metric depth accuracy. Those remain separate qualifications.
