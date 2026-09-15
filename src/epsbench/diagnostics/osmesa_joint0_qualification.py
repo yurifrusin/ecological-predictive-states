@@ -140,6 +140,33 @@ def require_osmesa_linux() -> None:
         raise QualificationFailure("qualification requires explicit OSMesa environment")
 
 
+def validate_source_linkage(source_root: Path) -> Path:
+    root = source_root.resolve()
+    if root != Path.cwd().resolve():
+        raise QualificationFailure("source root must equal the current working directory")
+    import epsbench
+
+    package_path_value = epsbench.__file__
+    if not isinstance(package_path_value, str):
+        raise QualificationFailure("imported epsbench package path is unavailable")
+    package_path = Path(package_path_value).resolve()
+    source_package = (root / "src" / "epsbench").resolve()
+    if not package_path.is_relative_to(source_package):
+        raise QualificationFailure("imported epsbench package is outside source root")
+    return root
+
+
+def canonical_source_binding(source_root: Path) -> dict[str, object]:
+    from epsbench.data.identity import compute_source_provenance_hash
+    from epsbench.data.provenance import collect_source_provenance
+
+    provenance = collect_source_provenance(source_root)
+    return {
+        "provenance": provenance.model_dump(mode="json"),
+        "provenance_sha256": compute_source_provenance_hash(provenance),
+    }
+
+
 def git_binding(
     root: Path,
     lock: Path,
@@ -147,6 +174,8 @@ def git_binding(
     registry: Path,
     seeds: Path | None = None,
 ) -> dict[str, object]:
+    root = validate_source_linkage(root)
+
     def git(*args: str) -> str:
         return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
 
@@ -161,6 +190,7 @@ def git_binding(
         "seed_registry_sha256": digest_file(
             seeds or root / "configs/evaluation_seed_candidates_v0.yaml"
         ),
+        "canonical_source": canonical_source_binding(root),
     }
 
 
@@ -699,6 +729,28 @@ def validate_artifact_binding(root: Path, recorded: object) -> None:
         raise QualificationFailure("dataset artifact membership/hash differs from receipt")
 
 
+def validate_child_source_provenance(
+    manifest: object,
+    ledger_binding: Mapping[str, object],
+) -> None:
+    source = ledger_binding.get("canonical_source")
+    if not isinstance(source, Mapping):
+        raise QualificationFailure("ledger canonical source binding is absent")
+    candidate = cast(Any, manifest)
+    if hasattr(candidate, "source_provenance"):
+        provenance = candidate.source_provenance.model_dump(mode="json")
+        provenance_sha256 = candidate.source_provenance_sha256
+    elif isinstance(manifest, Mapping):
+        provenance = manifest.get("source_provenance")
+        provenance_sha256 = manifest.get("source_provenance_sha256")
+    else:
+        raise QualificationFailure("child manifest source provenance is unavailable")
+    if provenance != source.get("provenance") or provenance_sha256 != source.get(
+        "provenance_sha256"
+    ):
+        raise QualificationFailure("child manifest source provenance differs from ledger binding")
+
+
 def validate_recorded_attempt(
     output_root: Path,
     attempt: Attempt,
@@ -717,6 +769,17 @@ def validate_recorded_attempt(
     }:
         raise QualificationFailure("attempt receipt identity/status differs")
     validate_artifact_binding(dataset, receipt.get("artifacts"))
+    if expected_binding is not None:
+        from epsbench.data import DatasetLoader
+        from epsbench.schema import ModalityPermissionSet
+
+        child_manifest = DatasetLoader(
+            dataset, ModalityPermissionSet.all_modalities()
+        ).read_dataset_manifest()
+        child_payload = child_manifest.model_dump(mode="json")
+        if receipt.get("dataset_manifest") != child_payload:
+            raise QualificationFailure("receipt and child dataset manifests differ")
+        validate_child_source_provenance(child_manifest, expected_binding)
     contexts = receipt.get("contexts")
     events = receipt.get("native_events")
     if not isinstance(contexts, list) or len(contexts) != 4 or not isinstance(events, list):
@@ -1229,6 +1292,7 @@ def run_attempt(
     observer: Observer = observe_zero_sample_osmesa,
     assess: Callable[[Path, object], Mapping[str, object]] | None = None,
 ) -> Path:
+    source_root = validate_source_linkage(source_root)
     lock = AttemptLock(output_root)
     lock.path = output_root / "osmesa-joint0-attempt.lock"
     lock.acquire()
@@ -1261,6 +1325,7 @@ def run_attempt(
                 manifest = generate(dataset, active)
             assert adapter is not None
             adapter.validate_complete()
+            validate_child_source_provenance(manifest, ledger_binding)
             receipt["dataset_manifest"] = (
                 manifest.model_dump(mode="json") if hasattr(manifest, "model_dump") else manifest
             )

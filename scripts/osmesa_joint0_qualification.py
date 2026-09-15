@@ -19,6 +19,7 @@ from epsbench.diagnostics.osmesa_joint0_qualification import (
     validate_bindings,
     validate_ledger,
     validate_recorded_attempt,
+    validate_source_linkage,
 )
 
 
@@ -194,6 +195,7 @@ def main() -> None:
 
         print(json.dumps(plan(), sort_keys=True))
         return
+    source = validate_source_linkage(source)
     output = args.output_root.resolve()
     if args.command == "init":
         path = initialise_ledger(output, _binding(source))

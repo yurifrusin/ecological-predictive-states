@@ -258,7 +258,7 @@ def test_run_attempt_rejects_binding_mismatch_before_generator_or_observer(
         q.run_attempt(
             root,
             q.fixed_attempts()[0],
-            tmp_path,
+            Path.cwd(),
             {"head": "different"},
             generator,
             object(),
@@ -299,7 +299,7 @@ def test_run_attempt_rejects_tampered_prior_receipt_before_generator_or_observer
         q.run_attempt(
             root,
             q.fixed_attempts()[1],
-            tmp_path,
+            Path.cwd(),
             binding,
             generator,
             object(),
@@ -474,3 +474,75 @@ def test_first_bind_rejects_preexisting_public_wrapper() -> None:
     )
     with pytest.raises(q.QualificationFailure, match="installed classic SDK class"):
         q.verify_pristine_entrypoints(public, classic, extension)
+
+
+def test_run_attempt_rejects_source_root_cwd_before_generator_or_context(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    def generator(path: Path, adapter: q.RendererAdapter) -> object:
+        calls.append("generator")
+        return object()
+
+    def observer(*args: object) -> dict[str, object]:
+        calls.append("observer")
+        return {}
+
+    output = tmp_path / "run"
+    with pytest.raises(q.QualificationFailure, match="current working directory"):
+        q.run_attempt(
+            output,
+            q.fixed_attempts()[0],
+            tmp_path,
+            {},
+            generator,
+            object(),
+            observer=observer,
+        )
+    assert calls == []
+    assert not output.exists()
+
+
+def test_run_attempt_rejects_foreign_import_before_generator_or_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import epsbench
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        epsbench, "__file__", str(tmp_path / "foreign" / "epsbench" / "__init__.py")
+    )
+
+    def generator(path: Path, adapter: q.RendererAdapter) -> object:
+        calls.append("generator")
+        return object()
+
+    output = tmp_path / "run"
+    with pytest.raises(q.QualificationFailure, match="outside source root"):
+        q.run_attempt(
+            output,
+            q.fixed_attempts()[0],
+            Path.cwd(),
+            {},
+            generator,
+            object(),
+            observer=lambda *args: calls.append("observer") or {},
+        )
+    assert calls == []
+    assert not output.exists()
+
+
+def test_child_manifest_source_provenance_must_match_ledger() -> None:
+    binding = {
+        "canonical_source": {
+            "provenance": {"git_commit": "expected"},
+            "provenance_sha256": "a" * 64,
+        }
+    }
+    manifest = SimpleNamespace(
+        source_provenance=SimpleNamespace(model_dump=lambda **kwargs: {"git_commit": "different"}),
+        source_provenance_sha256="b" * 64,
+    )
+    with pytest.raises(q.QualificationFailure, match="differs from ledger binding"):
+        q.validate_child_source_provenance(manifest, binding)
