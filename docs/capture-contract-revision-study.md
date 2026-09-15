@@ -179,9 +179,13 @@ This operational ledger is not review-state or approval automation.
 The lock primitive is `os.open` with `O_CREAT | O_EXCL | O_WRONLY` on one
 per-attempt lock file in the shared root, held until all result/receipt/state
 publications and file flushes finish. An interrupted lock is never removed
-automatically. The operator verifies the Windows path and its `wslpath -w`
-translation agree and performs a two-way CPU-only token handoff on that same
-root before the first capture; both runtimes must observe the other's token.
+automatically. Each handoff command derives its runtime and host from the
+process, requires host `DESKTOP-TPUQMNG`, and binds the resolved output root.
+Both native Windows and WSL independently run `wslpath` in both directions and
+require the exact canonical `C:\...` to `/mnt/c/...` round trip before
+preparation or context construction. The two CPU-only tokens must be nonempty,
+distinct and observed by the peer runtime; caller assertions cannot substitute
+for these checks.
 Reject symlinks, Windows reparse points and aliasing in every controlled path
 component. WSL `/mnt/c` and the corresponding native C-drive path are the only
 allowed host mapping for this study; no remote network filesystem.
@@ -194,8 +198,11 @@ hash-chained ledger revisions, rather than overwriting a final ledger. Validate
 the full revision chain under the lock; any gap, unexpected temporary file,
 invalid predecessor, reserved/failed tail or foreign entry blocks execution.
 Release the lock only after all corresponding files are flushed and the
-successful terminal revision exists: close its descriptor, verify ownership,
-then unlink only this attempt's lock file and sync the parent where supported.
+successful terminal revision exists: verify the open descriptor still has the
+acquired identity, close it, then verify the live non-linked pathname has that
+same single-link identity before unlinking it and syncing the parent where
+supported. This is a fail-closed ownership check, not a claim of an atomic
+compare-and-unlink against an adversary.
 On failure or interruption retain the lock path and never auto-clear it.
 Directory fsync is required where supported; any
 platform limitation is recorded, not presented as a power-loss durability
@@ -221,6 +228,27 @@ for every renderer. Inspect under its own current context, preserving GL
 bindings. Retain Python/MuJoCo/NumPy/PyOpenGL/glfw versions, package/binary/
 renderer hashes, Git head/tree, dependency lock, actual host and invocation
 records. Missing or inconsistent required provenance fails closed.
+
+The attachment validator distinguishes retained observations from SDK
+semantics. Historical WGL and OSMesa evidence supplies the observed color
+triple (`GL_RENDERBUFFER`, `GL_RGBA8`, `GL_UNSIGNED_NORMALIZED`). MuJoCo 3.12.0
+[`makeOff`](https://github.com/google-deepmind/mujoco/blob/3.12.0/src/render/classic/render_context.c#L1178-L1267)
+is the primary source for the permitted depth alternatives:
+`GL_DEPTH32F_STENCIL8` when `ARB_depth_buffer_float` is available, otherwise
+`GL_DEPTH24_STENCIL8`; main and resolve use the same selected depth format.
+The study queries both live depth renderbuffers under the renderer's already
+current context and restores read-framebuffer, draw-framebuffer and
+renderbuffer bindings. It creates no additional context and performs no
+additional render.
+
+Every returned provenance mapping is placed in the receipt immediately with a
+separate revision-validation status. Invalid or mismatched mappings remain in
+a failed receipt; non-finite or otherwise non-JSON scalar observations receive
+a tagged representation so receipt JSON remains strict. A provenance call
+that raises has no returned mapping to retain and is recorded as that stage
+failure. Likewise, every returned non-object numeric depth array is published
+incomplete and unvalidated before finite/schema validation, so a NaN/Inf
+failure retains both the malformed depth and earlier RGB.
 
 Independently decode retained RGB using R + 256G + 65536B, segid+1, the actual
 scene map and vertical orientation, then compare every returned pair and raw

@@ -15,14 +15,17 @@ from typing import Any
 
 from epsbench.diagnostics.revision_capture import (
     ARCHIVE_SHA256,
+    STUDY_HOST,
     RevisionCaptureFailure,
     canonical_json_bytes,
+    detect_study_runtime,
     fixed_cells,
     initialise_ledger,
     load_cell_result,
     publish_analysis_result,
     publish_bytes,
     sha256_file,
+    translate_study_root,
     validate_ledger,
     verify_input_archive,
 )
@@ -78,9 +81,14 @@ def _init(args: argparse.Namespace) -> None:
 
 
 def _handoff_create(args: argparse.Namespace) -> None:
+    actual_runtime = detect_study_runtime()
+    actual_host = platform.node()
+    if args.runtime != actual_runtime or actual_host.upper() != STUDY_HOST:
+        raise RevisionCaptureFailure("handoff runtime/host differs from actual invocation")
     record = {
         "schema": "revision_capture_handoff/v1",
-        "runtime": args.runtime,
+        "runtime": actual_runtime,
+        "host": actual_host,
         "token": args.token,
         "observed_root": str(args.output_root.resolve()),
     }
@@ -90,6 +98,10 @@ def _handoff_create(args: argparse.Namespace) -> None:
 
 
 def _handoff_verify(args: argparse.Namespace) -> None:
+    actual_runtime = detect_study_runtime()
+    actual_host = platform.node()
+    if args.runtime != actual_runtime or actual_host.upper() != STUDY_HOST:
+        raise RevisionCaptureFailure("handoff runtime/host differs from actual invocation")
     records: dict[str, dict[str, Any]] = {}
     for runtime in ("windows", "wsl"):
         path = args.output_root / "handoff" / f"{runtime}.json"
@@ -103,14 +115,16 @@ def _handoff_verify(args: argparse.Namespace) -> None:
     peer = records["wsl" if args.runtime == "windows" else "windows"]
     if own["token"] != args.own_token or peer["token"] != args.peer_token:
         raise RevisionCaptureFailure("handoff token verification failed")
-    if str(peer.get("observed_root")) != args.expected_peer_root:
+    expected_peer_root = translate_study_root(str(own["observed_root"]), actual_runtime)
+    if str(peer.get("observed_root")) != expected_peer_root:
         raise RevisionCaptureFailure("peer root translation does not match expected path")
     record = {
         "schema": "revision_capture_handoff_verification/v1",
-        "runtime": args.runtime,
+        "runtime": actual_runtime,
+        "host": actual_host,
         "own_token": args.own_token,
         "peer_token": args.peer_token,
-        "expected_peer_root": args.expected_peer_root,
+        "expected_peer_root": expected_peer_root,
         "observed_root": str(args.output_root.resolve()),
     }
     target = args.output_root / "handoff" / f"verified-{args.runtime}.json"
@@ -207,7 +221,6 @@ def _parser() -> argparse.ArgumentParser:
         else:
             command.add_argument("--own-token", required=True)
             command.add_argument("--peer-token", required=True)
-            command.add_argument("--expected-peer-root", required=True)
             command.set_defaults(func=_handoff_verify)
     nxt = sub.add_parser("next")
     nxt.add_argument("--output-root", type=Path, required=True)

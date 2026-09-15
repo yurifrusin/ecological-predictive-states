@@ -97,6 +97,78 @@ def _camera_facts(
     return value
 
 
+def _study_depth_attachments(renderer: object) -> dict[str, dict[str, object]]:
+    """Inspect MuJoCo's SDK-defined offscreen depth renderbuffers.
+
+    MuJoCo's renderer creates color and depth/stencil renderbuffer storage for
+    both the multisample offscreen FBO and its single-sample resolve FBO.  This
+    study records the live depth attachment facts without creating a context or
+    issuing a render, and restores every binding it changes.
+    """
+    from OpenGL import GL  # type: ignore[import-untyped]
+
+    context = getattr(renderer, "_mjr_context", None)
+    if context is None:
+        raise RevisionCaptureFailure("MuJoCo renderer exposes no offscreen context")
+
+    def scalar(value: Any) -> int:
+        return int(value[0] if hasattr(value, "__len__") else value)
+
+    saved_read = scalar(GL.glGetIntegerv(GL.GL_READ_FRAMEBUFFER_BINDING))
+    saved_draw = scalar(GL.glGetIntegerv(GL.GL_DRAW_FRAMEBUFFER_BINDING))
+    saved_renderbuffer = scalar(GL.glGetIntegerv(GL.GL_RENDERBUFFER_BINDING))
+    result: dict[str, dict[str, object]] = {}
+    try:
+        for name in ("offFBO", "offFBO_r"):
+            fbo = int(getattr(context, name, 0))
+            if fbo == 0:
+                continue
+            GL.glBindFramebuffer(GL.GL_READ_FRAMEBUFFER, fbo)
+            GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, fbo)
+            object_type = scalar(
+                GL.glGetFramebufferAttachmentParameteriv(
+                    GL.GL_DRAW_FRAMEBUFFER,
+                    GL.GL_DEPTH_ATTACHMENT,
+                    GL.GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+                )
+            )
+            object_name = scalar(
+                GL.glGetFramebufferAttachmentParameteriv(
+                    GL.GL_DRAW_FRAMEBUFFER,
+                    GL.GL_DEPTH_ATTACHMENT,
+                    GL.GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+                )
+            )
+            component_type = scalar(
+                GL.glGetFramebufferAttachmentParameteriv(
+                    GL.GL_DRAW_FRAMEBUFFER,
+                    GL.GL_DEPTH_ATTACHMENT,
+                    GL.GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE,
+                )
+            )
+            if object_type != int(GL.GL_RENDERBUFFER) or object_name <= 0:
+                raise RevisionCaptureFailure("MuJoCo offscreen depth is not a renderbuffer")
+            GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, object_name)
+            result[name] = {
+                "object_type": object_type,
+                "object_name": object_name,
+                "component_type": component_type,
+                "internal_format": scalar(
+                    GL.glGetRenderbufferParameteriv(
+                        GL.GL_RENDERBUFFER, GL.GL_RENDERBUFFER_INTERNAL_FORMAT
+                    )
+                ),
+                "samples": scalar(
+                    GL.glGetRenderbufferParameteriv(GL.GL_RENDERBUFFER, GL.GL_RENDERBUFFER_SAMPLES)
+                ),
+            }
+    finally:
+        GL.glBindFramebuffer(GL.GL_READ_FRAMEBUFFER, saved_read)
+        GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, saved_draw)
+        GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, saved_renderbuffer)
+    return result
+
+
 class MujocoStack:
     def __init__(
         self,
@@ -194,6 +266,14 @@ class MujocoStack:
         )
 
         value = dict(inspect_mujoco_offscreen_attachments(self.renderer))
+        attachments = value.get("offscreen_attachments")
+        if not isinstance(attachments, dict):
+            raise RevisionCaptureFailure("offscreen attachment provenance is not mutable")
+        for name, depth in _study_depth_attachments(self.renderer).items():
+            record = attachments.get(name)
+            if not isinstance(record, dict) or not record.get("present"):
+                raise RevisionCaptureFailure("depth provenance FBO differs from color provenance")
+            record["depth"] = depth
         value.update(_runtime_hashes(self.mujoco, self.xml))
         value.update(
             {

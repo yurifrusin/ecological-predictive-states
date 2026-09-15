@@ -5,10 +5,14 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import ntpath
 import os
+import platform
+import posixpath
 import stat
+import subprocess
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -30,6 +34,7 @@ FAMILIES = ("corridor", "single_occluder")
 BACKENDS = ("wgl", "osmesa")
 POLICIES = ("joint4", "hybrid", "joint0")
 POSES = ("before", "after")
+STUDY_HOST = "DESKTOP-TPUQMNG"
 
 
 class RevisionCaptureFailure(RuntimeError):
@@ -258,8 +263,25 @@ class ArtifactWriter:
         *,
         complete: bool = True,
         validated: bool = False,
+        allow_nonfinite: bool = False,
     ) -> dict[str, object]:
-        payload, metadata = array_bytes(value)
+        array = np.asarray(value)
+        if allow_nonfinite:
+            if array.dtype.hasobject or not np.issubdtype(array.dtype, np.number):
+                raise RevisionCaptureFailure("retained malformed array must be non-object numeric")
+            dtype = array.dtype.newbyteorder("<")
+            canonical = np.ascontiguousarray(array.astype(dtype, copy=False))
+            stream = io.BytesIO()
+            np.save(stream, canonical, allow_pickle=False)
+            payload = stream.getvalue()
+            metadata: dict[str, object] = {
+                "dtype": canonical.dtype.str,
+                "shape": list(canonical.shape),
+                "byte_order": "little",
+                "order": "C",
+            }
+        else:
+            payload, metadata = array_bytes(array)
         record = publish_bytes(self.root / relative, payload)
         return {**record, **metadata, "complete": complete, "validated": validated}
 
@@ -323,6 +345,7 @@ class AttemptLock:
         self.root = root
         self.path = root / "capture-attempt.lock"
         self.fd: int | None = None
+        self.identity: tuple[int, int] | None = None
 
     def acquire(self) -> None:
         _reject_linked_path(self.root)
@@ -331,23 +354,111 @@ class AttemptLock:
             self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             os.write(self.fd, canonical_json_bytes({"pid": os.getpid()}))
             os.fsync(self.fd)
+            acquired = os.fstat(self.fd)
+            self.identity = (acquired.st_dev, acquired.st_ino)
             _directory_fsync(self.root)
         except FileExistsError as exc:
             raise RevisionCaptureFailure("attempt lock already exists; study stopped") from exc
 
     def release_after_success(self, terminal_revision: Path) -> None:
-        if self.fd is None or not terminal_revision.is_file():
+        if self.fd is None or self.identity is None or not terminal_revision.is_file():
             raise RevisionCaptureFailure("cannot release lock before terminal revision")
         os.fsync(self.fd)
+        descriptor = os.fstat(self.fd)
+        descriptor_identity = (descriptor.st_dev, descriptor.st_ino)
+        if descriptor_identity != self.identity:
+            os.close(self.fd)
+            self.fd = None
+            raise RevisionCaptureFailure("attempt lock descriptor identity changed")
+        # Native Windows does not permit unlinking this file while its os.open
+        # descriptor remains open. Close first, then independently re-check the
+        # pathname before unlinking; a mismatch retains whichever path now exists.
         os.close(self.fd)
         self.fd = None
+        try:
+            path_info = self.path.stat(follow_symlinks=False)
+        except FileNotFoundError as exc:
+            raise RevisionCaptureFailure("acquired attempt lock path disappeared") from exc
+        path_identity = (path_info.st_dev, path_info.st_ino)
+        if (
+            path_identity != self.identity
+            or stat.S_ISLNK(path_info.st_mode)
+            or path_info.st_nlink != 1
+        ):
+            raise RevisionCaptureFailure("attempt lock ownership/file identity changed")
         self.path.unlink()
+        self.identity = None
         _directory_fsync(self.root)
 
 
-def verify_handoff_records(root: Path) -> dict[str, object]:
+def detect_study_runtime(
+    *, system: str | None = None, environ: Mapping[str, str] | None = None
+) -> str:
+    actual_system = platform.system() if system is None else system
+    actual_environ = os.environ if environ is None else environ
+    if actual_system == "Windows":
+        return "windows"
+    if actual_system == "Linux" and (
+        "WSL_INTEROP" in actual_environ or "WSL_DISTRO_NAME" in actual_environ
+    ):
+        return "wsl"
+    raise RevisionCaptureFailure("study handoff requires native Windows or WSL")
+
+
+def _canonical_native_root(value: object, runtime: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise RevisionCaptureFailure("handoff root is not a nonempty native path")
+    if runtime == "windows":
+        drive, tail = ntpath.splitdrive(value)
+        if drive.upper() != "C:" or not tail.startswith("\\") or value.startswith("\\\\"):
+            raise RevisionCaptureFailure("Windows handoff root must be a native C-drive path")
+        if "/" in value or value.startswith("\\\\?\\") or ntpath.normpath(value) != value:
+            raise RevisionCaptureFailure("Windows handoff root is aliased or non-canonical")
+        return value
+    if runtime == "wsl":
+        if not value.startswith("/mnt/c/") or posixpath.normpath(value) != value:
+            raise RevisionCaptureFailure("WSL handoff root must be canonical under /mnt/c")
+        return value
+    raise RevisionCaptureFailure("invalid handoff runtime")
+
+
+def translate_study_root(
+    value: str, source_runtime: str, *, executing_runtime: str | None = None
+) -> str:
+    execution = detect_study_runtime() if executing_runtime is None else executing_runtime
+    if source_runtime not in ("windows", "wsl") or execution not in ("windows", "wsl"):
+        raise RevisionCaptureFailure("invalid wslpath translation runtime")
+    direction = "-u" if source_runtime == "windows" else "-w"
+    command = (
+        ["wsl.exe", "--exec", "wslpath", "-a", direction, value]
+        if execution == "windows"
+        else ["wslpath", "-a", direction, value]
+    )
+    try:
+        translated = subprocess.check_output(
+            command,
+            text=True,
+            encoding="utf-8",
+            stderr=subprocess.PIPE,
+            timeout=10,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise RevisionCaptureFailure("independent wslpath translation failed") from exc
+    return _canonical_native_root(translated, "wsl" if source_runtime == "windows" else "windows")
+
+
+def verify_handoff_records(
+    root: Path,
+    *,
+    current_runtime: str | None = None,
+    current_host: str | None = None,
+    current_root: str | None = None,
+    translator: Callable[[str, str], str] = translate_study_root,
+) -> dict[str, object]:
     """Require the completed two-way Windows/WSL token exchange."""
     directory = root / "handoff"
+    _reject_linked_path(root)
+    _reject_linked_path(directory)
     expected = {
         "windows.json",
         "wsl.json",
@@ -356,21 +467,39 @@ def verify_handoff_records(root: Path) -> dict[str, object]:
     }
     if not directory.is_dir() or {item.name for item in directory.iterdir()} != expected:
         raise RevisionCaptureFailure("complete two-way handoff records are absent")
+    runtime_now = detect_study_runtime() if current_runtime is None else current_runtime
+    host_now = platform.node() if current_host is None else current_host
+    root_now = str(root.resolve()) if current_root is None else current_root
+    if host_now.upper() != STUDY_HOST or runtime_now not in ("windows", "wsl"):
+        raise RevisionCaptureFailure("handoff invocation host/runtime differs from study binding")
     records: dict[str, dict[str, Any]] = {}
     for runtime in ("windows", "wsl"):
-        source = json.loads((directory / f"{runtime}.json").read_text(encoding="utf-8"))
-        verified = json.loads((directory / f"verified-{runtime}.json").read_text(encoding="utf-8"))
+        source_path = directory / f"{runtime}.json"
+        verified_path = directory / f"verified-{runtime}.json"
+        _reject_linked_path(source_path)
+        _reject_linked_path(verified_path)
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+        verified = json.loads(verified_path.read_text(encoding="utf-8"))
         if (
             source.get("schema") != "revision_capture_handoff/v1"
             or source.get("runtime") != runtime
+            or str(source.get("host", "")).upper() != STUDY_HOST
             or verified.get("schema") != "revision_capture_handoff_verification/v1"
             or verified.get("runtime") != runtime
+            or str(verified.get("host", "")).upper() != STUDY_HOST
             or verified.get("own_token") != source.get("token")
             or not verified.get("expected_peer_root")
+            or verified.get("observed_root") != source.get("observed_root")
+            or not isinstance(source.get("token"), str)
+            or not source.get("token")
         ):
             raise RevisionCaptureFailure("invalid handoff record")
         records[runtime] = source
         records[f"verified-{runtime}"] = verified
+    windows_root = _canonical_native_root(records["windows"].get("observed_root"), "windows")
+    wsl_root = _canonical_native_root(records["wsl"].get("observed_root"), "wsl")
+    if _canonical_native_root(root_now, runtime_now) != records[runtime_now].get("observed_root"):
+        raise RevisionCaptureFailure("current canonical output root differs from handoff binding")
     if records["windows"]["token"] == records["wsl"]["token"]:
         raise RevisionCaptureFailure("handoff tokens are not independent")
     if (
@@ -382,9 +511,14 @@ def verify_handoff_records(root: Path) -> dict[str, object]:
         != records["windows"].get("observed_root")
     ):
         raise RevisionCaptureFailure("handoff peer token/root mismatch")
+    if (
+        translator(windows_root, "windows") != wsl_root
+        or translator(wsl_root, "wsl") != windows_root
+    ):
+        raise RevisionCaptureFailure("independent native/WSL root translation mismatch")
     return {
-        "windows_root": records["windows"].get("observed_root"),
-        "wsl_root": records["wsl"].get("observed_root"),
+        "windows_root": windows_root,
+        "wsl_root": wsl_root,
         "windows_token_sha256": sha256_bytes(str(records["windows"]["token"]).encode("utf-8")),
         "wsl_token_sha256": sha256_bytes(str(records["wsl"]["token"]).encode("utf-8")),
     }

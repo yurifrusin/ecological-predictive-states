@@ -120,6 +120,16 @@ _REQUIRED_PROVENANCE = {
     "renderer_py_sha256",
 }
 
+# OpenGL enums used by MuJoCo 3.12.0's makeOff implementation. Historical
+# WGL/OSMesa observations bind the color triple; depth accepts either SDK
+# branch selected by ARB_depth_buffer_float support.
+_GL_RENDERBUFFER = 36161
+_COLOR_FORMAT_COMPONENTS = {(32856, 35863)}  # GL_RGBA8, GL_UNSIGNED_NORMALIZED
+_DEPTH_FORMAT_COMPONENTS = {
+    (35056, 35863),  # GL_DEPTH24_STENCIL8, GL_UNSIGNED_NORMALIZED
+    (36013, 5126),  # GL_DEPTH32F_STENCIL8, GL_FLOAT
+}
+
 
 def _event(receipt: dict[str, Any], stage: str, state: str, **details: object) -> None:
     receipt.setdefault("stage_events", []).append(
@@ -150,9 +160,35 @@ def _current(
     return _call(receipt, stage, operation)
 
 
+def _validate_attachment(
+    value: object,
+    *,
+    samples: int,
+    label: str,
+    accepted_formats: set[tuple[int, int]],
+) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise RevisionCaptureFailure(f"{label} attachment provenance is absent")
+    required = ("object_type", "object_name", "component_type", "internal_format", "samples")
+    if any(value.get(key) in (None, "") for key in required):
+        raise RevisionCaptureFailure(f"{label} attachment provenance is incomplete")
+    if any(type(value[key]) is not int for key in required):
+        raise RevisionCaptureFailure(f"{label} attachment facts must be exact integers")
+    if int(value["object_type"]) != _GL_RENDERBUFFER or int(value["object_name"]) <= 0:
+        raise RevisionCaptureFailure(f"{label} attachment is not a live GL renderbuffer")
+    format_component = (int(value["internal_format"]), int(value["component_type"]))
+    if format_component not in accepted_formats:
+        raise RevisionCaptureFailure(f"{label} attachment format/component type is unsupported")
+    if int(value["samples"]) != samples:
+        raise RevisionCaptureFailure(f"{label} attachment samples differ from framebuffer")
+    return value
+
+
 def _validate_provenance(
-    value: Mapping[str, object], cell: StudyCell, role: str, requested: int
+    value: object, cell: StudyCell, role: str, requested: int
 ) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise RevisionCaptureFailure("renderer provenance is not a mapping")
     missing = sorted(key for key in _REQUIRED_PROVENANCE if value.get(key) in (None, ""))
     if missing:
         raise RevisionCaptureFailure("missing renderer provenance: " + ", ".join(missing))
@@ -162,7 +198,7 @@ def _validate_provenance(
         cell.backend,
     ):
         raise RevisionCaptureFailure("renderer identity/backend/request differs from cell")
-    actual = int(value["actual_offsamples"])  # type: ignore[call-overload]
+    actual = int(value["actual_offsamples"])
     if actual != requested:
         raise RevisionCaptureFailure("actual offsamples differs from requested")
     attachments = value["offscreen_attachments"]
@@ -176,9 +212,20 @@ def _validate_provenance(
         or int(main.get("draw_framebuffer_samples", -1)) != requested
     ):
         raise RevisionCaptureFailure("live main FBO samples differ from request")
-    color = main.get("color0")
-    if not isinstance(color, Mapping) or int(color.get("samples", -1)) != requested:
-        raise RevisionCaptureFailure("live main attachment samples differ from request")
+    main_color = _validate_attachment(
+        main.get("color0"),
+        samples=requested,
+        label="main color",
+        accepted_formats=_COLOR_FORMAT_COMPONENTS,
+    )
+    main_depth = _validate_attachment(
+        main.get("depth"),
+        samples=requested,
+        label="main depth",
+        accepted_formats=_DEPTH_FORMAT_COMPONENTS,
+    )
+    if main_depth["object_name"] == main_color["object_name"]:
+        raise RevisionCaptureFailure("main color/depth do not identify distinct renderbuffers")
     if requested > 0:
         if (
             not isinstance(resolve, Mapping)
@@ -186,6 +233,27 @@ def _validate_provenance(
             or int(resolve.get("draw_framebuffer_samples", -1)) != 0
         ):
             raise RevisionCaptureFailure("multisample resolve FBO is missing or sampled")
+        resolve_color = _validate_attachment(
+            resolve.get("color0"),
+            samples=0,
+            label="resolve color",
+            accepted_formats=_COLOR_FORMAT_COMPONENTS,
+        )
+        resolve_depth = _validate_attachment(
+            resolve.get("depth"),
+            samples=0,
+            label="resolve depth",
+            accepted_formats=_DEPTH_FORMAT_COMPONENTS,
+        )
+        if resolve_depth["object_name"] == resolve_color["object_name"]:
+            raise RevisionCaptureFailure(
+                "resolve color/depth do not identify distinct renderbuffers"
+            )
+        if (
+            resolve_depth["internal_format"] != main_depth["internal_format"]
+            or resolve_depth["component_type"] != main_depth["component_type"]
+        ):
+            raise RevisionCaptureFailure("main/resolve depth formats differ within renderer")
     elif isinstance(resolve, Mapping) and resolve.get("present"):
         raise RevisionCaptureFailure("unexpected resolve FBO for zero-sample renderer")
     return dict(value)
@@ -198,8 +266,77 @@ def _save_array(
     *,
     complete: bool = True,
     validated: bool = False,
+    allow_nonfinite: bool = False,
 ) -> dict[str, object]:
-    return writer.array(relative, np.asarray(value), complete=complete, validated=validated)
+    return writer.array(
+        relative,
+        np.asarray(value),
+        complete=complete,
+        validated=validated,
+        allow_nonfinite=allow_nonfinite,
+    )
+
+
+def _json_safe_observation(value: object) -> object:
+    """Losslessly retain ordinary provenance while keeping failed receipts strict JSON."""
+    if isinstance(value, Mapping):
+        if all(isinstance(key, str) for key in value):
+            return {str(key): _json_safe_observation(child) for key, child in value.items()}
+        return {
+            "revision_mapping_items": [
+                {
+                    "key": _json_safe_observation(key),
+                    "value": _json_safe_observation(child),
+                }
+                for key, child in value.items()
+            ]
+        }
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_observation(child) for child in value]
+    if isinstance(value, np.ndarray):
+        return _json_safe_observation(value.tolist())
+    if isinstance(value, np.generic):
+        return _json_safe_observation(value.item())
+    if isinstance(value, float) and not np.isfinite(value):
+        if np.isnan(value):
+            spelling = "nan"
+        elif value > 0:
+            spelling = "+inf"
+        else:
+            spelling = "-inf"
+        return {"revision_nonfinite_float": spelling}
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, bytes):
+        return {"revision_bytes_hex": value.hex()}
+    return {
+        "revision_unsupported_type": f"{type(value).__module__}.{type(value).__qualname__}",
+        "repr": repr(value),
+    }
+
+
+def _retain_provenance(receipt: dict[str, Any], value: object, role: str) -> dict[str, Any]:
+    retained = _json_safe_observation(value)
+    record: dict[str, Any]
+    if isinstance(retained, dict):
+        if "revision_validation" in retained:
+            record = {"observed_provenance": retained}
+        else:
+            record = retained
+    else:
+        record = {"observed_value": retained}
+    record["revision_validation"] = {"status": "unvalidated", "role": role}
+    receipt["renderers"].append(record)
+    return record
+
+
+def _validate_model_hash(
+    provenance: Mapping[str, object], actual_models: object, role: str
+) -> None:
+    if not isinstance(actual_models, Mapping) or provenance[
+        "model_mjb_sha256"
+    ] != actual_models.get(role):
+        raise RevisionCaptureFailure(f"{role} live model hash differs from CPU binding")
 
 
 def _segmentation(
@@ -290,7 +427,14 @@ def _rgb_depth(
     _current(receipt, stack, f"{prefix}.depth_enable", stack.enable_depth)
     _current(receipt, stack, f"{prefix}.depth_update", stack.update_scene)
     depth = np.asarray(_current(receipt, stack, f"{prefix}.depth_readback", stack.render_depth))
-    pose["modalities"]["depth"] = _save_array(writer, f"{prefix}-depth.npy", depth)
+    pose["modalities"]["depth"] = _save_array(
+        writer,
+        f"{prefix}-depth.npy",
+        depth,
+        complete=False,
+        validated=False,
+        allow_nonfinite=True,
+    )
     if (
         depth.dtype != np.float32
         or depth.shape != (stack.height, stack.width)
@@ -302,6 +446,7 @@ def _rgb_depth(
             receipt,
         )
     pose["modalities"]["depth"]["validated"] = True
+    pose["modalities"]["depth"]["complete"] = True
     _current(receipt, stack, f"{prefix}.depth_disable", stack.disable_depth)
 
 
@@ -415,13 +560,27 @@ def capture_cell(
             lambda: factory(primary_samples, "primary"),
         )
         primary_provenance = _current(receipt, primary, "primary.provenance", primary.provenance)
-        checked_primary = _validate_provenance(primary_provenance, cell, "primary", primary_samples)
+        retained_primary = _retain_provenance(receipt, primary_provenance, "primary")
+        try:
+            checked_primary = _call(
+                receipt,
+                "primary.provenance_validation",
+                lambda: _validate_provenance(primary_provenance, cell, "primary", primary_samples),
+            )
+        except StageFailure:
+            retained_primary["revision_validation"]["status"] = "invalid"
+            raise
         actual_models = prepared.model["actual_models"]
-        if not isinstance(actual_models, Mapping) or checked_primary[
-            "model_mjb_sha256"
-        ] != actual_models.get("primary"):
-            raise RevisionCaptureFailure("primary live model hash differs from CPU binding")
-        receipt["renderers"].append(checked_primary)
+        try:
+            _call(
+                receipt,
+                "primary.model_hash_validation",
+                lambda: _validate_model_hash(checked_primary, actual_models, "primary"),
+            )
+        except StageFailure:
+            retained_primary["revision_validation"]["status"] = "invalid"
+            raise
+        retained_primary["revision_validation"]["status"] = "validated"
         segmentation = primary
         if cell.policy == "hybrid":
             segmentation = _call(
@@ -435,16 +594,30 @@ def capture_cell(
                 "segmentation.provenance",
                 segmentation.provenance,
             )
-            checked_segmentation = _validate_provenance(
-                segmentation_provenance, cell, "segmentation", 0
+            retained_segmentation = _retain_provenance(
+                receipt, segmentation_provenance, "segmentation"
             )
-            if not isinstance(actual_models, Mapping) or checked_segmentation[
-                "model_mjb_sha256"
-            ] != actual_models.get("segmentation"):
-                raise RevisionCaptureFailure(
-                    "segmentation live model hash differs from CPU binding"
+            try:
+                checked_segmentation = _call(
+                    receipt,
+                    "segmentation.provenance_validation",
+                    lambda: _validate_provenance(segmentation_provenance, cell, "segmentation", 0),
                 )
-            receipt["renderers"].append(checked_segmentation)
+            except StageFailure:
+                retained_segmentation["revision_validation"]["status"] = "invalid"
+                raise
+            try:
+                _call(
+                    receipt,
+                    "segmentation.model_hash_validation",
+                    lambda: _validate_model_hash(
+                        checked_segmentation, actual_models, "segmentation"
+                    ),
+                )
+            except StageFailure:
+                retained_segmentation["revision_validation"]["status"] = "invalid"
+                raise
+            retained_segmentation["revision_validation"]["status"] = "validated"
         for pose_name in ("before", "after"):
             _capture_pose(
                 receipt,
