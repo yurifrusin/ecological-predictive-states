@@ -332,7 +332,7 @@ def observe_shared_context(
     main = cast(Mapping[str, object], attachments["offFBO"])
     resolve = cast(Mapping[str, object], attachments["offFBO_r"])
     if (
-        facts["read_framebuffer_binding"] != main.get("object_name")
+        facts["read_framebuffer_binding"] != main.get("framebuffer")
         or resolve.get("present") is not False
     ):
         raise SharedRasterFailure("read framebuffer is not the unresolved offFBO")
@@ -752,7 +752,7 @@ class _RendererProxy:
                 validate_paired_draw_state(
                     draw_state,
                     expected_context=int(cast(int, context_facts["osmesa_context_identity"])),
-                    expected_read_framebuffer=int(cast(int, main["object_name"])),
+                    expected_read_framebuffer=int(cast(int, main["framebuffer"])),
                     expected_read_buffer=int(cast(int, context_facts["read_buffer"])),
                     expected_context_facts=context_facts,
                 )
@@ -795,7 +795,7 @@ class _RendererProxy:
                 validate_paired_draw_state(
                     read_state_before,
                     expected_context=int(cast(int, context_facts["osmesa_context_identity"])),
-                    expected_read_framebuffer=int(cast(int, main["object_name"])),
+                    expected_read_framebuffer=int(cast(int, main["framebuffer"])),
                     expected_read_buffer=int(cast(int, context_facts["read_buffer"])),
                     expected_context_facts=context_facts,
                 )
@@ -1460,7 +1460,7 @@ def validate_recorded_attempt(
             validate_paired_draw_state(
                 draw_state,
                 expected_context=int(cast(int, context["osmesa_context_identity"])),
-                expected_read_framebuffer=int(cast(int, main["object_name"])),
+                expected_read_framebuffer=int(cast(int, main["framebuffer"])),
                 expected_read_buffer=int(cast(int, context["read_buffer"])),
                 expected_context_facts=context,
             )

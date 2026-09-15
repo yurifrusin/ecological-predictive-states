@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -60,7 +61,7 @@ def fake_native_state(_renderer: object) -> dict[str, object]:
         "offFBO_r": 0,
         "offWidth": 2,
         "offHeight": 2,
-        "offscreen_attachments": {"offFBO": {"object_name": 5}},
+        "offscreen_attachments": {"offFBO": {"framebuffer": 5}},
         "query_bindings_restored": True,
         "draw_framebuffer_binding": 5,
         "draw_buffer": 1029,
@@ -95,8 +96,64 @@ def fake_context() -> dict[str, object]:
         "osmesa_context_identity": 77,
         "mjr_off_width": 2,
         "mjr_off_height": 2,
-        "offscreen_attachments": {"offFBO": {"object_name": 5}},
+        "offscreen_attachments": {"offFBO": {"framebuffer": 5}},
     }
+
+
+def test_observe_shared_context_consumes_real_attachment_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from OpenGL import GL
+
+    parent_facts = {
+        "offscreen_attachments": {
+            "offFBO": {
+                "present": True,
+                "framebuffer": 5,
+                "color0": {"object_name": 11},
+                "depth": {"object_name": 12},
+                "draw_framebuffer_samples": 0,
+            },
+            "offFBO_r": {"present": False},
+        }
+    }
+    monkeypatch.setattr(
+        subject,
+        "observe_zero_sample_osmesa",
+        lambda *_args: parent_facts,
+    )
+    queried = {
+        GL.GL_CLIP_ORIGIN: np.array([36001, 0], dtype=np.int32),
+        GL.GL_CLIP_DEPTH_MODE: np.array([37727, 0], dtype=np.int32),
+        GL.GL_PACK_ALIGNMENT: np.array([1], dtype=np.int32),
+        GL.GL_PACK_ROW_LENGTH: np.array([0], dtype=np.int32),
+        GL.GL_PACK_SKIP_ROWS: np.array([0], dtype=np.int32),
+        GL.GL_PACK_SKIP_PIXELS: np.array([0], dtype=np.int32),
+        GL.GL_PIXEL_PACK_BUFFER_BINDING: np.array([0], dtype=np.int32),
+        GL.GL_READ_FRAMEBUFFER_BINDING: np.array([5], dtype=np.int32),
+        GL.GL_READ_BUFFER: np.array([1029], dtype=np.int32),
+    }
+    monkeypatch.setattr(GL, "glGetIntegerv", lambda enum: queried[enum])
+    made_current: list[bool] = []
+    renderer = SimpleNamespace(
+        _gl_context=SimpleNamespace(
+            _context=ctypes.c_void_p(77),
+            make_current=lambda: made_current.append(True),
+        ),
+        _mjr_context=SimpleNamespace(readPixelFormat=int(GL.GL_RGB), readDepthMap=1),
+    )
+
+    facts = subject.observe_shared_context(renderer, SimpleNamespace(), 160, 120)
+
+    assert made_current == [True]
+    assert facts["read_framebuffer_binding"] == 5
+    assert facts["offscreen_attachments"] == parent_facts["offscreen_attachments"]
+
+    main = parent_facts["offscreen_attachments"]["offFBO"]
+    main["object_name"] = main.pop("framebuffer")
+    with pytest.raises(subject.SharedRasterFailure, match="unresolved offFBO"):
+        subject.observe_shared_context(renderer, SimpleNamespace(), 160, 120)
+    assert made_current == [True, True]
 
 
 def test_plan_is_exact_finite_contract() -> None:
