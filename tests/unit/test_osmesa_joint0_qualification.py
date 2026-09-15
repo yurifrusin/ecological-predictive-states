@@ -238,6 +238,77 @@ def test_ledger_chain_reservation_completion_and_no_retry(tmp_path: Path) -> Non
         q.append_revision(tmp_path / "run", "reserved", q.fixed_attempts()[1])
 
 
+def test_run_attempt_rejects_binding_mismatch_before_generator_or_observer(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "run"
+    ledger_binding = {"head": "ledger"}
+    q.initialise_ledger(root, ledger_binding)
+    calls: list[str] = []
+
+    def generator(path: Path, adapter: q.RendererAdapter) -> object:
+        calls.append("generator")
+        return object()
+
+    def observer(*args: object) -> dict[str, object]:
+        calls.append("observer")
+        return {}
+
+    with pytest.raises(q.QualificationFailure, match="differs from initialized ledger"):
+        q.run_attempt(
+            root,
+            q.fixed_attempts()[0],
+            tmp_path,
+            {"head": "different"},
+            generator,
+            object(),
+            observer=observer,
+        )
+    assert calls == []
+    assert not (root / "datasets").exists()
+
+
+def test_run_attempt_rejects_tampered_prior_receipt_before_generator_or_observer(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "run"
+    binding = {"head": "ledger"}
+    q.initialise_ledger(root, binding)
+    first = q.fixed_attempts()[0]
+    q.append_revision(root, "reserved", first)
+    receipt = root / "receipts" / f"{first.name}.json"
+    q.publish_bytes(receipt, b"{}")
+    q.append_revision(
+        root,
+        "complete",
+        first,
+        {"receipt_sha256": q.digest_file(receipt), "status": q.STATUS},
+    )
+    receipt.write_bytes(b'{"tampered":true}')
+    calls: list[str] = []
+
+    def generator(path: Path, adapter: q.RendererAdapter) -> object:
+        calls.append("generator")
+        return object()
+
+    def observer(*args: object) -> dict[str, object]:
+        calls.append("observer")
+        return {}
+
+    with pytest.raises(q.QualificationFailure, match="receipt hash differs"):
+        q.run_attempt(
+            root,
+            q.fixed_attempts()[1],
+            tmp_path,
+            binding,
+            generator,
+            object(),
+            observer=observer,
+        )
+    assert calls == []
+    assert not (root / "datasets").exists()
+
+
 def test_ledger_plan_and_chain_falsification_rejected(tmp_path: Path) -> None:
     root = tmp_path / "run"
     first = q.initialise_ledger(root, {"binding": "x"})

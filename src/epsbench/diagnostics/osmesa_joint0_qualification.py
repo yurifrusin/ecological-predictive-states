@@ -704,11 +704,14 @@ def validate_recorded_attempt(
     attempt: Attempt,
     *,
     context_baseline: Mapping[str, object] | None = None,
+    expected_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     dataset = output_root / "datasets" / attempt.name
     receipt_path = output_root / "receipts" / f"{attempt.name}.json"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     validate_plan(receipt.get("plan"))
+    if expected_binding is not None and receipt.get("source") != dict(expected_binding):
+        raise QualificationFailure("attempt receipt source differs from ledger binding")
     if receipt.get("status") != STATUS or receipt.get("attempt") != attempt.__dict__ | {
         "name": attempt.name
     }:
@@ -1186,6 +1189,36 @@ def append_revision(
     return _revision_path(root, index)
 
 
+def validate_completed_prefix(
+    output_root: Path,
+    records: Sequence[Mapping[str, Any]],
+    ledger_binding: Mapping[str, object],
+) -> dict[str, object] | None:
+    completed = [record for record in records if record.get("event") == "complete"]
+    baseline: dict[str, object] | None = None
+    for attempt, record in zip(fixed_attempts(), completed, strict=False):
+        if record.get("attempt_ordinal") != attempt.ordinal:
+            raise QualificationFailure("completed ledger prefix order differs")
+        receipt_path = output_root / "receipts" / f"{attempt.name}.json"
+        details = record.get("details")
+        if not isinstance(details, Mapping) or details.get("receipt_sha256") != digest_file(
+            receipt_path
+        ):
+            raise QualificationFailure("completed receipt hash differs from ledger")
+        receipt = validate_recorded_attempt(
+            output_root,
+            attempt,
+            context_baseline=baseline,
+            expected_binding=ledger_binding,
+        )
+        if baseline is None:
+            contexts = receipt.get("contexts")
+            if not isinstance(contexts, list) or not contexts:
+                raise QualificationFailure("validated receipt lacks context baseline")
+            baseline = context_runtime_binding(contexts[0])
+    return baseline
+
+
 def run_attempt(
     output_root: Path,
     attempt: Attempt,
@@ -1202,32 +1235,27 @@ def run_attempt(
     terminal: Path | None = None
     try:
         records = validate_ledger(output_root)
+        ledger_binding = records[0].get("binding")
+        if not isinstance(ledger_binding, Mapping) or dict(binding) != dict(ledger_binding):
+            raise QualificationFailure("attempt source binding differs from initialized ledger")
+        context_baseline = validate_completed_prefix(output_root, records, ledger_binding)
         append_revision(output_root, "reserved", attempt)
         dataset = output_root / "datasets" / attempt.name
-        dataset.mkdir(parents=True, exist_ok=False)
         receipt_path = output_root / "receipts" / f"{attempt.name}.json"
-        receipt_path.parent.mkdir(parents=True, exist_ok=True)
         receipt: dict[str, object] = {
             "schema": SCHEMA,
             "attempt": attempt.__dict__ | {"name": attempt.name},
             "status": "reserved",
             "plan": records[0]["plan"],
-            "source": dict(binding),
+            "source": dict(ledger_binding),
             "invocation": {"argv": list(sys.argv), "cwd": os.getcwd(), "host": platform.node()},
         }
         adapter: RendererAdapter | None = None
         try:
             require_osmesa_linux()
-            validate_bindings(source_root, binding)
+            validate_bindings(source_root, ledger_binding)
             receipt["runtime"] = bind_pristine_sdk(mujoco)
-            completed_records = [record for record in records if record.get("event") == "complete"]
-            context_baseline = None
-            if completed_records:
-                first = fixed_attempts()[0]
-                first_receipt = json.loads(
-                    (output_root / "receipts" / f"{first.name}.json").read_text(encoding="utf-8")
-                )
-                context_baseline = context_runtime_binding(first_receipt["contexts"][0])
+            dataset.mkdir(parents=True, exist_ok=False)
             with RendererAdapter(mujoco, observer, attempt, context_baseline) as active:
                 adapter = active
                 manifest = generate(dataset, active)

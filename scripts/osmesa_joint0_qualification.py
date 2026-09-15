@@ -133,7 +133,12 @@ def _validate_complete(output: Path, source: Path) -> dict[str, object]:
         dataset = output / "datasets" / attempt.name
         receipt = output / "receipts" / f"{attempt.name}.json"
         validate_dataset(dataset)
-        recorded = validate_recorded_attempt(output, attempt, context_baseline=baseline)
+        recorded = validate_recorded_attempt(
+            output,
+            attempt,
+            context_baseline=baseline,
+            expected_binding=binding,
+        )
         if recorded.get("runtime") != current_runtime:
             raise QualificationFailure("recorded CPU/package runtime binding differs")
         if baseline is None:
