@@ -5,6 +5,7 @@ from epsbench.data.inspect import create_inspection_image
 from epsbench.data.loader import (
     DatasetLoader,
     LoadedAnalyticOpticalTransport,
+    LoadedCanonicalPairedOutput,
     LoadedEcologicalVisibilityEvents,
     PermissionDeniedError,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "DatasetLoader",
     "DatasetValidationError",
     "LoadedAnalyticOpticalTransport",
+    "LoadedCanonicalPairedOutput",
     "LoadedEcologicalVisibilityEvents",
     "PermissionDeniedError",
     "create_inspection_image",

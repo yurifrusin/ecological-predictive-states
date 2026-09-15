@@ -14,6 +14,8 @@ from epsbench.schema import (
     AvailableDenseOpticalTransport,
     AvailableEcologicalVisibilityEvents,
     AvailableOrientedBoundaryOwnership,
+    CanonicalPairedEpisodeManifest,
+    CanonicalPairedOutputProvenance,
     ComponentTopologyAnnotation,
     CorridorSampledGeometry,
     DatasetManifest,
@@ -78,6 +80,22 @@ def ecological_label_domain(transition: TransitionRecord) -> dict[str, Any]:
 
 def compute_ecological_label_hash(transition: TransitionRecord) -> str:
     return sha256_bytes(canonical_json_bytes(ecological_label_domain(transition)))
+
+
+def canonical_paired_endpoint_domain(
+    provenance: CanonicalPairedOutputProvenance,
+) -> dict[str, Any]:
+    """Stable privileged endpoint identity with volatile GL handles excluded."""
+
+    value = provenance.model_dump(mode="json")
+    value.pop("endpoint_logical_sha256")
+    return value
+
+
+def compute_canonical_paired_endpoint_hash(
+    provenance: CanonicalPairedOutputProvenance,
+) -> str:
+    return sha256_bytes(canonical_json_bytes(canonical_paired_endpoint_domain(provenance)))
 
 
 def analytic_transport_domain(transport: AvailableDenseOpticalTransport) -> dict[str, Any]:
@@ -329,6 +347,15 @@ def dataset_logical_domain(manifest: DatasetManifest) -> dict[str, Any]:
                 "visibility_event_sha256": episode.visibility_event_sha256,
                 "appearance_instance_sha256": episode.appearance_instance_sha256,
                 "rgb_logical_sha256": list(episode.rgb_logical_sha256),
+                **(
+                    {
+                        "paired_output_provenance_sha256": list(
+                            episode.paired_output_provenance_sha256
+                        )
+                    }
+                    if isinstance(episode, CanonicalPairedEpisodeManifest)
+                    else {}
+                ),
             }
             for episode in manifest.episodes
         ],

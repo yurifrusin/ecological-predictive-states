@@ -9,7 +9,7 @@ import socket
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import mujoco
 import numpy as np
@@ -84,6 +84,7 @@ from epsbench.config import BenchmarkConfig, CorridorConfig, SingleOccluderConfi
 from epsbench.data.identity import (
     compute_analytic_transport_hash,
     compute_boundary_numerical_contract_hash,
+    compute_canonical_paired_endpoint_hash,
     compute_content_provenance_binding,
     compute_corridor_scene_content_hash,
     compute_dataset_logical_hash,
@@ -111,6 +112,10 @@ from epsbench.schema import (
     BoundaryOwnerSide,
     BoundaryVisibilityDiagnostics,
     CameraInstrumentation,
+    CanonicalPairedEpisodeManifest,
+    CanonicalPairedFrameRecord,
+    CanonicalPairedOutputProvenance,
+    CanonicalPairedSceneMapEntry,
     CorridorInstrumentation,
     DatasetManifest,
     DirectionalOpticalTransport,
@@ -134,6 +139,7 @@ from epsbench.schema import (
     RawSegmentationFrameEvidence,
     RendererProvenance,
     SceneFamily,
+    SeparateCaptureProvenance,
     SingleOccluderInstrumentation,
     SurfaceReference,
     TransitionRecord,
@@ -149,6 +155,7 @@ from epsbench.sim import (
     render_single_occluder_transition,
     sample_corridor_geometry,
 )
+from epsbench.sim.canonical_paired import CanonicalPairedResult, require_supported_runtime
 from epsbench.utils.canonical import (
     canonical_json_bytes,
     logical_array_hash,
@@ -271,7 +278,20 @@ def _write_frame(
     depth: np.ndarray[Any, Any],
     segmentation: np.ndarray[Any, Any],
     camera: CameraInstrumentation,
-) -> FrameRecord:
+    *,
+    canonical_pair: CanonicalPairedResult | None = None,
+    pair_operational_events: list[dict[str, object]] | None = None,
+    scene_family: SceneFamily | None = None,
+    episode_seed: int | None = None,
+    config_logical_sha256: str | None = None,
+    scene_content_sha256: str | None = None,
+    counterfactual_segmentation: np.ndarray[Any, Any] | None = None,
+    episode_id: str | None = None,
+    raw_to_opaque_surface_ids: dict[str, str] | None = None,
+    opaque_surface_labels: dict[str, int] | None = None,
+    source_provenance_sha256: str | None = None,
+    renderer_execution_provenance_sha256: str | None = None,
+) -> FrameRecord | CanonicalPairedFrameRecord:
     stem = "before" if frame_index == 0 else "after"
     rgb_path = episode_directory / f"rgb_{stem}.png"
     depth_path = episode_directory / f"depth_{stem}.npy"
@@ -281,8 +301,125 @@ def _write_frame(
     np.save(depth_path, depth, allow_pickle=False)
     np.save(segmentation_path, segmentation, allow_pickle=False)
     write_canonical_json(camera_path, camera)
-    return FrameRecord(
-        frame_index=frame_index,  # type: ignore[arg-type]
+    paired_artifact: ArtifactRecord | None = None
+    if canonical_pair is not None:
+        required = (
+            episode_id,
+            scene_family,
+            episode_seed,
+            config_logical_sha256,
+            scene_content_sha256,
+            pair_operational_events,
+            raw_to_opaque_surface_ids,
+            opaque_surface_labels,
+            source_provenance_sha256,
+            renderer_execution_provenance_sha256,
+        )
+        if any(value is None for value in required):
+            raise RuntimeError("canonical paired provenance binding is incomplete")
+        native_id_path = episode_directory / f"paired_native_id_rgb_{stem}.npy"
+        native_depth_path = episode_directory / f"paired_native_depth_{stem}.npy"
+        producer_state_path = episode_directory / f"paired_producer_state_{stem}.json"
+        np.save(native_id_path, canonical_pair.native_id_rgb, allow_pickle=False)
+        np.save(native_depth_path, canonical_pair.native_depth_pre_metric, allow_pickle=False)
+        write_canonical_json(producer_state_path, dict(canonical_pair.stable_state))
+        native_id_artifact = _array_artifact(
+            native_id_path,
+            root,
+            canonical_pair.native_id_rgb,
+            Modality.PRIVILEGED_GENERATION_RECORDS,
+            "application/x-npy",
+        )
+        native_depth_artifact = _array_artifact(
+            native_depth_path,
+            root,
+            canonical_pair.native_depth_pre_metric,
+            Modality.PRIVILEGED_GENERATION_RECORDS,
+            "application/x-npy",
+        )
+        producer_state_artifact = _json_artifact(
+            producer_state_path,
+            root,
+            canonical_pair.stable_state,
+            Modality.PRIVILEGED_GENERATION_RECORDS,
+            "application/json",
+        )
+        provenance = CanonicalPairedOutputProvenance(
+            schema_version="canonical_paired_output_provenance/v1",
+            association="shared_raster_id_depth",
+            episode_id=episode_id,  # type: ignore[arg-type]
+            episode_seed=episode_seed,  # type: ignore[arg-type]
+            scene_family=scene_family,  # type: ignore[arg-type]
+            config_logical_sha256=config_logical_sha256,  # type: ignore[arg-type]
+            scene_content_sha256=scene_content_sha256,  # type: ignore[arg-type]
+            depth_conversion="mujoco_3.12_float32_coefficients_float64_inverse_float32_output",
+            rgb_provenance=SeparateCaptureProvenance(
+                producer="ordinary_rgb",
+                association="separate_draw_no_id_depth_correspondence",
+                artifact_logical_sha256=logical_array_hash(rgb),
+            ),
+            counterfactual_provenance=(
+                SeparateCaptureProvenance(
+                    producer="single_occluder_counterfactual_segmentation",
+                    association="separate_draw_no_id_depth_correspondence",
+                    artifact_logical_sha256=logical_array_hash(counterfactual_segmentation),
+                )
+                if counterfactual_segmentation is not None
+                else None
+            ),
+            frame_index=frame_index,  # type: ignore[arg-type]
+            orientation=canonical_pair.orientation,  # type: ignore[arg-type]
+            native_readback_atomicity="sequential_color_then_depth_not_hardware_atomic",
+            native_id_rgb=native_id_artifact,
+            native_depth_pre_metric=native_depth_artifact,
+            producer_state=producer_state_artifact,
+            scene_map=tuple(
+                CanonicalPairedSceneMapEntry.model_validate(
+                    {
+                        "segid_plus_one": item.segid_plus_one,
+                        "objid": item.objid,
+                        "objtype": item.objtype,
+                    }
+                )
+                for item in canonical_pair.scene_map
+            ),
+            raw_to_opaque_surface_ids=raw_to_opaque_surface_ids,  # type: ignore[arg-type]
+            opaque_surface_labels=opaque_surface_labels,  # type: ignore[arg-type]
+            canonical_segmentation_logical_sha256=logical_array_hash(segmentation),
+            canonical_depth_logical_sha256=logical_array_hash(depth),
+            canonical_segmentation_file_sha256=sha256_file(segmentation_path),
+            canonical_depth_file_sha256=sha256_file(depth_path),
+            near=canonical_pair.near,
+            far=canonical_pair.far,
+            source_provenance_sha256=source_provenance_sha256,  # type: ignore[arg-type]
+            renderer_execution_provenance_sha256=(
+                renderer_execution_provenance_sha256  # type: ignore[arg-type]
+            ),
+            endpoint_logical_sha256="0" * 64,
+        )
+        provenance = provenance.model_copy(
+            update={"endpoint_logical_sha256": compute_canonical_paired_endpoint_hash(provenance)}
+        )
+        assert pair_operational_events is not None
+        pair_operational_events.append(
+            {
+                "episode_id": episode_id,
+                "frame_index": frame_index,
+                "endpoint_logical_sha256": provenance.endpoint_logical_sha256,
+                "observations": dict(canonical_pair.operational_state),
+            }
+        )
+        provenance_path = episode_directory / f"paired_provenance_{stem}.json"
+        write_canonical_json(provenance_path, provenance)
+        paired_artifact = _json_artifact(
+            provenance_path,
+            root,
+            provenance,
+            Modality.PRIVILEGED_GENERATION_RECORDS,
+            "application/json",
+        )
+    frame_values = dict(
+        frame_index=frame_index,
         width=int(rgb.shape[1]),
         height=int(rgb.shape[0]),
         rgb=_array_artifact(rgb_path, root, rgb, Modality.RGB, "image/png"),
@@ -302,6 +439,14 @@ def _write_frame(
             "application/json",
         ),
     )
+    if paired_artifact is not None:
+        return CanonicalPairedFrameRecord.model_validate(
+            {
+                **frame_values,
+                "paired_output_provenance": paired_artifact,
+            }
+        )
+    return FrameRecord.model_validate(frame_values)
 
 
 def _write_transport_direction(
@@ -843,6 +988,10 @@ def _generate_single_occluder_episode(
     appearance_registry: AppearanceRegistryType,
     seed_registry: SeedRegistryType,
     component_topology: bool,
+    capture_mode: Literal["legacy", "canonical_paired"],
+    pair_operational_events: list[dict[str, object]],
+    source_provenance_sha256: str,
+    renderer_execution_provenance_sha256: str,
 ) -> EpisodeManifest:
     episode_id = f"episode-{episode_index:06d}"
     episode_seed = derive_seed(config.seed, f"episode:{episode_index}")
@@ -857,8 +1006,12 @@ def _generate_single_occluder_episode(
         config.seed,
         seed_registry,
     )
-    rendered = render_single_occluder_transition(config, appearance)
+    rendered = render_single_occluder_transition(config, appearance, capture_mode=capture_mode)
     surfaces, references = _surface_references(config.seed, episode_index)
+    raw_to_opaque = {
+        str(raw_id): references[name].surface_id for name, raw_id in rendered.raw_geom_ids.items()
+    }
+    opaque_labels = {item.surface_id: item.segmentation_label for item in surfaces}
     before_segmentation = _remap_segmentation(
         rendered.before.raw_geom_segmentation,
         rendered.raw_geom_ids,
@@ -887,6 +1040,18 @@ def _generate_single_occluder_episode(
         rendered.before.depth,
         before_segmentation,
         camera_before,
+        canonical_pair=rendered.before.canonical_pair,
+        pair_operational_events=pair_operational_events,
+        scene_family=config.scene_family,
+        episode_seed=episode_seed,
+        config_logical_sha256=sha256_bytes(canonical_json_bytes(config)),
+        scene_content_sha256=compute_single_occluder_scene_content_hash(config),
+        counterfactual_segmentation=rendered.before.counterfactual_raw_geom_segmentation,
+        episode_id=episode_id,
+        raw_to_opaque_surface_ids=raw_to_opaque,
+        opaque_surface_labels=opaque_labels,
+        source_provenance_sha256=source_provenance_sha256,
+        renderer_execution_provenance_sha256=renderer_execution_provenance_sha256,
     )
     after = _write_frame(
         root,
@@ -896,6 +1061,18 @@ def _generate_single_occluder_episode(
         rendered.after.depth,
         after_segmentation,
         camera_after,
+        canonical_pair=rendered.after.canonical_pair,
+        pair_operational_events=pair_operational_events,
+        scene_family=config.scene_family,
+        episode_seed=episode_seed,
+        config_logical_sha256=sha256_bytes(canonical_json_bytes(config)),
+        scene_content_sha256=compute_single_occluder_scene_content_hash(config),
+        counterfactual_segmentation=rendered.after.counterfactual_raw_geom_segmentation,
+        episode_id=episode_id,
+        raw_to_opaque_surface_ids=raw_to_opaque,
+        opaque_surface_labels=opaque_labels,
+        source_provenance_sha256=source_provenance_sha256,
+        renderer_execution_provenance_sha256=renderer_execution_provenance_sha256,
     )
     visibility, correspondence, mask_changes = derive_visibility(
         before_segmentation,
@@ -1042,7 +1219,7 @@ def _generate_single_occluder_episode(
     )
     instrumentation_path = episode_directory / "instrumentation.json"
     write_canonical_json(instrumentation_path, instrumentation)
-    return EpisodeManifest(
+    episode_values = dict(
         episode_id=episode_id,
         episode_index=episode_index,
         episode_seed=episode_seed,
@@ -1068,6 +1245,19 @@ def _generate_single_occluder_episode(
         appearance_instance_sha256=appearance.record.appearance_instance_sha256,
         rgb_logical_sha256=(before.rgb.logical_sha256, after.rgb.logical_sha256),
     )
+    if isinstance(before, CanonicalPairedFrameRecord) and isinstance(
+        after, CanonicalPairedFrameRecord
+    ):
+        return CanonicalPairedEpisodeManifest.model_validate(
+            {
+                **episode_values,
+                "paired_output_provenance_sha256": (
+                    before.paired_output_provenance.logical_sha256,
+                    after.paired_output_provenance.logical_sha256,
+                ),
+            }
+        )
+    return EpisodeManifest.model_validate(episode_values)
 
 
 def _generate_corridor_episode(
@@ -1077,6 +1267,10 @@ def _generate_corridor_episode(
     appearance_registry: AppearanceRegistryType,
     seed_registry: SeedRegistryType,
     component_topology: bool,
+    capture_mode: Literal["legacy", "canonical_paired"],
+    pair_operational_events: list[dict[str, object]],
+    source_provenance_sha256: str,
+    renderer_execution_provenance_sha256: str,
 ) -> EpisodeManifest:
     episode_id = f"episode-{episode_index:06d}"
     episode_seed = derive_seed(config.seed, f"episode:{episode_index}")
@@ -1095,8 +1289,12 @@ def _generate_corridor_episode(
     )
     if appearance.record.seeds.appearance_base_seed != appearance_seed:
         raise RuntimeError("corridor appearance namespace differs from the resolved instance")
-    rendered = render_corridor_transition(config, geometry, appearance)
+    rendered = render_corridor_transition(config, geometry, appearance, capture_mode=capture_mode)
     surfaces, references = _corridor_surface_references(remapping_seed)
+    raw_to_opaque = {
+        str(raw_id): references[name].surface_id for name, raw_id in rendered.raw_geom_ids.items()
+    }
+    opaque_labels = {item.surface_id: item.segmentation_label for item in surfaces}
     before_segmentation = _remap_segmentation(
         rendered.before.raw_geom_segmentation,
         rendered.raw_geom_ids,
@@ -1125,6 +1323,17 @@ def _generate_corridor_episode(
         rendered.before.depth,
         before_segmentation,
         camera_before,
+        canonical_pair=rendered.before.canonical_pair,
+        pair_operational_events=pair_operational_events,
+        scene_family=config.scene_family,
+        episode_seed=episode_seed,
+        config_logical_sha256=sha256_bytes(canonical_json_bytes(config)),
+        scene_content_sha256=compute_corridor_scene_content_hash(config, geometry),
+        episode_id=episode_id,
+        raw_to_opaque_surface_ids=raw_to_opaque,
+        opaque_surface_labels=opaque_labels,
+        source_provenance_sha256=source_provenance_sha256,
+        renderer_execution_provenance_sha256=renderer_execution_provenance_sha256,
     )
     after = _write_frame(
         root,
@@ -1134,6 +1343,17 @@ def _generate_corridor_episode(
         rendered.after.depth,
         after_segmentation,
         camera_after,
+        canonical_pair=rendered.after.canonical_pair,
+        pair_operational_events=pair_operational_events,
+        scene_family=config.scene_family,
+        episode_seed=episode_seed,
+        config_logical_sha256=sha256_bytes(canonical_json_bytes(config)),
+        scene_content_sha256=compute_corridor_scene_content_hash(config, geometry),
+        episode_id=episode_id,
+        raw_to_opaque_surface_ids=raw_to_opaque,
+        opaque_surface_labels=opaque_labels,
+        source_provenance_sha256=source_provenance_sha256,
+        renderer_execution_provenance_sha256=renderer_execution_provenance_sha256,
     )
     visibility, correspondence, mask_changes = derive_visibility(
         before_segmentation,
@@ -1275,7 +1495,7 @@ def _generate_corridor_episode(
     instrumentation_path = episode_directory / "instrumentation.json"
     write_canonical_json(instrumentation_path, instrumentation)
     scene_content_sha256 = compute_corridor_scene_content_hash(config, geometry)
-    return EpisodeManifest(
+    episode_values = dict(
         episode_id=episode_id,
         episode_index=episode_index,
         episode_seed=episode_seed,
@@ -1301,6 +1521,19 @@ def _generate_corridor_episode(
         appearance_instance_sha256=appearance.record.appearance_instance_sha256,
         rgb_logical_sha256=(before.rgb.logical_sha256, after.rgb.logical_sha256),
     )
+    if isinstance(before, CanonicalPairedFrameRecord) and isinstance(
+        after, CanonicalPairedFrameRecord
+    ):
+        return CanonicalPairedEpisodeManifest.model_validate(
+            {
+                **episode_values,
+                "paired_output_provenance_sha256": (
+                    before.paired_output_provenance.logical_sha256,
+                    after.paired_output_provenance.logical_sha256,
+                ),
+            }
+        )
+    return EpisodeManifest.model_validate(episode_values)
 
 
 def _generate_episode(
@@ -1310,14 +1543,36 @@ def _generate_episode(
     appearance_registry: AppearanceRegistryType,
     seed_registry: SeedRegistryType,
     component_topology: bool,
+    capture_mode: Literal["legacy", "canonical_paired"],
+    pair_operational_events: list[dict[str, object]],
+    source_provenance_sha256: str,
+    renderer_execution_provenance_sha256: str,
 ) -> EpisodeManifest:
     if isinstance(config, SingleOccluderConfig):
         return _generate_single_occluder_episode(
-            root, config, episode_index, appearance_registry, seed_registry, component_topology
+            root,
+            config,
+            episode_index,
+            appearance_registry,
+            seed_registry,
+            component_topology,
+            capture_mode,
+            pair_operational_events,
+            source_provenance_sha256,
+            renderer_execution_provenance_sha256,
         )
     if isinstance(config, CorridorConfig):
         return _generate_corridor_episode(
-            root, config, episode_index, appearance_registry, seed_registry, component_topology
+            root,
+            config,
+            episode_index,
+            appearance_registry,
+            seed_registry,
+            component_topology,
+            capture_mode,
+            pair_operational_events,
+            source_provenance_sha256,
+            renderer_execution_provenance_sha256,
         )
     raise TypeError(f"unsupported scene configuration: {type(config).__name__}")
 
@@ -1343,17 +1598,36 @@ def generate_dataset(
     appearance_registry: AppearanceRegistryType | None = None,
     seed_registry: SeedRegistryType | None = None,
     component_topology: bool = False,
+    capture_mode: Literal["legacy", "canonical_paired"] = "legacy",
 ) -> DatasetManifest:
     """Generate a new dataset directory, refusing to overwrite existing content."""
 
     if episodes < 1:
         raise ValueError("episodes must be at least one")
+    if capture_mode not in {"legacy", "canonical_paired"}:
+        raise ValueError("unknown capture mode")
+    if capture_mode == "canonical_paired":
+        if component_topology:
+            raise ValueError("canonical paired capture does not support component topology")
+        require_supported_runtime(os.environ.get("MUJOCO_GL", ""))
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(f"output directory is not empty: {output}")
     source_provenance = collect_source_provenance(Path.cwd())
     source_provenance_sha256 = compute_source_provenance_hash(source_provenance)
+    renderer_provenance = _renderer_provenance()
+    renderer_execution_provenance_sha256 = compute_renderer_execution_provenance_hash(
+        renderer_provenance
+    )
     appearance_registry = appearance_registry or load_appearance_registry(_APPEARANCE_REGISTRY_PATH)
     seed_registry = seed_registry or load_evaluation_seed_registry(_EVALUATION_SEED_REGISTRY_PATH)
+    if capture_mode == "canonical_paired":
+        if (
+            appearance_registry.registry_version != "appearance_candidate_registry_v1"
+            or config.appearance.profile_id
+            not in {"legacy_solid_base_v1", "legacy_solid_alternate_v1"}
+            or (config.render.width, config.render.height) != (160, 120)
+        ):
+            raise ValueError("canonical paired capture is limited to the initial legacy scope")
     validate_axis_isolation(appearance_registry)
     if config.appearance.registry_version != appearance_registry.registry_version:
         raise ValueError("selected appearance registry version is unavailable")
@@ -1389,6 +1663,7 @@ def generate_dataset(
         Modality.APPEARANCE_CONTROL,
         "application/json",
     )
+    pair_operational_events: list[dict[str, object]] = []
     episode_manifests = tuple(
         _generate_episode(
             output,
@@ -1397,19 +1672,23 @@ def generate_dataset(
             appearance_registry,
             seed_registry,
             component_topology,
+            capture_mode,
+            pair_operational_events,
+            source_provenance_sha256,
+            renderer_execution_provenance_sha256,
         )
         for episode_index in range(episodes)
-    )
-    renderer_provenance = _renderer_provenance()
-    renderer_execution_provenance_sha256 = compute_renderer_execution_provenance_hash(
-        renderer_provenance
     )
     revision1 = appearance_registry.registry_version == APPEARANCE_REVISION1_REGISTRY_VERSION
     manifest = DatasetManifest(
         schema_version=(
-            ("0.1.0-dev.10" if revision1 else "0.1.0-dev.9")
-            if component_topology
-            else ("0.1.0-dev.8" if revision1 else "0.1.0-dev.7")
+            "0.1.0-dev.11"
+            if capture_mode == "canonical_paired"
+            else (
+                ("0.1.0-dev.10" if revision1 else "0.1.0-dev.9")
+                if component_topology
+                else ("0.1.0-dev.8" if revision1 else "0.1.0-dev.7")
+            )
         ),
         generator_version="0.1.0",
         scene_family=config.scene_family,
@@ -1446,12 +1725,14 @@ def generate_dataset(
         }
     )
     write_canonical_json(output / "manifest.json", manifest)
-    volatile_metadata = {
+    volatile_metadata: dict[str, object] = {
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "hostname": socket.gethostname(),
         "python": sys.version,
         "generator_version": __version__,
     }
+    if capture_mode == "canonical_paired":
+        volatile_metadata["canonical_paired_events"] = pair_operational_events
     (output / "run.json").write_text(
         json.dumps(volatile_metadata, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

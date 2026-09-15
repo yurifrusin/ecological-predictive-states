@@ -69,6 +69,7 @@ from epsbench.data.decoding import (
 from epsbench.data.identity import (
     compute_analytic_transport_hash,
     compute_boundary_numerical_contract_hash,
+    compute_canonical_paired_endpoint_hash,
     compute_content_provenance_binding,
     compute_dataset_logical_hash,
     compute_ecological_label_hash,
@@ -98,6 +99,9 @@ from epsbench.schema import (
     BoundaryOwnerSide,
     BoundaryVisibilityDiagnostics,
     CameraInstrumentation,
+    CanonicalPairedEpisodeManifest,
+    CanonicalPairedFrameRecord,
+    CanonicalPairedOutputProvenance,
     ComponentTopologyAnnotation,
     CorridorInstrumentation,
     DatasetManifest,
@@ -127,6 +131,12 @@ from epsbench.sim import (
     compute_single_occluder_analytic_transport,
     compute_single_occluder_boundary_visibility,
     corridor_generation_seeds,
+)
+from epsbench.sim.canonical_paired import (
+    SceneMapEntry,
+    convert_native_depth,
+    decode_id_colors,
+    validate_saved_state,
 )
 from epsbench.sim.compiled import CompiledSceneContract
 from epsbench.utils.canonical import (
@@ -1167,6 +1177,16 @@ def validate_dataset(root: Path) -> DatasetManifest:
     ):
         raise DatasetValidationError("content/provenance binding hash mismatch")
 
+    if manifest.schema_version == "0.1.0-dev.11":
+        renderer = manifest.renderer_provenance
+        if (
+            renderer.mujoco_version != "3.12.0"
+            or renderer.numpy_version != "2.4.6"
+            or renderer.backend != "osmesa"
+            or renderer.operating_system != "Linux"
+            or manifest.source_provenance.python_version != "3.11.15"
+        ):
+            raise DatasetValidationError("paired dataset runtime is outside the initial scope")
     registry = _ArtifactRegistry(resolved_root)
 
     appearance_registry_payload = _verify_json(
@@ -1381,6 +1401,7 @@ def validate_dataset(root: Path) -> DatasetManifest:
         frame_arrays: list[
             tuple[np.ndarray[Any, Any], np.ndarray[Any, Any], np.ndarray[Any, Any]]
         ] = []
+        paired_hashes: list[str] = []
         cameras: list[CameraInstrumentation] = []
         for frame in (transition.before, transition.after):
             if (frame.height, frame.width) != expected_raster_shape:
@@ -1410,6 +1431,121 @@ def validate_dataset(root: Path) -> DatasetManifest:
                 raise DatasetValidationError("segmentation dtype or shape is invalid")
             if rgb.shape[:2] != depth.shape or depth.shape != segmentation.shape:
                 raise DatasetValidationError("RGB, depth, and segmentation are misaligned")
+            if isinstance(frame, CanonicalPairedFrameRecord):
+                paired_payload = _verify_json(
+                    resolved_root, frame.paired_output_provenance, registry
+                )
+                try:
+                    paired = CanonicalPairedOutputProvenance.model_validate_json(
+                        canonical_json_bytes(paired_payload)
+                    )
+                except Exception as error:
+                    raise DatasetValidationError(
+                        "canonical paired provenance failed schema validation"
+                    ) from error
+                if (
+                    paired.episode_id != episode.episode_id
+                    or paired.episode_seed != episode.episode_seed
+                    or paired.scene_family != manifest.scene_family
+                    or paired.config_logical_sha256 != manifest.config_logical_sha256
+                    or paired.scene_content_sha256 != episode.scene_content_sha256
+                    or paired.raw_to_opaque_surface_ids != instrumentation.raw_to_opaque_surface_ids
+                    or paired.opaque_surface_labels
+                    != {
+                        surface.surface_id: surface.segmentation_label
+                        for surface in transition.surfaces
+                    }
+                    or paired.rgb_provenance.artifact_logical_sha256 != frame.rgb.logical_sha256
+                    or paired.frame_index != frame.frame_index
+                    or paired.source_provenance_sha256 != manifest.source_provenance_sha256
+                    or paired.renderer_execution_provenance_sha256
+                    != manifest.renderer_execution_provenance_sha256
+                    or paired.canonical_segmentation_logical_sha256
+                    != frame.segmentation.logical_sha256
+                    or paired.canonical_depth_logical_sha256 != frame.depth.logical_sha256
+                    or paired.canonical_segmentation_file_sha256 != frame.segmentation.file_sha256
+                    or paired.canonical_depth_file_sha256 != frame.depth.file_sha256
+                ):
+                    raise DatasetValidationError("canonical paired endpoint binding differs")
+                if compute_canonical_paired_endpoint_hash(paired) != paired.endpoint_logical_sha256:
+                    raise DatasetValidationError("canonical paired endpoint hash mismatch")
+                native_id = _load_npy(resolved_root, paired.native_id_rgb, registry)
+                native_depth = _load_npy(resolved_root, paired.native_depth_pre_metric, registry)
+                state = _verify_json(resolved_root, paired.producer_state, registry)
+                try:
+                    if not isinstance(state, dict):
+                        raise ValueError("paired producer state must be an object")
+                    validate_saved_state(state, frame.width, frame.height)
+                    if state["scene_map"] != [
+                        item.model_dump(mode="json") for item in paired.scene_map
+                    ]:
+                        raise ValueError("paired scene map differs from producer state")
+                    if state["near"] != paired.near or state["far"] != paired.far:
+                        raise ValueError("paired conversion bounds differ from producer state")
+                    for camera_state in state["scene_cameras"]:
+                        if camera_state["frustum_near"] != float(
+                            np.float32(paired.near)
+                        ) or camera_state["frustum_far"] != float(np.float32(paired.far)):
+                            raise ValueError("paired camera frustum and conversion bounds differ")
+                    by_raw_id = {
+                        raw_id: name for name, raw_id in instrumentation.raw_geom_ids.items()
+                    }
+                    if {item["objid"] for item in state["scene_geometry"]} != set(by_raw_id):
+                        raise ValueError("paired producer geometry and instrumentation IDs differ")
+                    for geom in state["scene_geometry"]:
+                        name = by_raw_id[geom["objid"]]
+                        for key, expected in (
+                            ("pos", instrumentation.raw_geom_world_positions[name]),
+                            ("size", instrumentation.raw_geom_compiled_sizes[name]),
+                            ("mat", instrumentation.raw_geom_world_rotations_row_major[name]),
+                        ):
+                            if (
+                                geom[key]
+                                != np.asarray(expected, dtype=np.float32).reshape(-1).tolist()
+                            ):
+                                raise ValueError(
+                                    "paired geometry differs from compiled instrumentation"
+                                )
+                except Exception as error:
+                    raise DatasetValidationError(
+                        "canonical paired producer state is invalid"
+                    ) from error
+                if isinstance(instrumentation, SingleOccluderInstrumentation):
+                    cf = next(
+                        item
+                        for item in instrumentation.occlusion_oracle.frames
+                        if item.frame_index == frame.frame_index
+                    )
+                    if (
+                        paired.counterfactual_provenance is None
+                        or paired.counterfactual_provenance.artifact_logical_sha256
+                        != cf.counterfactual_segmentation.logical_sha256
+                    ):
+                        raise DatasetValidationError("separate counterfactual provenance differs")
+                raw = decode_id_colors(
+                    native_id,
+                    tuple(
+                        SceneMapEntry(item.segid_plus_one, item.objid, item.objtype)
+                        for item in paired.scene_map
+                    ),
+                )
+                regenerated_segmentation = np.zeros(raw.shape, dtype=np.int32)
+                for raw_id_text, surface_id in paired.raw_to_opaque_surface_ids.items():
+                    regenerated_segmentation[raw == int(raw_id_text)] = np.int32(
+                        paired.opaque_surface_labels[surface_id]
+                    )
+                if not np.array_equal(regenerated_segmentation, segmentation):
+                    raise DatasetValidationError(
+                        "canonical segmentation is not regenerated by paired native IDs"
+                    )
+                regenerated_depth = convert_native_depth(native_depth, paired.near, paired.far)
+                if not np.array_equal(regenerated_depth, depth):
+                    raise DatasetValidationError(
+                        "canonical depth is not regenerated by paired native depth"
+                    )
+                paired_hashes.append(frame.paired_output_provenance.logical_sha256)
+            elif manifest.schema_version == "0.1.0-dev.11":
+                raise DatasetValidationError("canonical paired dataset lacks endpoint provenance")
             camera_payload = _verify_json(
                 resolved_root,
                 frame.camera_world_transform,
@@ -1479,6 +1615,11 @@ def validate_dataset(root: Path) -> DatasetManifest:
             transition.after.rgb.logical_sha256,
         ):
             raise DatasetValidationError("episode RGB hashes differ from frame records")
+        if isinstance(episode, CanonicalPairedEpisodeManifest):
+            if tuple(paired_hashes) != episode.paired_output_provenance_sha256:
+                raise DatasetValidationError("episode paired endpoint hashes differ")
+        elif paired_hashes:
+            raise DatasetValidationError("legacy dataset unexpectedly has paired provenance")
 
         declared_labels = {surface.segmentation_label for surface in transition.surfaces}
         observed_labels: set[int] = set()

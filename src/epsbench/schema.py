@@ -539,6 +539,98 @@ class ArtifactRecord(StrictModel):
         return value
 
 
+class CanonicalPairedSceneMapEntry(StrictModel):
+    segid_plus_one: int = Field(gt=0, le=0xFFFFFF)
+    objid: int = Field(ge=0, le=2**31 - 1)
+    objtype: Literal[5]
+
+
+class SeparateCaptureProvenance(StrictModel):
+    producer: Literal["ordinary_rgb", "single_occluder_counterfactual_segmentation"]
+    association: Literal["separate_draw_no_id_depth_correspondence"]
+    artifact_logical_sha256: Sha256
+
+
+class CanonicalPairedOutputProvenance(StrictModel):
+    """Privileged stable binding for one canonical segmentation/depth endpoint."""
+
+    schema_version: Literal["canonical_paired_output_provenance/v1"]
+    association: Literal["shared_raster_id_depth"]
+    episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
+    frame_index: Literal[0, 1]
+    episode_seed: int = Field(ge=0)
+    scene_family: SceneFamily
+    config_logical_sha256: Sha256
+    scene_content_sha256: Sha256
+    rgb_provenance: SeparateCaptureProvenance
+    counterfactual_provenance: SeparateCaptureProvenance | None
+    depth_conversion: Literal["mujoco_3.12_float32_coefficients_float64_inverse_float32_output"]
+    orientation: Literal["native_bottom_up_then_common_vertical_flip_to_image_top_down"]
+    native_readback_atomicity: Literal["sequential_color_then_depth_not_hardware_atomic"]
+    native_id_rgb: ArtifactRecord
+    native_depth_pre_metric: ArtifactRecord
+    producer_state: ArtifactRecord
+    scene_map: tuple[CanonicalPairedSceneMapEntry, ...] = Field(min_length=1)
+    raw_to_opaque_surface_ids: dict[str, SurfaceId]
+    opaque_surface_labels: dict[SurfaceId, int]
+    canonical_segmentation_logical_sha256: Sha256
+    canonical_depth_logical_sha256: Sha256
+    canonical_segmentation_file_sha256: Sha256
+    canonical_depth_file_sha256: Sha256
+    near: float
+    far: float
+    source_provenance_sha256: Sha256
+    renderer_execution_provenance_sha256: Sha256
+    endpoint_logical_sha256: Sha256
+
+    @model_validator(mode="after")
+    def complete_pair_is_well_formed(self) -> CanonicalPairedOutputProvenance:
+        for artifact, dtype, rank in (
+            (self.native_id_rgb, "uint8", 3),
+            (self.native_depth_pre_metric, "float32", 2),
+            (self.producer_state, "json", 1),
+        ):
+            if artifact.modality != Modality.PRIVILEGED_GENERATION_RECORDS:
+                raise ValueError("paired native/state artifacts must remain privileged")
+            if artifact.dtype != dtype or len(artifact.shape) != rank:
+                raise ValueError("paired native/state artifact shape or dtype differs")
+        if self.native_id_rgb.shape[:2] != self.native_depth_pre_metric.shape:
+            raise ValueError("paired native arrays must have aligned raster dimensions")
+        if self.native_id_rgb.shape[2] != 3:
+            raise ValueError("native ID colour must have three channels")
+        if not math.isfinite(self.near) or not math.isfinite(self.far):
+            raise ValueError("paired depth conversion bounds must be finite")
+        if self.near <= 0.0 or self.far <= self.near:
+            raise ValueError("paired depth conversion bounds are invalid")
+        if self.rgb_provenance.producer != "ordinary_rgb":
+            raise ValueError("RGB requires its own ordinary draw provenance")
+        if self.scene_family == SceneFamily.SINGLE_OCCLUDER:
+            if (
+                self.counterfactual_provenance is None
+                or self.counterfactual_provenance.producer
+                != "single_occluder_counterfactual_segmentation"
+            ):
+                raise ValueError("single occluder requires separate counterfactual provenance")
+        elif self.counterfactual_provenance is not None:
+            raise ValueError("corridor has no counterfactual capture")
+        if any(not re.fullmatch(r"0|[1-9][0-9]*", key) for key in self.raw_to_opaque_surface_ids):
+            raise ValueError("raw identifier keys must use canonical decimal form")
+        if len(set(self.raw_to_opaque_surface_ids.values())) != len(self.raw_to_opaque_surface_ids):
+            raise ValueError("raw-to-opaque identities must be one-to-one")
+        if any(label <= 0 or label > 2**31 - 1 for label in self.opaque_surface_labels.values()):
+            raise ValueError("opaque labels must fit positive int32")
+        raw_ids = {entry.objid for entry in self.scene_map}
+        if len(self.scene_map) != len({entry.segid_plus_one for entry in self.scene_map}):
+            raise ValueError("paired scene map segmentation IDs must be unique")
+        if not raw_ids.issubset({int(key) for key in self.raw_to_opaque_surface_ids}):
+            raise ValueError("paired scene map is not covered by raw-to-opaque identity")
+        if set(self.raw_to_opaque_surface_ids.values()) != set(self.opaque_surface_labels):
+            raise ValueError("paired opaque identity and label domains differ")
+        if len(set(self.opaque_surface_labels.values())) != len(self.opaque_surface_labels):
+            raise ValueError("paired opaque labels must be unique")
+        return self
+
+
 class DirectionalVisibilityEventMap(StrictModel):
     frame_index: Literal[0, 1]
     direction: Literal["before_frame_fate", "after_frame_origin"]
@@ -894,6 +986,21 @@ class FrameRecord(StrictModel):
         return self
 
 
+class CanonicalPairedFrameRecord(FrameRecord):
+    paired_output_provenance: ArtifactRecord
+
+    @model_validator(mode="after")
+    def provenance_is_privileged_json(self) -> CanonicalPairedFrameRecord:
+        artifact = self.paired_output_provenance
+        if (
+            artifact.modality != Modality.PRIVILEGED_GENERATION_RECORDS
+            or artifact.dtype != "json"
+            or len(artifact.shape) != 1
+        ):
+            raise ValueError("paired provenance artifact must be privileged JSON")
+        return self
+
+
 class OpticalTransportCoordinateConvention(StrictModel):
     pixel_sample: Literal["centre_of_pixel"]
     pixel_centre_x: Literal["column_plus_0.5"]
@@ -1000,8 +1107,8 @@ class TransitionRecord(StrictModel):
     episode_id: str = Field(pattern=r"^episode-[0-9]{6}$")
     action: Action
     surfaces: tuple[SurfaceReference, ...] = Field(min_length=1)
-    before: FrameRecord
-    after: FrameRecord
+    before: FrameRecord | CanonicalPairedFrameRecord
+    after: FrameRecord | CanonicalPairedFrameRecord
     visibility_states: tuple[VisibilityState, ...] = Field(min_length=1)
     region_correspondence: tuple[RegionCorrespondence, ...] = Field(min_length=1)
     region_mask_changes: tuple[RegionMaskChange, ...] = Field(min_length=1)
@@ -1159,6 +1266,10 @@ class EpisodeManifest(StrictModel):
         if self.privileged_instrumentation.modality != Modality.PRIVILEGED_GENERATION_RECORDS:
             raise ValueError("instrumentation artifact must be privileged")
         return self
+
+
+class CanonicalPairedEpisodeManifest(EpisodeManifest):
+    paired_output_provenance_sha256: tuple[Sha256, Sha256]
 
 
 class CameraInstrumentation(StrictModel):
@@ -1699,7 +1810,13 @@ class RendererProvenance(StrictModel):
 
 
 class DatasetManifest(StrictModel):
-    schema_version: Literal["0.1.0-dev.7", "0.1.0-dev.8", "0.1.0-dev.9", "0.1.0-dev.10"]
+    schema_version: Literal[
+        "0.1.0-dev.7",
+        "0.1.0-dev.8",
+        "0.1.0-dev.9",
+        "0.1.0-dev.10",
+        "0.1.0-dev.11",
+    ]
     generator_version: Literal["0.1.0"]
     scene_family: SceneFamily
     root_seed: int = Field(ge=0)
@@ -1717,7 +1834,7 @@ class DatasetManifest(StrictModel):
     resolved_config: ArtifactRecord
     renderer_provenance: RendererProvenance
     renderer_execution_provenance_sha256: Sha256
-    episodes: tuple[EpisodeManifest, ...] = Field(min_length=1)
+    episodes: tuple[EpisodeManifest | CanonicalPairedEpisodeManifest, ...] = Field(min_length=1)
     dataset_logical_sha256: Sha256
     source_provenance: SourceProvenance
     source_provenance_sha256: Sha256
@@ -1729,9 +1846,15 @@ class DatasetManifest(StrictModel):
             "snapshotted_revision_partition_seed_registry_v1"
         )
         if self.schema_version not in (
-            ("0.1.0-dev.8", "0.1.0-dev.10") if revision1 else ("0.1.0-dev.7", "0.1.0-dev.9")
+            ("0.1.0-dev.8", "0.1.0-dev.10")
+            if revision1
+            else ("0.1.0-dev.7", "0.1.0-dev.9", "0.1.0-dev.11")
         ):
             raise ValueError("dataset schema and appearance assignment versions disagree")
+        paired = self.schema_version == "0.1.0-dev.11"
+        for episode in self.episodes:
+            if paired != isinstance(episode, CanonicalPairedEpisodeManifest):
+                raise ValueError("dataset schema and paired provenance disagree")
         if self.resolved_config.modality != Modality.PRIVILEGED_GENERATION_RECORDS:
             raise ValueError("resolved configuration must be privileged generation data")
         if self.appearance_registry_snapshot.modality != Modality.APPEARANCE_CONTROL:
