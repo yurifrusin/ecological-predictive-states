@@ -47,6 +47,38 @@ def fake_native_state(_renderer: object) -> dict[str, object]:
         "stereo": 0,
         "stereo_none": 0,
         "rnd_depth": False,
+        "segment_enabled": True,
+        "idcolor_enabled": True,
+        "gl_rgb": 6407,
+        "depth_zerofar": 1,
+        "actual_current_context": 77,
+        "expected_current_context": 77,
+        "mjr_currentBuffer": 1,
+        "framebuffer_offscreen": 1,
+        "offSamples": 0,
+        "offFBO": 5,
+        "offFBO_r": 0,
+        "offWidth": 2,
+        "offHeight": 2,
+        "offscreen_attachments": {"offFBO": {"object_name": 5}},
+        "query_bindings_restored": True,
+        "draw_framebuffer_binding": 5,
+        "draw_buffer": 1029,
+        "scene_cameras": [
+            {
+                "pos": [0.0, 0.0, 0.0],
+                "forward": [0.0, 0.0, -1.0],
+                "up": [0.0, 1.0, 0.0],
+                "frustum_near": 0.01,
+                "frustum_far": 50.0,
+                "frustum_top": 1.0,
+                "frustum_bottom": -1.0,
+                "frustum_center": 0.0,
+                "frustum_width": 1.0,
+            }
+        ],
+        "projection_matrix_float32": [0.0] * 16,
+        "modelview_matrix_float32": [0.0] * 16,
     }
 
 
@@ -59,6 +91,11 @@ def fake_context() -> dict[str, object]:
         "depth_storage_dimensions": [2, 2],
         "attachment_format": "RGB8",
         "attachment_component_type": "UNSIGNED_NORMALIZED",
+        "read_buffer": 1029,
+        "osmesa_context_identity": 77,
+        "mjr_off_width": 2,
+        "mjr_off_height": 2,
+        "offscreen_attachments": {"offFBO": {"object_name": 5}},
     }
 
 
@@ -149,6 +186,61 @@ def test_strict_gl_integer_allows_only_named_zero_padding() -> None:
         subject._strict_gl_integer(np.array([36001, 2]), "clip", allow_zero_padding=True)
     with pytest.raises(subject.SharedRasterFailure):
         subject._strict_gl_integer(np.array([1, 0]), "ordinary")
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"framewidth": 1.0}, "framewidth"),
+        ({"stereo": 1}, "stereo"),
+        ({"rnd_depth": True}, "depth-redraw"),
+        ({"segment_enabled": False}, "SEGMENT"),
+        ({"readPixelFormat": 1}, "GL_RGB"),
+        ({"readDepthMap": 0}, "mjDEPTH_ZEROFAR"),
+        ({"pack_alignment": 4}, "packing/PBO"),
+        ({"pixel_pack_buffer_binding": 7}, "packing/PBO"),
+        ({"actual_current_context": 78}, "current context"),
+        ({"mjr_currentBuffer": 0}, "currentBuffer"),
+        ({"offSamples": 4}, "sampled"),
+        ({"offFBO_r": 9}, "resolve"),
+        ({"read_framebuffer_binding": 6}, "offFBO"),
+        ({"draw_framebuffer_binding": 6}, "offFBO"),
+        ({"read_buffer": 8}, "read buffer"),
+        ({"offWidth": 3}, "dimensions"),
+        ({"offscreen_attachments": {}}, "attachment"),
+        ({"scene_cameras": []}, "camera"),
+        ({"projection_matrix_float32": [0.0]}, "projection"),
+    ],
+)
+def test_strict_paired_draw_state_rejects_absolute_constraint_drift(
+    changes: dict[str, object], message: str
+) -> None:
+    state = fake_native_state(object())
+    state.update(changes)
+    with pytest.raises(subject.SharedRasterFailure, match=message):
+        subject.validate_paired_draw_state(
+            state,
+            expected_context=77,
+            expected_read_framebuffer=5,
+            expected_read_buffer=1029,
+            expected_context_facts=fake_context(),
+        )
+
+
+def test_strict_draw_state_accepts_legitimate_first_draw_clip_transition() -> None:
+    constructor_clip = {"clip_origin": 0, "clip_depth_mode": 0}
+    draw_state = fake_native_state(object())
+    assert (draw_state["clip_origin"], draw_state["clip_depth_mode"]) != (
+        constructor_clip["clip_origin"],
+        constructor_clip["clip_depth_mode"],
+    )
+    subject.validate_paired_draw_state(
+        draw_state,
+        expected_context=77,
+        expected_read_framebuffer=5,
+        expected_read_buffer=1029,
+        expected_context_facts=fake_context(),
+    )
 
 
 def test_permissions_deny_before_any_path_access(
@@ -364,6 +456,7 @@ def test_depth_flags_rejected_before_original_render_and_hooks_restored(tmp_path
         tmp_path,
         native_state_observer=fake_native_state,
     )
+    owner.contexts = [fake_context()]
     renderer = FakeRenderer(module)
     renderer._scene.flags[:] = False
     subject._PRISTINE[id(module)] = (FakeRenderer, native_render, native_read)
@@ -398,6 +491,7 @@ def test_native_read_failure_is_retained_and_hooks_restored(tmp_path: Path) -> N
         tmp_path,
         native_state_observer=fake_native_state,
     )
+    owner.contexts = [fake_context()]
     renderer = FakeRenderer(module)
     subject._PRISTINE[id(module)] = (FakeRenderer, native_render, native_read)
     proxy = subject._RendererProxy(owner, renderer, 0)

@@ -8,6 +8,7 @@ remain sequential rather than hardware-atomic.
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import os
@@ -284,6 +285,7 @@ def observe_shared_context(
     if context is None:
         raise SharedRasterFailure("renderer context unavailable")
     context.make_current()
+    facts["osmesa_context_identity"] = _pointer_identity(getattr(context, "_context", None))
     mjr = getattr(renderer, "_mjr_context", None)
     facts["readPixelFormat"] = int(getattr(mjr, "readPixelFormat", -1))
     facts["readDepthMap"] = int(getattr(mjr, "readDepthMap", -1))
@@ -356,9 +358,24 @@ def shared_context_binding(facts: Mapping[str, object]) -> dict[str, object]:
     return value
 
 
+def _pointer_identity(value: object) -> int:
+    try:
+        pointer = ctypes.cast(cast(Any, value), ctypes.c_void_p).value
+    except (TypeError, ValueError) as exc:
+        raise SharedRasterFailure("OSMesa context pointer is unavailable") from exc
+    if pointer is None or pointer <= 0:
+        raise SharedRasterFailure("OSMesa context pointer is unavailable")
+    return int(pointer)
+
+
 def observe_native_read_state(renderer: Any) -> dict[str, object]:
+    """Observe current draw/read state without making a context current."""
     import mujoco
     from OpenGL import GL
+    from OpenGL import osmesa as GL_OSMESA
+
+    from epsbench.diagnostics.gl_provenance import inspect_mujoco_offscreen_attachments
+    from epsbench.diagnostics.revision_mujoco import _study_depth_attachments
 
     scene, model, rect, mjr = (
         renderer._scene,
@@ -366,34 +383,119 @@ def observe_native_read_state(renderer: Any) -> dict[str, object]:
         renderer._rect,
         renderer._mjr_context,
     )
+    gl_context = getattr(renderer, "_gl_context", None)
+    expected_pointer = getattr(gl_context, "_context", None)
+    actual_pointer = GL_OSMESA.OSMesaGetCurrentContext()
+    query_bindings_before = {
+        "read_framebuffer": _strict_gl_integer(
+            GL.glGetIntegerv(GL.GL_READ_FRAMEBUFFER_BINDING), "GL_READ_FRAMEBUFFER_BINDING"
+        ),
+        "draw_framebuffer": _strict_gl_integer(
+            GL.glGetIntegerv(GL.GL_DRAW_FRAMEBUFFER_BINDING), "GL_DRAW_FRAMEBUFFER_BINDING"
+        ),
+        "renderbuffer": _strict_gl_integer(
+            GL.glGetIntegerv(GL.GL_RENDERBUFFER_BINDING), "GL_RENDERBUFFER_BINDING"
+        ),
+    }
+    attachments = dict(inspect_mujoco_offscreen_attachments(renderer))
+    query_bindings_after = {
+        "read_framebuffer": _strict_gl_integer(
+            GL.glGetIntegerv(GL.GL_READ_FRAMEBUFFER_BINDING), "GL_READ_FRAMEBUFFER_BINDING"
+        ),
+        "draw_framebuffer": _strict_gl_integer(
+            GL.glGetIntegerv(GL.GL_DRAW_FRAMEBUFFER_BINDING), "GL_DRAW_FRAMEBUFFER_BINDING"
+        ),
+        "renderbuffer": _strict_gl_integer(
+            GL.glGetIntegerv(GL.GL_RENDERBUFFER_BINDING), "GL_RENDERBUFFER_BINDING"
+        ),
+    }
+    if query_bindings_after != query_bindings_before:
+        raise SharedRasterFailure("attachment query did not restore GL bindings")
+    if _pointer_identity(GL_OSMESA.OSMesaGetCurrentContext()) != _pointer_identity(actual_pointer):
+        raise SharedRasterFailure("attachment query changed the current OSMesa context")
+    attachment_records = cast(dict[str, object], attachments["offscreen_attachments"])
+    for name, depth in _study_depth_attachments(renderer).items():
+        cast(dict[str, object], attachment_records[name])["depth"] = depth
     mapping = [
-        {"segid_plus_one": int(g.segid) + 1, "objid": int(g.objid), "objtype": int(g.objtype)}
+        {
+            "segid_plus_one": int(g.segid) + 1,
+            "objid": int(g.objid),
+            "objtype": int(g.objtype),
+        }
         for g in scene.geoms[: int(scene.ngeom)]
         if int(g.segid) != -1
     ]
+    cameras = [
+        {
+            "pos": np.asarray(camera.pos, dtype=np.float32).tolist(),
+            "forward": np.asarray(camera.forward, dtype=np.float32).tolist(),
+            "up": np.asarray(camera.up, dtype=np.float32).tolist(),
+            "frustum_near": float(camera.frustum_near),
+            "frustum_far": float(camera.frustum_far),
+            "frustum_top": float(camera.frustum_top),
+            "frustum_bottom": float(camera.frustum_bottom),
+            "frustum_center": float(camera.frustum_center),
+            "frustum_width": float(camera.frustum_width),
+        }
+        for camera in scene.camera
+    ]
+    projection = np.asarray(GL.glGetFloatv(GL.GL_PROJECTION_MATRIX), dtype=np.float32)
+    modelview = np.asarray(GL.glGetFloatv(GL.GL_MODELVIEW_MATRIX), dtype=np.float32)
+    if projection.size != 16 or modelview.size != 16:
+        raise SharedRasterFailure("post-draw projection/modelview matrix shape differs")
+    if not np.isfinite(projection).all() or not np.isfinite(modelview).all():
+        raise SharedRasterFailure("post-draw projection/modelview matrix is nonfinite")
     return {
+        "actual_current_context": _pointer_identity(actual_pointer),
+        "expected_current_context": _pointer_identity(expected_pointer),
         "rect": [int(rect.left), int(rect.bottom), int(rect.width), int(rect.height)],
         "scene_flags": np.asarray(scene.flags, dtype=np.uint8).tolist(),
         "ngeom": int(scene.ngeom),
         "scene_map": mapping,
+        "scene_cameras": cameras,
+        "projection_matrix_float32": projection.reshape(-1).tolist(),
+        "modelview_matrix_float32": modelview.reshape(-1).tolist(),
         "framewidth": float(scene.framewidth),
         "stereo": int(scene.stereo),
         "stereo_none": int(mujoco.mjtStereo.mjSTEREO_NONE),
         "rnd_depth": bool(scene.flags[int(mujoco.mjtRndFlag.mjRND_DEPTH)]),
+        "segment_enabled": bool(scene.flags[int(mujoco.mjtRndFlag.mjRND_SEGMENT)]),
+        "idcolor_enabled": bool(scene.flags[int(mujoco.mjtRndFlag.mjRND_IDCOLOR)]),
         "near": float(model.vis.map.znear * model.stat.extent),
         "far": float(model.vis.map.zfar * model.stat.extent),
         "extent": float(model.stat.extent),
         "readPixelFormat": int(mjr.readPixelFormat),
         "readDepthMap": int(mjr.readDepthMap),
+        "gl_rgb": int(GL.GL_RGB),
+        "depth_zerofar": int(mujoco.mjtDepthMap.mjDEPTH_ZEROFAR),
+        "mjr_currentBuffer": int(mjr.currentBuffer),
+        "framebuffer_offscreen": int(mujoco.mjtFramebuffer.mjFB_OFFSCREEN),
+        "offSamples": int(mjr.offSamples),
+        "offFBO": int(mjr.offFBO),
+        "offFBO_r": int(mjr.offFBO_r),
+        "offWidth": int(mjr.offWidth),
+        "offHeight": int(mjr.offHeight),
+        "offscreen_attachments": attachment_records,
+        "query_bindings_restored": True,
         "read_framebuffer_binding": _strict_gl_integer(
-            GL.glGetIntegerv(GL.GL_READ_FRAMEBUFFER_BINDING), "GL_READ_FRAMEBUFFER_BINDING"
+            GL.glGetIntegerv(GL.GL_READ_FRAMEBUFFER_BINDING),
+            "GL_READ_FRAMEBUFFER_BINDING",
+        ),
+        "draw_framebuffer_binding": _strict_gl_integer(
+            GL.glGetIntegerv(GL.GL_DRAW_FRAMEBUFFER_BINDING),
+            "GL_DRAW_FRAMEBUFFER_BINDING",
         ),
         "read_buffer": _strict_gl_integer(GL.glGetIntegerv(GL.GL_READ_BUFFER), "GL_READ_BUFFER"),
+        "draw_buffer": _strict_gl_integer(GL.glGetIntegerv(GL.GL_DRAW_BUFFER), "GL_DRAW_BUFFER"),
         "clip_origin": _strict_gl_integer(
-            GL.glGetIntegerv(GL.GL_CLIP_ORIGIN), "GL_CLIP_ORIGIN", allow_zero_padding=True
+            GL.glGetIntegerv(GL.GL_CLIP_ORIGIN),
+            "GL_CLIP_ORIGIN",
+            allow_zero_padding=True,
         ),
         "clip_depth_mode": _strict_gl_integer(
-            GL.glGetIntegerv(GL.GL_CLIP_DEPTH_MODE), "GL_CLIP_DEPTH_MODE", allow_zero_padding=True
+            GL.glGetIntegerv(GL.GL_CLIP_DEPTH_MODE),
+            "GL_CLIP_DEPTH_MODE",
+            allow_zero_padding=True,
         ),
         "pack_alignment": _strict_gl_integer(
             GL.glGetIntegerv(GL.GL_PACK_ALIGNMENT), "GL_PACK_ALIGNMENT"
@@ -408,9 +510,113 @@ def observe_native_read_state(renderer: Any) -> dict[str, object]:
             GL.glGetIntegerv(GL.GL_PACK_SKIP_PIXELS), "GL_PACK_SKIP_PIXELS"
         ),
         "pixel_pack_buffer_binding": _strict_gl_integer(
-            GL.glGetIntegerv(GL.GL_PIXEL_PACK_BUFFER_BINDING), "GL_PIXEL_PACK_BUFFER_BINDING"
+            GL.glGetIntegerv(GL.GL_PIXEL_PACK_BUFFER_BINDING),
+            "GL_PIXEL_PACK_BUFFER_BINDING",
         ),
     }
+
+
+def validate_paired_draw_state(
+    state: Mapping[str, object],
+    *,
+    expected_context: int,
+    expected_read_framebuffer: int,
+    expected_read_buffer: int,
+    expected_context_facts: Mapping[str, object],
+) -> None:
+    """Enforce absolute paired-draw invariants in live and retained evidence."""
+    if state.get("actual_current_context") != expected_context:
+        raise SharedRasterFailure("paired draw does not use the expected current context")
+    if state.get("expected_current_context") != expected_context:
+        raise SharedRasterFailure("renderer OSMesa context identity differs")
+    if state.get("framewidth") != 0.0:
+        raise SharedRasterFailure("paired draw framewidth is not zero")
+    if state.get("stereo") != state.get("stereo_none"):
+        raise SharedRasterFailure("paired draw stereo mode is not NONE")
+    if state.get("rnd_depth") is not False:
+        raise SharedRasterFailure("paired draw enables the native depth-redraw path")
+    if state.get("segment_enabled") is not True or state.get("idcolor_enabled") is not True:
+        raise SharedRasterFailure("paired draw lacks SEGMENT and IDCOLOR flags")
+    if state.get("readPixelFormat") != state.get("gl_rgb"):
+        raise SharedRasterFailure("paired draw readPixelFormat is not GL_RGB")
+    if state.get("readDepthMap") != state.get("depth_zerofar"):
+        raise SharedRasterFailure("paired draw readDepthMap is not mjDEPTH_ZEROFAR")
+    packing = (
+        state.get("pack_alignment"),
+        state.get("pack_row_length"),
+        state.get("pack_skip_rows"),
+        state.get("pack_skip_pixels"),
+        state.get("pixel_pack_buffer_binding"),
+    )
+    if packing != (1, 0, 0, 0, 0):
+        raise SharedRasterFailure("paired draw pixel packing/PBO state differs")
+    if state.get("query_bindings_restored") is not True:
+        raise SharedRasterFailure("paired draw query bindings were not restored")
+    if state.get("mjr_currentBuffer") != state.get("framebuffer_offscreen"):
+        raise SharedRasterFailure("paired draw mjr currentBuffer is not offscreen")
+    if state.get("offSamples") != 0 or state.get("offFBO_r") != 0:
+        raise SharedRasterFailure("paired draw is sampled or has a resolve FBO")
+    if state.get("offFBO") != expected_read_framebuffer:
+        raise SharedRasterFailure("paired draw mjr offFBO identity differs")
+    if state.get("read_framebuffer_binding") != expected_read_framebuffer:
+        raise SharedRasterFailure("paired draw read framebuffer is not expected offFBO")
+    if state.get("draw_framebuffer_binding") != expected_read_framebuffer:
+        raise SharedRasterFailure("paired draw draw framebuffer is not expected offFBO")
+    if state.get("read_buffer") != expected_read_buffer:
+        raise SharedRasterFailure("paired draw read buffer differs from expected buffer")
+    for key in ("offWidth", "offHeight"):
+        expected_key = "mjr_off_width" if key == "offWidth" else "mjr_off_height"
+        if state.get(key) != expected_context_facts.get(expected_key):
+            raise SharedRasterFailure("paired draw framebuffer dimensions differ")
+    if state.get("offscreen_attachments") != expected_context_facts.get("offscreen_attachments"):
+        raise SharedRasterFailure("paired draw attachment identities/storage/samples differ")
+    cameras = state.get("scene_cameras")
+    if not isinstance(cameras, list) or not cameras:
+        raise SharedRasterFailure("paired draw scene camera/frustum facts are absent")
+    for key in ("projection_matrix_float32", "modelview_matrix_float32"):
+        matrix = state.get(key)
+        if not isinstance(matrix, list) or len(matrix) != 16:
+            raise SharedRasterFailure("paired draw projection provenance differs")
+
+
+def stable_paired_draw_state(state: Mapping[str, object]) -> dict[str, object]:
+    """Project deterministic per-draw facts; volatile GL/context handles stay in receipts."""
+    keys = (
+        "rect",
+        "scene_flags",
+        "ngeom",
+        "scene_cameras",
+        "projection_matrix_float32",
+        "modelview_matrix_float32",
+        "readPixelFormat",
+        "readDepthMap",
+        "read_buffer",
+        "draw_buffer",
+        "pack_alignment",
+        "pack_row_length",
+        "pack_skip_rows",
+        "pack_skip_pixels",
+        "pixel_pack_buffer_binding",
+        "clip_origin",
+        "clip_depth_mode",
+        "framewidth",
+        "stereo",
+        "stereo_none",
+        "rnd_depth",
+        "segment_enabled",
+        "idcolor_enabled",
+        "gl_rgb",
+        "depth_zerofar",
+        "mjr_currentBuffer",
+        "framebuffer_offscreen",
+        "offSamples",
+        "offWidth",
+        "offHeight",
+        "query_bindings_restored",
+    )
+    if any(key not in state for key in keys):
+        raise SharedRasterFailure("paired stable draw-state projection is incomplete")
+    return {key: state[key] for key in keys}
 
 
 class Observer(Protocol):
@@ -528,6 +734,8 @@ class _RendererProxy:
                     "scene_identity": id(scene),
                     "context_identity": id(context),
                     "scene_flags": flags.astype(int).tolist(),
+                    "draw_input_scene_flags": flags.astype(int).tolist(),
+                    "draw_input_scene_map": render_scene_map,
                     "segment_enabled": bool(flags[segment]),
                     "idcolor_enabled": bool(flags[idcolor]),
                     "ngeom": int(scene.ngeom),
@@ -535,12 +743,19 @@ class _RendererProxy:
             )
             result = cast(Callable[..., object], original_render)(rect, scene, context)
             draw_state = self._owner.native_state_observer(self._renderer)
-            if (
-                draw_state.get("framewidth") != 0.0
-                or draw_state.get("stereo") != draw_state.get("stereo_none")
-                or draw_state.get("rnd_depth") is not False
-            ):
-                raise SharedRasterFailure("paired draw uses edge/depth/stereo alternate path")
+            if modality == "depth":
+                context_facts = self._owner.contexts[self._context_index]
+                main = cast(
+                    Mapping[str, object],
+                    cast(Mapping[str, object], context_facts["offscreen_attachments"])["offFBO"],
+                )
+                validate_paired_draw_state(
+                    draw_state,
+                    expected_context=int(cast(int, context_facts["osmesa_context_identity"])),
+                    expected_read_framebuffer=int(cast(int, main["object_name"])),
+                    expected_read_buffer=int(cast(int, context_facts["read_buffer"])),
+                    expected_context_facts=context_facts,
+                )
             event["draw_state"] = draw_state
             return result
 
@@ -571,6 +786,19 @@ class _RendererProxy:
             event["read_state_before"] = read_state_before
             if read_state_before != event.get("draw_state"):
                 raise SharedRasterFailure("native state drifted between draw and read")
+            if modality == "depth":
+                context_facts = self._owner.contexts[self._context_index]
+                main = cast(
+                    Mapping[str, object],
+                    cast(Mapping[str, object], context_facts["offscreen_attachments"])["offFBO"],
+                )
+                validate_paired_draw_state(
+                    read_state_before,
+                    expected_context=int(cast(int, context_facts["osmesa_context_identity"])),
+                    expected_read_framebuffer=int(cast(int, main["object_name"])),
+                    expected_read_buffer=int(cast(int, context_facts["read_buffer"])),
+                    expected_context_facts=context_facts,
+                )
             height, width = int(self._renderer.height), int(self._renderer.width)
             if modality == "depth":
                 if rgb is not None or not isinstance(depth, np.ndarray):
@@ -819,12 +1047,17 @@ class SharedRasterRendererAdapter:
             float(cast(float, projection["near"])), float(cast(float, projection["far"]))
         )
         context = self.contexts[episode]
+        modalities_per_pose = 4 if self.attempt.family == "single_occluder" else 3
+        native_event_sequence = (
+            episode * self.attempt.calls_per_episode + frame * modalities_per_pose + 1
+        )
         metadata = {
             "schema": PAIR_SCHEMA,
             "episode": episode,
             "frame": frame,
             "context_logical": f"episode-{episode:06d}",
             "native_event_modality": "depth",
+            "native_event_sequence": native_event_sequence,
             "framebuffer": {
                 "role": "offFBO",
                 "resolve_present": False,
@@ -837,35 +1070,13 @@ class SharedRasterRendererAdapter:
                 "attachment_component_type": context["attachment_component_type"],
             },
             "orientation": (
-                "native arrays preserve readback orientation; one vertical flip is applied equally "
-                "before ID decode and depth conversion"
+                "native arrays preserve readback orientation; one vertical flip is "
+                "applied equally before ID decode and depth conversion"
             ),
             "readback_atomicity": "sequential color/depth GL reads; not hardware-atomic",
             "depth_term": "native SDK readback before metric conversion",
             "scene_id_map": item["mapping"],
-            "draw_state": {
-                key: projection[key]
-                for key in (
-                    "rect",
-                    "scene_flags",
-                    "ngeom",
-                    "readPixelFormat",
-                    "readDepthMap",
-                    "read_framebuffer_binding",
-                    "read_buffer",
-                    "pack_alignment",
-                    "pack_row_length",
-                    "pack_skip_rows",
-                    "pack_skip_pixels",
-                    "pixel_pack_buffer_binding",
-                    "clip_origin",
-                    "clip_depth_mode",
-                    "framewidth",
-                    "stereo",
-                    "stereo_none",
-                    "rnd_depth",
-                )
-            },
+            "draw_state": stable_paired_draw_state(projection),
             "projection": {
                 **{key: projection[key] for key in ("near", "far", "extent")},
                 "c_coef_float32": float(c_coef),
@@ -876,8 +1087,8 @@ class SharedRasterRendererAdapter:
             "arrays_sha256": hashes,
             "compatibility": {"canonical_sdk_ids_exact": True, "canonical_sdk_depth_exact": True},
             "interpretation": (
-                "shared raster correspondence candidate; geometric ownership and metric accuracy "
-                "are separate and unqualified"
+                "shared raster correspondence candidate; geometric ownership and "
+                "metric accuracy are separate and unqualified"
             ),
         }
         publish_bytes(directory / "pair.json", canonical(metadata))
@@ -1246,12 +1457,41 @@ def validate_recorded_attempt(
                 Mapping[str, object],
                 cast(Mapping[str, object], context["offscreen_attachments"])["offFBO"],
             )
+            validate_paired_draw_state(
+                draw_state,
+                expected_context=int(cast(int, context["osmesa_context_identity"])),
+                expected_read_framebuffer=int(cast(int, main["object_name"])),
+                expected_read_buffer=int(cast(int, context["read_buffer"])),
+                expected_context_facts=context,
+            )
             if (
-                draw_state.get("read_framebuffer_binding") != main.get("object_name")
-                or event.get("read_state_before") != draw_state
+                event.get("read_state_before") != draw_state
                 or event.get("read_state_after") != draw_state
             ):
                 raise SharedRasterFailure("paired depth framebuffer/state association differs")
+            if event.get("draw_input_scene_flags") != draw_state.get("scene_flags"):
+                raise SharedRasterFailure("draw-input flags differ from post-draw paired state")
+            if event.get("draw_input_scene_map") != draw_state.get("scene_map"):
+                raise SharedRasterFailure("draw-input map differs from post-draw paired state")
+            episode = int(cast(int, event["context_index"]))
+            frame = int(cast(int, event["frame"]))
+            pair = PairedArtifactAccess(pairs, PairedEvidencePermission.authorized()).metadata(
+                episode, frame
+            )
+            if (
+                pair.get("native_event_sequence") != index
+                or pair.get("native_event_modality") != "depth"
+                or pair.get("context_logical") != f"episode-{episode:06d}"
+                or pair.get("frame") != frame
+                or pair.get("scene_id_map") != draw_state.get("scene_map")
+                or pair.get("draw_state") != stable_paired_draw_state(draw_state)
+            ):
+                raise SharedRasterFailure("paired sidecar/native-event association differs")
+            projection = pair.get("projection")
+            if not isinstance(projection, Mapping) or any(
+                projection.get(key) != draw_state.get(key) for key in ("near", "far", "extent")
+            ):
+                raise SharedRasterFailure("paired sidecar/native projection association differs")
     if (
         receipt.get("constructor_restored") is not True
         or receipt.get("cleanup_complete") is not True
@@ -1262,6 +1502,17 @@ def validate_recorded_attempt(
         raise SharedRasterFailure("canonical permission evidence differs")
     if receipt.get("paired_permissions") != paired_permission_probes(pairs):
         raise SharedRasterFailure("paired permission evidence differs")
+    assessment = receipt.get("assessment")
+    expected_inspection = output / "inspections" / f"{attempt.name}-episode-000000.png"
+    if not isinstance(assessment, Mapping):
+        raise SharedRasterFailure("recorded assessment is absent")
+    inspection = assessment.get("inspection")
+    if (
+        not isinstance(inspection, Mapping)
+        or inspection.get("path") != expected_inspection.relative_to(output).as_posix()
+        or inspection.get("sha256") != digest_file(expected_inspection)
+    ):
+        raise SharedRasterFailure("saved inspection evidence differs")
     return receipt
 
 

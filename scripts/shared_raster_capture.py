@@ -17,6 +17,7 @@ from epsbench.diagnostics.shared_raster_capture import (
     STATUS,
     SharedRasterFailure,
     compare_repeat_pairs,
+    digest_file,
     fixed_attempts,
     git_binding,
     initialise_ledger,
@@ -57,10 +58,18 @@ def _generate(source: Path, attempt: Any, dataset: Path, _adapter: object) -> ob
 
 
 def _assessment(output: Path, attempt: Any, dataset: Path, _manifest: object) -> dict[str, object]:
+    from epsbench.data.inspect import create_inspection_image
     from epsbench.data.validate import validate_dataset
 
     validate_dataset(dataset)
+    inspection = output / "inspections" / f"{attempt.name}-episode-000000.png"
+    inspection.parent.mkdir(parents=True, exist_ok=True)
+    create_inspection_image(dataset, 0, inspection)
     result: dict[str, object] = {
+        "inspection": {
+            "path": inspection.relative_to(output).as_posix(),
+            "sha256": digest_file(inspection),
+        },
         "validate_dataset": "passed",
         "paired": validate_pair_tree(output / "paired" / attempt.name),
         "analytic_geometry_descriptive_only": geometry_diagnostics(dataset),
