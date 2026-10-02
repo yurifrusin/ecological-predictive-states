@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -201,7 +202,7 @@ def test_vectorized_geometry_matches_canonical_cpu_intersections_for_real_config
         pixel_rays_world,
     )
     from epsbench.appearance import configured_appearance_render_plan
-    from epsbench.config import load_config
+    from epsbench.config import CorridorConfig, SingleOccluderConfig, load_config
     from epsbench.sim.corridor import (
         CORRIDOR_SURFACE_NAMES,
         build_corridor_scene_xml,
@@ -212,7 +213,9 @@ def test_vectorized_geometry_matches_canonical_cpu_intersections_for_real_config
 
     root = Path(__file__).resolve().parents[2]
 
-    def geometry_facts(model: object, data: object, names: tuple[str, ...]) -> dict[str, object]:
+    def geometry_facts(
+        model: mujoco.MjModel, data: mujoco.MjData, names: tuple[str, ...]
+    ) -> dict[str, object]:
         planes: list[dict[str, object]] = []
         boxes: list[dict[str, object]] = []
         for name in names:
@@ -231,7 +234,7 @@ def test_vectorized_geometry_matches_canonical_cpu_intersections_for_real_config
                 raise AssertionError(f"unexpected controlled geom type: {name}")
         return {"finite_planes": planes, "oriented_boxes": boxes}
 
-    families = (
+    families: tuple[tuple[Literal["corridor", "single_occluder"], str, tuple[str, ...]], ...] = (
         ("corridor", "corridor_v0.yaml", CORRIDOR_SURFACE_NAMES),
         ("single_occluder", "benchmark_v0.yaml", SINGLE_OCCLUDER_SURFACE_NAMES),
     )
@@ -243,6 +246,7 @@ def test_vectorized_geometry_matches_canonical_cpu_intersections_for_real_config
                 config.appearance.profile_id, family, names, episode_seed
             )
             if family == "corridor":
+                assert isinstance(config, CorridorConfig)
                 sampled = sample_corridor_geometry(config, episode_seed)
                 xml = build_corridor_scene_xml(config, sampled, appearance)
                 pose_axis = 1
@@ -251,6 +255,7 @@ def test_vectorized_geometry_matches_canonical_cpu_intersections_for_real_config
                     sampled.camera_after_forward_position,
                 )
             else:
+                assert isinstance(config, SingleOccluderConfig)
                 xml = build_scene_xml(config, appearance)
                 pose_axis = 0
                 pose_values = (config.camera.before_lateral, config.camera.after_lateral)
@@ -264,7 +269,11 @@ def test_vectorized_geometry_matches_canonical_cpu_intersections_for_real_config
                 model.cam_pos[camera_id, pose_axis] = pose_value
                 mujoco.mj_forward(model, data)
                 camera = AnalyticCamera(
-                    tuple(float(x) for x in data.cam_xpos[camera_id]),
+                    (
+                        float(data.cam_xpos[camera_id, 0]),
+                        float(data.cam_xpos[camera_id, 1]),
+                        float(data.cam_xpos[camera_id, 2]),
+                    ),
                     tuple(float(x) for x in data.cam_xmat[camera_id].reshape(-1)),
                     float(model.cam_fovy[camera_id]),
                 )

@@ -228,10 +228,12 @@ def test_scoped_hooks_capture_raw_depth_and_restore_originals(tmp_path: Path) ->
     event = stack.observations[0]
     assert event["render_calls"] == event["readback_calls"] == 1
     assert event["originals_restored"] is True
-    assert event["post_render_state"]["stage"] == "post_render"
-    assert (
-        event["raw_depth_window_copy_identity"]["bitwise_identical_and_argument_unmodified"] is True
-    )
+    post_render_state = event["post_render_state"]
+    assert isinstance(post_render_state, dict)
+    assert post_render_state["stage"] == "post_render"
+    copy_identity = event["raw_depth_window_copy_identity"]
+    assert isinstance(copy_identity, dict)
+    assert copy_identity["bitwise_identical_and_argument_unmodified"] is True
     raw = np.load(tmp_path / "readback-before-depth-raw-depth_window.npy", allow_pickle=False)
     assert raw.dtype == np.float32 and np.all(raw == np.float32(0.5))
 
@@ -294,6 +296,7 @@ def test_matrix_layout_is_explicit_and_finite(tmp_path: Path) -> None:
     stack.set_pose("before")
     stack.render_rgb()
     state = stack.observations[0]["post_render_state"]
+    assert isinstance(state, dict)
     projection = state["queries"]["projection_matrix"]
     assert projection["layout"] == "GL column-major flat16"
     assert projection["finite_and_float_cast_consistent"] is True
@@ -343,7 +346,7 @@ def test_exact_selected_output_comparison_detects_perturbation(
     archive_path = tmp_path / "selected.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:
         for pose in ("before", "after"):
-            arrays = {
+            arrays: dict[str, np.ndarray] = {
                 "rgb": np.zeros((2, 3, 3), np.uint8),
                 "depth": np.ones((2, 3), np.float32),
                 "encoded-rgb": np.zeros((2, 3, 3), np.uint8),

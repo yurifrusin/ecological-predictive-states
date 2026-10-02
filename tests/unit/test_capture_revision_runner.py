@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, TypedDict
 
 import numpy as np
 import pytest
@@ -641,7 +642,14 @@ def test_handoff_rejects_wrong_runtime_host_root_and_translation(tmp_path: Path)
                 }
             ),
         )
-    valid = dict(
+
+    class HandoffArguments(TypedDict, total=False):
+        current_runtime: str
+        current_host: str
+        current_root: str
+        translator: Callable[[str, str], str]
+
+    valid: HandoffArguments = dict(
         current_runtime="wsl",
         current_host="DESKTOP-TPUQMNG",
         current_root="/mnt/c/study",
@@ -649,12 +657,13 @@ def test_handoff_rejects_wrong_runtime_host_root_and_translation(tmp_path: Path)
             "observed_root"
         ],
     )
-    for override in (
+    overrides: tuple[HandoffArguments, ...] = (
         {"current_runtime": "windows"},
         {"current_host": "OTHER"},
         {"current_root": "/mnt/c/other"},
         {"translator": lambda value, runtime: "/mnt/c/wrong"},
-    ):
+    )
+    for override in overrides:
         with pytest.raises(RevisionCaptureFailure):
             verify_handoff_records(tmp_path, **(valid | override))
 
@@ -778,9 +787,9 @@ def test_attempt_lock_closes_before_successful_unlink(
         original_close(fd)
         closed = True
 
-    def observed_unlink(path: Path, *args: object, **kwargs: object) -> None:
+    def observed_unlink(path: Path, missing_ok: bool = False) -> None:
         assert closed
-        original_unlink(path, *args, **kwargs)
+        original_unlink(path, missing_ok=missing_ok)
 
     monkeypatch.setattr(os, "close", observed_close)
     monkeypatch.setattr(Path, "unlink", observed_unlink)
@@ -853,9 +862,11 @@ def test_analysis_publication_separates_nan_arrays_from_finite_json(
             "analytic_no_hit_depth": np.array([[np.nan]], dtype=np.float64),
         },
     )
-    report = json.loads((tmp_path / reference["path"]).read_text(encoding="utf-8"))
+    report_path = reference["path"]
+    assert isinstance(report_path, str)
+    report = json.loads((tmp_path / report_path).read_text(encoding="utf-8"))
     array_ref = report["analytic_no_hit_depth"]
-    assert "NaN" not in (tmp_path / reference["path"]).read_text(encoding="utf-8")
+    assert "NaN" not in (tmp_path / report_path).read_text(encoding="utf-8")
     value = np.load(tmp_path / array_ref["path"], allow_pickle=False)
     assert np.isnan(value[0, 0])
     with pytest.raises(FileExistsError):

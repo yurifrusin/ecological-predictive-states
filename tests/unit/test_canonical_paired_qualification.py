@@ -30,7 +30,9 @@ def test_plan_is_finite_with_no_extra_ordinary_segmentation() -> None:
         sum(attempt.modalities.count("counterfactual_segmentation") for attempt in attempts) == 32
     )
     assert all("segmentation" not in attempt.modalities for attempt in attempts)
-    assert q.plan()["limits"]["contexts"] == 32
+    limits = q.plan()["limits"]
+    assert isinstance(limits, dict)
+    assert limits["contexts"] == 32
 
 
 def test_existing_output_cannot_be_reinitialized(tmp_path: Path) -> None:

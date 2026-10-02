@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ import numpy as np
 import pytest
 
 import epsbench.diagnostics.osmesa_joint0_qualification as q
+from epsbench.diagnostics.revision_capture import publish_bytes
 
 
 class FakeNative:
@@ -17,7 +19,7 @@ class FakeNative:
         self.duplicate = duplicate
         self.mjr_render = self.native_render
         self.mjr_readPixels = self.native_read
-        self.Renderer = self.construct
+        self.Renderer: Callable[..., FakeRenderer | q._RendererProxy] = self.construct
         self.closed = 0
 
     def native_render(self, rect: object, scene: object, context: object) -> None:
@@ -72,7 +74,7 @@ class FakeRenderer:
         self.sdk.closed += 1
 
 
-def model() -> object:
+def model() -> SimpleNamespace:
     return SimpleNamespace(vis=SimpleNamespace(quality=SimpleNamespace(offsamples=4)))
 
 
@@ -81,6 +83,7 @@ def bind(fake: FakeNative) -> None:
 
 
 def observe(renderer: object, model: object, width: int, height: int) -> dict[str, object]:
+    assert isinstance(model, SimpleNamespace)
     assert model.vis.quality.offsamples == 0
     return {
         "actual_backend": "osmesa",
@@ -105,7 +108,9 @@ def observe(renderer: object, model: object, width: int, height: int) -> dict[st
     }
 
 
-def one_render(proxy: object, modality: str, *, counterfactual: bool = False) -> None:
+def one_render(
+    proxy: FakeRenderer | q._RendererProxy, modality: str, *, counterfactual: bool = False
+) -> None:
     proxy.update_scene(
         object(), scene_option=SimpleNamespace(geomgroup=np.array([1, 0 if counterfactual else 1]))
     )
@@ -185,6 +190,7 @@ def test_wrong_thread_and_reentrancy_rejected_before_native() -> None:
     with q.RendererAdapter(fake, observe, q.fixed_attempts()[0]) as adapter:
         proxy = fake.Renderer(model(), width=160, height=120)
         proxy.update_scene(object())
+        assert isinstance(proxy, q._RendererProxy)
         proxy._rendering = True
         with pytest.raises(q.QualificationFailure, match="thread/reentrancy"):
             proxy.render()
@@ -197,7 +203,7 @@ def test_wrong_thread_and_reentrancy_rejected_before_native() -> None:
     assert adapter.native_events == []
 
 
-def _capture(errors: list[BaseException], operation: object) -> None:
+def _capture(errors: list[BaseException], operation: Callable[[], object]) -> None:
     try:
         operation()
     except BaseException as exc:
@@ -250,7 +256,7 @@ def test_run_attempt_rejects_binding_mismatch_before_generator_or_observer(
         calls.append("generator")
         return object()
 
-    def observer(*args: object) -> dict[str, object]:
+    def observer(renderer: object, model: object, width: int, height: int) -> dict[str, object]:
         calls.append("observer")
         return {}
 
@@ -277,7 +283,7 @@ def test_run_attempt_rejects_tampered_prior_receipt_before_generator_or_observer
     first = q.fixed_attempts()[0]
     q.append_revision(root, "reserved", first)
     receipt = root / "receipts" / f"{first.name}.json"
-    q.publish_bytes(receipt, b"{}")
+    publish_bytes(receipt, b"{}")
     q.append_revision(
         root,
         "complete",
@@ -291,7 +297,7 @@ def test_run_attempt_rejects_tampered_prior_receipt_before_generator_or_observer
         calls.append("generator")
         return object()
 
-    def observer(*args: object) -> dict[str, object]:
+    def observer(renderer: object, model: object, width: int, height: int) -> dict[str, object]:
         calls.append("observer")
         return {}
 
@@ -407,7 +413,7 @@ def test_rehashed_failed_then_reserved_history_is_rejected(tmp_path: Path) -> No
         "attempt_name": second.name,
         "details": {},
     }
-    q.publish_bytes(root / "ledger/revision-0003.json", q.canonical(third))
+    publish_bytes(root / "ledger/revision-0003.json", q.canonical(third))
     with pytest.raises(q.QualificationFailure, match="failed qualification event"):
         q.validate_ledger(root, allow_stopped=True)
 
@@ -439,7 +445,9 @@ def test_source_binding_mutation_rejected(monkeypatch: pytest.MonkeyPatch, tmp_p
         q.validate_bindings(tmp_path, expected)
 
 
-def test_ecological_permission_denial_precedes_transition_io() -> None:
+def test_ecological_permission_denial_precedes_transition_io(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from epsbench.data import DatasetLoader, PermissionDeniedError
     from epsbench.schema import ModalityPermissionSet
 
@@ -451,7 +459,7 @@ def test_ecological_permission_denial_precedes_transition_io() -> None:
         calls.append("transition")
         raise AssertionError("protected I/O reached")
 
-    loader._transition = protected
+    monkeypatch.setattr(loader, "_transition", protected)
     with pytest.raises(PermissionDeniedError):
         loader.read_depth(0, 0)
     assert calls == []
@@ -485,7 +493,7 @@ def test_run_attempt_rejects_source_root_cwd_before_generator_or_context(
         calls.append("generator")
         return object()
 
-    def observer(*args: object) -> dict[str, object]:
+    def observer(renderer: object, model: object, width: int, height: int) -> dict[str, object]:
         calls.append("observer")
         return {}
 
@@ -518,6 +526,10 @@ def test_run_attempt_rejects_foreign_import_before_generator_or_context(
         calls.append("generator")
         return object()
 
+    def observer(renderer: object, model: object, width: int, height: int) -> dict[str, object]:
+        calls.append("observer")
+        return {}
+
     output = tmp_path / "run"
     with pytest.raises(q.QualificationFailure, match="outside source root"):
         q.run_attempt(
@@ -527,7 +539,7 @@ def test_run_attempt_rejects_foreign_import_before_generator_or_context(
             {},
             generator,
             object(),
-            observer=lambda *args: calls.append("observer") or {},
+            observer=observer,
         )
     assert calls == []
     assert not output.exists()

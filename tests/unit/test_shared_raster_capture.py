@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import importlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -103,17 +104,18 @@ def fake_context() -> dict[str, object]:
 def test_observe_shared_context_consumes_real_attachment_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from OpenGL import GL
+    GL = importlib.import_module("OpenGL.GL")
 
+    main: dict[str, object] = {
+        "present": True,
+        "framebuffer": 5,
+        "color0": {"object_name": 11},
+        "depth": {"object_name": 12},
+        "draw_framebuffer_samples": 0,
+    }
     parent_facts = {
         "offscreen_attachments": {
-            "offFBO": {
-                "present": True,
-                "framebuffer": 5,
-                "color0": {"object_name": 11},
-                "depth": {"object_name": 12},
-                "draw_framebuffer_samples": 0,
-            },
+            "offFBO": main,
             "offFBO_r": {"present": False},
         }
     }
@@ -149,7 +151,6 @@ def test_observe_shared_context_consumes_real_attachment_schema(
     assert facts["read_framebuffer_binding"] == 5
     assert facts["offscreen_attachments"] == parent_facts["offscreen_attachments"]
 
-    main = parent_facts["offscreen_attachments"]["offFBO"]
     main["object_name"] = main.pop("framebuffer")
     with pytest.raises(subject.SharedRasterFailure, match="unresolved offFBO"):
         subject.observe_shared_context(renderer, SimpleNamespace(), 160, 120)
@@ -158,7 +159,9 @@ def test_observe_shared_context_consumes_real_attachment_schema(
 
 def test_plan_is_exact_finite_contract() -> None:
     value = subject.plan()
-    assert [a["name"] for a in value["attempts"]] == [a.name for a in subject.fixed_attempts()]
+    attempts = value["attempts"]
+    assert isinstance(attempts, list)
+    assert [a["name"] for a in attempts] == [a.name for a in subject.fixed_attempts()]
     assert value["limits"] == {
         "batch_attempts": 8,
         "contexts": 32,
@@ -457,6 +460,8 @@ def test_native_depth_hook_rewrites_color_argument_once_and_preserves_buffers(
     depth = proxy.render()
     renderer._depth_rendering, renderer._segmentation_rendering = False, True
     segmentation = proxy.render()
+    assert isinstance(depth, np.ndarray)
+    assert isinstance(segmentation, np.ndarray)
     assert len(calls) == 2
     assert isinstance(calls[0][0], np.ndarray) and calls[0][1] is not None
     saved_raw = np.load(tmp_path / "episode-000000/frame-0/native_depth_pre_metric.npy")

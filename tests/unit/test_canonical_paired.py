@@ -254,13 +254,13 @@ def test_flags_and_buffer_restore_on_all_native_failures(phase: str) -> None:
     calls = [0]
     restored: list[int] = []
 
-    def observe(value: Any) -> dict[str, Any]:
+    def observe(renderer: Any) -> dict[str, object]:
         calls[0] += 1
         if (phase == "observe_after_draw" and calls[0] == 2) or (
             phase == "observe_after_read" and calls[0] == 4
         ):
             raise RuntimeError("injected failure")
-        return fake_state(value)
+        return fake_state(renderer)
 
     def fail(*_args: object) -> None:
         raise RuntimeError("injected failure")

@@ -85,7 +85,9 @@ def test_canonical_frame_preserves_pair_fields_through_union_and_round_trip(
     written_frame: Any,
 ) -> None:
     root, frame, events = written_frame
-    adapter = TypeAdapter(FrameRecord | CanonicalPairedFrameRecord)
+    adapter: TypeAdapter[FrameRecord | CanonicalPairedFrameRecord] = TypeAdapter(
+        FrameRecord | CanonicalPairedFrameRecord
+    )
     payload = adapter.dump_json(frame)
     assert b"paired_output_provenance" in payload
     parsed = adapter.validate_json(payload)
@@ -108,7 +110,9 @@ def test_legacy_frame_has_no_paired_field_or_retroactive_claim(written_frame: An
     payload = frame.model_dump(mode="python")
     del payload["paired_output_provenance"]
     old = FrameRecord.model_validate(payload)
-    adapter = TypeAdapter(FrameRecord | CanonicalPairedFrameRecord)
+    adapter: TypeAdapter[FrameRecord | CanonicalPairedFrameRecord] = TypeAdapter(
+        FrameRecord | CanonicalPairedFrameRecord
+    )
     assert adapter.dump_json(old) == old.model_dump_json().encode()
     assert type(adapter.validate_json(adapter.dump_json(old))) is FrameRecord
     assert "paired_output_provenance" not in old.model_dump()
@@ -172,7 +176,9 @@ def test_malformed_pair_metadata_is_rejected(written_frame: Any, mutation: str) 
     "missing",
     [None, Modality.DEPTH, Modality.MUJOCO_GEOM_IDS, Modality.PRIVILEGED_GENERATION_RECORDS],
 )
-def test_permissions_are_denied_before_transition_or_path_access(missing: Modality | None) -> None:
+def test_permissions_are_denied_before_transition_or_path_access(
+    missing: Modality | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     loader = object.__new__(DatasetLoader)
     all_required = {
         Modality.DEPTH,
@@ -188,35 +194,42 @@ def test_permissions_are_denied_before_transition_or_path_access(missing: Modali
     def forbidden(*_args: object) -> None:
         raise AssertionError("transition/path access occurred before permission denial")
 
-    loader._transition = forbidden
-    loader._load_npy = forbidden
-    loader._load_json = forbidden
+    monkeypatch.setattr(loader, "_transition", forbidden)
+    monkeypatch.setattr(loader, "_load_npy", forbidden)
+    monkeypatch.setattr(loader, "_load_json", forbidden)
     with pytest.raises(PermissionDeniedError):
         loader.read_canonical_paired_output(999, 999)
 
 
-def _loader(root: Path, frame: CanonicalPairedFrameRecord) -> DatasetLoader:
+def _loader(
+    root: Path, frame: CanonicalPairedFrameRecord, monkeypatch: pytest.MonkeyPatch
+) -> DatasetLoader:
     loader = object.__new__(DatasetLoader)
     loader.root = root
     loader.permissions = ModalityPermissionSet.all_modalities()
-    loader._transition = lambda _: SimpleNamespace(
-        episode_id="episode-000000", before=frame, after=frame
+    monkeypatch.setattr(
+        loader,
+        "_transition",
+        lambda _: SimpleNamespace(episode_id="episode-000000", before=frame, after=frame),
     )
     return loader
 
 
 def test_authorized_reader_uses_owned_artifacts_and_returns_retained_arrays(
     written_frame: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root, frame, _ = written_frame
-    pair = _loader(root, frame).read_canonical_paired_output(0, 0)
+    pair = _loader(root, frame, monkeypatch).read_canonical_paired_output(0, 0)
     assert pair.native_id_rgb.dtype == np.uint8
     assert pair.native_depth_pre_metric.dtype == np.float32
     assert pair.provenance.association == "shared_raster_id_depth"
     assert pair.producer_state["offSamples"] == 0
 
 
-def test_authorized_reader_rejects_changed_native_file(written_frame: Any) -> None:
+def test_authorized_reader_rejects_changed_native_file(
+    written_frame: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root, frame, _ = written_frame
     pair = _provenance(root, frame)
     path = root / pair.native_depth_pre_metric.path
@@ -224,7 +237,7 @@ def test_authorized_reader_rejects_changed_native_file(written_frame: Any) -> No
     payload[-1] ^= 1
     path.write_bytes(payload)
     with pytest.raises(ValueError, match="hash mismatch"):
-        _loader(root, frame).read_canonical_paired_output(0, 0)
+        _loader(root, frame, monkeypatch).read_canonical_paired_output(0, 0)
 
 
 def manifest_value(*, paired: bool) -> dict[str, Any]:

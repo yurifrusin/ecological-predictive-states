@@ -90,12 +90,17 @@ def test_full_four_success_and_resume_order(
     output = tmp_path / "out"
     init_capture_ledger(output, inputs=_inputs())
     seen: list[CaptureCell] = []
+
+    def capture(cell: CaptureCell) -> CaptureResult:
+        seen.append(cell)
+        return _result(cell)
+
     for _ in range(4):
         assert (
             run_next_capture_cell(
                 output,
                 inputs=_inputs(),
-                capture=lambda cell: seen.append(cell) or _result(cell),
+                capture=capture,
                 geom_objtype=5,
             )
             == seen[-1]
@@ -212,10 +217,15 @@ def test_gl_inspection_uses_renderbuffer_query_and_restores_bindings(
         6 if _[-1] == 8 else 99 if _[-1] == 9 else 10
     )
     calls: list[int] = []
-    gl.glGetRenderbufferParameteriv = lambda _, key: calls.append(key) or (88 if key == 11 else 4)
+
+    def get_renderbuffer_parameter(target: int, key: int) -> int:
+        calls.append(key)
+        return 88 if key == 11 else 4
+
+    gl.glGetRenderbufferParameteriv = get_renderbuffer_parameter
     gl.glGetString = lambda _: b"fake"
     package = types.ModuleType("OpenGL")
-    package.GL = gl
+    monkeypatch.setattr(package, "GL", gl, raising=False)
     monkeypatch.setitem(sys.modules, "OpenGL", package)
     result = inspect_mujoco_offscreen_attachments(
         types.SimpleNamespace(_mjr_context=types.SimpleNamespace(offFBO=101, offFBO_r=0))
@@ -294,9 +304,13 @@ def test_partial_frame_keeps_rgb_depth_encoded_and_pairs_on_map_failure(
             geom_objtype=5,
         )
     cell = output / BASELINE_CELLS[0].name
+    assert partial.rgb is not None
     assert np.array_equal(np.load(cell / "partial_after_rgb.npy"), partial.rgb)
+    assert partial.depth is not None
     assert np.array_equal(np.load(cell / "partial_after_depth.npy"), partial.depth)
+    assert partial.encoded_rgb is not None
     assert np.array_equal(np.load(cell / "partial_after_encoded_rgb.npy"), partial.encoded_rgb)
+    assert partial.decoded_pairs is not None
     assert np.array_equal(np.load(cell / "partial_after_decoded_pairs.npy"), partial.decoded_pairs)
     assert not (cell / "partial_after_segid_map.json").exists()
 
@@ -432,13 +446,17 @@ def test_frame_failure_retains_only_observations_acquired_before_stage(
     assert (partial.decoded_pairs is not None) is has_pairs
     assert (partial.segid_to_object_map is not None) is has_mapping
     if has_rgb:
+        assert partial.rgb is not None
         assert np.array_equal(partial.rgb, np.array([[[1, 2, 3]]], dtype=np.uint8))
     if has_depth:
+        assert partial.depth is not None
         assert np.array_equal(partial.depth, np.array([[2.5]], dtype=np.float32))
     if has_encoded:
+        assert partial.encoded_rgb is not None
         expected_encoded = [4, 0, 0] if has_pairs else [0, 0, 0]
         assert np.array_equal(partial.encoded_rgb, np.array([[expected_encoded]], dtype=np.uint8))
     if has_pairs:
+        assert partial.decoded_pairs is not None
         assert np.array_equal(partial.decoded_pairs, np.array([[[42, 5]]], dtype=np.int32))
     if has_mapping:
         assert partial.segid_to_object_map == {3: (42, 5)}
@@ -460,6 +478,7 @@ def test_segmentation_readback_retains_buffer_written_before_decoder_failure() -
 
     partial = raised.value.observations
     assert raised.value.stage == stage
+    assert partial.encoded_rgb is not None
     assert np.array_equal(partial.encoded_rgb, np.array([[[17, 18, 19]]], dtype=np.uint8))
     assert partial.decoded_pairs is None
     assert partial.segid_to_object_map is None
@@ -493,13 +512,27 @@ def test_capture_runner_propagates_actual_frame_failure(
     )
     expected_contract = runner_module._contract_mapping(contract)
     fake_mujoco = types.ModuleType("mujoco")
-    fake_mujoco.mjtObj = types.SimpleNamespace(mjOBJ_CAMERA=6, mjOBJ_GEOM=5)
-    fake_mujoco.MjModel = types.SimpleNamespace(from_xml_string=lambda _xml, _assets: model)
-    fake_mujoco.MjData = lambda _model: data
-    fake_mujoco.mj_name2id = lambda *_args: 0
-    fake_mujoco.mj_forward = lambda _model, _data: None
-    fake_mujoco.mj_saveModel = lambda _model, path, _buffer: Path(path).write_bytes(b"compiled")
-    fake_mujoco.Renderer = lambda _model, *, height, width: renderer
+    monkeypatch.setattr(
+        fake_mujoco, "mjtObj", types.SimpleNamespace(mjOBJ_CAMERA=6, mjOBJ_GEOM=5), raising=False
+    )
+    monkeypatch.setattr(
+        fake_mujoco,
+        "MjModel",
+        types.SimpleNamespace(from_xml_string=lambda _xml, _assets: model),
+        raising=False,
+    )
+    monkeypatch.setattr(fake_mujoco, "MjData", lambda _model: data, raising=False)
+    monkeypatch.setattr(fake_mujoco, "mj_name2id", lambda *_args: 0, raising=False)
+    monkeypatch.setattr(fake_mujoco, "mj_forward", lambda _model, _data: None, raising=False)
+    monkeypatch.setattr(
+        fake_mujoco,
+        "mj_saveModel",
+        lambda _model, path, _buffer: Path(path).write_bytes(b"compiled"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        fake_mujoco, "Renderer", lambda _model, *, height, width: renderer, raising=False
+    )
     monkeypatch.setitem(sys.modules, "mujoco", fake_mujoco)
 
     import epsbench.sim.compiled as compiled_module
@@ -535,6 +568,8 @@ def test_capture_runner_propagates_actual_frame_failure(
     assert failure.partial_frame_name == frame_name
     assert (failure.before is not None) is (fault_frame == 2)
     assert failure.partial_frame is not None
+    assert failure.partial_frame.rgb is not None
+    assert failure.partial_frame.depth is not None
     assert np.array_equal(failure.partial_frame.rgb, np.array([[[1, 2, 3]]], dtype=np.uint8))
     assert np.array_equal(failure.partial_frame.depth, np.array([[2.5]], dtype=np.float32))
     assert failure.partial_frame.encoded_rgb is None
