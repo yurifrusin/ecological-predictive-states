@@ -1,5 +1,9 @@
 # ecological-predictive-states
 
+For the current experimental development checkout and instructions for moving work to another
+machine, read [Machine continuation](docs/MACHINE_CONTINUATION.md). The latest capture work is
+on a draft branch stack through PR30; cloning `main` alone does not include that stack.
+
 Ecological Predictive States is a research repository for testing whether an action-conditioned state built around persistent surfaces, boundaries, occlusion, visibility change, and optical transformation is a useful inductive bias under appearance change. The hypothesis is falsifiable and is not assumed to be true.
 
 ## Current status
