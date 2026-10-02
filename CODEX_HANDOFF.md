@@ -1,5 +1,9 @@
 # Codex Handoff — Milestone 0A and 0B
 
+This is the historical foundation prompt. For current continuation, first read
+[Machine continuation](docs/MACHINE_CONTINUATION.md) and `AGENTS.md`; do not restart the
+foundation work from this historical prompt.
+
 You are implementing the foundation of a research repository called **Ecological Predictive States**. Read `README.md`, `AGENTS.md`, `docs/RESEARCH_CHARTER.md`, `docs/EPS_BENCH_V0.md`, and `docs/MILESTONE_0.md` in full before changing code.
 
 ## Goal
