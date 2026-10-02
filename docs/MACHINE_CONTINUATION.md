@@ -35,12 +35,13 @@ still refers to the original machine:
 git clone --branch docs/machine-continuation-20261002 https://github.com/yurifrusin/ecological-predictive-states.git EPS
 cd EPS
 git rev-parse HEAD
-git rev-parse HEAD^
+git rev-parse HEAD^{tree}
+git merge-base --is-ancestor 3c9ec6e196010959b558d5a6fc49fc82c660603d HEAD
 git status --short
 ```
 
-Use `Set-Location EPS` for the second command in PowerShell. The parent must be the PR30 head
-above for the initial handoff commit. Record the cloned head, tree and clean status before work.
+Use `Set-Location EPS` for the second command in PowerShell. The ancestry check must return
+zero: the handoff branch includes PR30. Record the cloned head, tree and clean status before work.
 Create a new work branch for subsequent corrections; retain the exact historical PR heads.
 
 ## Restore a project environment
@@ -57,17 +58,19 @@ uv sync --locked --python 3.11.15
 The unchanged `uv.lock` SHA-256 is
 `d8fbbd09590dd2c937db822668d168ed73947d79e3772de7dce1e311b89ebafc`.
 The recorded project runtime used Python 3.11.15, MuJoCo 3.12.0, NumPy 2.4.6, glfw 2.10.2,
-mypy 1.20.2, Ruff 0.16.4, pytest 8.4.2 and Pydantic 2.13.4. PyOpenGL 3.1.10 was an additional
-project-environment installation and is absent from this lock. To restore that dependency in
-Linux/WSL after locked sync:
+mypy 1.20.2, Ruff 0.16.4, pytest 8.4.2 and Pydantic 2.13.4. PyOpenGL 3.1.10 is already
+locked as a transitive MuJoCo dependency and is installed by locked sync. Older working
+environments also recorded an explicit installation. The following command may be used to
+confirm or restore that exact version in Linux/WSL:
 
 ```sh
 uv pip install --python .venv/bin/python PyOpenGL==3.1.10
 ```
 
-On Windows use `.venv\Scripts\python.exe` for that interpreter argument. A later exact
-`uv sync` can remove this extra installation; restore it afterward and record versions. This
-handoff does not change the lock or add a new dependency declaration.
+On Windows use `.venv\Scripts\python.exe` for that interpreter argument. Record the actual
+installed versions after sync. This handoff does not change the lock or add a new dependency
+declaration. Keep `CODEX_HANDOFF.md` unchanged: it is a hash-bound governing document,
+even though its foundation-stage instructions are historical. Use this guide for continuation.
 
 Canonical paired capture is currently restricted to Linux/WSL OSMesa, zero samples and
 160 × 120. A Windows destination can use WSL for this path; its checkout should reside in the
