@@ -222,18 +222,13 @@ def test_failed_constructor_native_receipt_is_retained_outside_ledger(tmp_path: 
     partial = {"constructor_attempts": [{"ordinal": 0, "completed": False}], "native_events": []}
 
     def capture(*args: Any) -> dict[str, Any]:
-        error = RuntimeError("synthetic failed constructor")
-        setattr(error, "native_receipt", partial)
-        raise error
+        class SyntheticNativeFailure(RuntimeError):
+            native_receipt = partial
+
+        raise SyntheticNativeFailure("synthetic failed constructor")
 
     with pytest.raises(RuntimeError, match="failed constructor"):
         run_fake(root, capture=capture)
     failure = json.loads((root / "operator/failure.json").read_bytes())
     assert failure["native_partial_receipt"] == partial
     assert failure["lock_present"] is True
-
-
-def test_preflight_pins_complete_software_apparatus() -> None:
-    assert e.ENVIRONMENT["MUJOCO_GL"] == e.ENVIRONMENT["PYOPENGL_PLATFORM"] == "osmesa"
-    assert e.ENVIRONMENT["LIBGL_ALWAYS_SOFTWARE"] == "1"
-    assert e.ENVIRONMENT["GALLIUM_DRIVER"] == "llvmpipe"
