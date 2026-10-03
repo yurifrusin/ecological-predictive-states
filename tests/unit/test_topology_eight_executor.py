@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -284,3 +286,34 @@ def test_new_namespace_parent_flush_failure_prevents_constructor(tmp_path: Path)
     assert not (root / "capture-attempt.lock").exists()
     with pytest.raises(e.TopologyExecutionFailure, match="existing namespace"):
         run_fake(root)
+
+
+def test_fresh_process_inert_imports_do_not_load_graphics() -> None:
+    program = """
+import importlib.abc
+import sys
+class DenyGraphics(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'mujoco', 'OpenGL', 'glfw'}:
+            raise AssertionError('graphics import before backend preparation: ' + fullname)
+        return None
+sys.meta_path.insert(0, DenyGraphics())
+import epsbench.data
+from epsbench.data import DatasetLoader, PermissionDeniedError
+from epsbench.data.loader import DatasetLoader as DirectLoader
+assert DatasetLoader is DirectLoader
+assert issubclass(PermissionDeniedError, PermissionError)
+from epsbench.diagnostics import topology_eight_executor, topology_eight_native
+assert not any(name.split('.')[0] in {'mujoco','OpenGL','glfw'} for name in sys.modules)
+assert not topology_eight_native._GRAPHICS_PREPARED
+try:
+    getattr(epsbench.data, 'absent_api')
+except AttributeError:
+    pass
+else:
+    raise AssertionError('unknown package API accepted')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", program], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr

@@ -15,6 +15,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
@@ -49,6 +50,28 @@ def require_linux_capabilities() -> None:
     if sys.platform != "linux":
         raise ResourceFailure("resource enforcement requires Linux/WSL")
     resource = importlib.import_module("resource")
+    if (
+        threading.active_count() != 1
+        or signal.getsignal(_linux_attribute(signal, "SIGCHLD")) != signal.SIG_DFL
+    ):
+        raise ResourceFailure("supervisor requires sole child-reaping authority")
+    for module, name in ((os, "waitid"), (os, "pidfd_open"), (signal, "pidfd_send_signal")):
+        if not callable(_linux_attribute(module, name)):
+            raise ResourceFailure("identity-bound process lifecycle is unavailable")
+    own_handle = _linux_attribute(os, "pidfd_open")(os.getpid(), 0)
+    os.close(own_handle)
+    for name in (
+        "P_PID",
+        "WEXITED",
+        "WNOHANG",
+        "WNOWAIT",
+        "CLD_EXITED",
+        "CLD_KILLED",
+        "CLD_DUMPED",
+    ):
+        value = _linux_attribute(os, name)
+        if type(value) is not int or value <= 0:
+            raise ResourceFailure("required Linux waitid constants are unavailable")
 
     if not hasattr(os, "sched_getaffinity") or not hasattr(os, "sched_setaffinity"):
         raise ResourceFailure("CPU affinity is unavailable")
@@ -109,8 +132,12 @@ def _identity(pid: int) -> int:
 
 
 def _owned_processes(pid: int, known: dict[int, int]) -> dict[int, int]:
-    """Discover only children of the worker or previously observed descendants."""
-    pending = [pid]
+    """Discover scoped children without relabelling any previously bound PID."""
+    if pid not in known:
+        raise ResourceFailure("worker root identity was not bound")
+    if _identity(pid) != known[pid]:
+        raise ResourceFailure("worker root identity changed")
+    pending: list[int] = []
     for descendant, identity in list(known.items()):
         try:
             if _identity(descendant) == identity:
@@ -126,7 +153,10 @@ def _owned_processes(pid: int, known: dict[int, int]) -> dict[int, int]:
         if not proc.exists():
             continue
         try:
-            live[current] = _identity(current)
+            identity = _identity(current)
+            if current in known and known[current] != identity:
+                continue
+            live[current] = identity
         except FileNotFoundError:
             continue
         try:
@@ -143,7 +173,9 @@ def _owned_processes(pid: int, known: dict[int, int]) -> dict[int, int]:
 
 def _tree_usage(pid: int, known: dict[int, int], cpus: set[int]) -> tuple[int, dict[int, int]]:
     live = _owned_processes(pid, known)
-    known.update(live)
+    for current, identity in live.items():
+        if known.setdefault(current, identity) != identity:
+            raise ResourceFailure("previously bound process identity changed")
     rss = 0
     for current in live:
         proc = _PROC_ROOT / str(current)
@@ -265,25 +297,117 @@ def _phases(root: Path, launch: float, now: float) -> tuple[int, float | None]:
     return len(paths), active
 
 
+def _wait_status(pid: int) -> int | None:
+    """Observe exit without reaping: the original leader still reserves its PID."""
+    flags = (
+        _linux_attribute(os, "WEXITED")
+        | _linux_attribute(os, "WNOHANG")
+        | _linux_attribute(os, "WNOWAIT")
+    )
+    try:
+        result = _linux_attribute(os, "waitid")(_linux_attribute(os, "P_PID"), pid, flags)
+    except ChildProcessError as error:
+        raise ResourceFailure("worker leader ownership lost; termination uncertain") from error
+    if result is None:
+        return None
+    if result.si_pid != pid or type(result.si_status) is not int:
+        raise ResourceFailure("unexpected child wait observation")
+    if result.si_code == _linux_attribute(os, "CLD_EXITED"):
+        return result.si_status
+    if result.si_code in (_linux_attribute(os, "CLD_KILLED"), _linux_attribute(os, "CLD_DUMPED")):
+        return -result.si_status
+    raise ResourceFailure("unexpected child wait event")
+
+
+def _signal_bound_process(pid: int, identity: int) -> None:
+    """Signal a bound task through a pidfd, never through a reusable PID number."""
+    try:
+        descriptor = _linux_attribute(os, "pidfd_open")(pid, 0)
+    except ProcessLookupError:
+        return
+    try:
+        if _identity(pid) == identity:
+            _linux_attribute(signal, "pidfd_send_signal")(
+                descriptor, _linux_attribute(signal, "SIGKILL"), None, 0
+            )
+    except (FileNotFoundError, ProcessLookupError):
+        pass
+    finally:
+        os.close(descriptor)
+
+
+def _assert_leader_anchor(pid: int, known: dict[int, int]) -> None:
+    # No poll/wait occurs before this non-reaping observation. The synchronous,
+    # single-threaded supervisor with default SIGCHLD alone controls reaping.
+    _wait_status(pid)
+    if pid not in known or _identity(pid) != known[pid]:
+        raise ResourceFailure("worker leader identity unconfirmed; termination uncertain")
+    if _linux_attribute(os, "getpgid")(pid) != pid or _linux_attribute(os, "getsid")(pid) != pid:
+        raise ResourceFailure("worker session/group anchor changed; termination uncertain")
+
+
 def _kill(pid: int, known: dict[int, int]) -> None:
+    _assert_leader_anchor(pid, known)
     try:
         _linux_attribute(os, "killpg")(pid, _linux_attribute(signal, "SIGKILL"))
     except ProcessLookupError:
         pass
     for descendant, identity in known.items():
+        if descendant != pid:
+            _signal_bound_process(descendant, identity)
+
+
+def _anchored_group_members(pid: int, known: dict[int, int]) -> dict[int, int]:
+    """Discover the anchored private session/group, including reparented members.
+
+    Only stat metadata is read while filtering proc entries; identities/status
+    retained for assessment must belong to the still-owned session and group.
+    """
+    _assert_leader_anchor(pid, known)
+    members: dict[int, int] = {}
+    for path in _PROC_ROOT.iterdir():
+        if not path.name.isdecimal():
+            continue
         try:
-            if _identity(descendant) == identity:
-                os.kill(descendant, _linux_attribute(signal, "SIGKILL"))
-        except (FileNotFoundError, ProcessLookupError):
-            pass
+            fields = (path / "stat").read_text().rsplit(")", 1)[1].split()
+        except FileNotFoundError:
+            continue
+        if int(fields[2]) != pid or int(fields[3]) != pid:
+            continue
+        current = int(path.name)
+        identity = int(fields[19])
+        if known.setdefault(current, identity) != identity:
+            raise ResourceFailure("anchored group member PID was reused")
+        members[current] = identity
+    return members
 
 
-def _group_alive(pid: int) -> bool:
-    try:
-        _linux_attribute(os, "killpg")(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
+def _observed_survivors(pid: int, known: dict[int, int]) -> list[int]:
+    survivors = []
+    members = _owned_processes(pid, known)
+    members.update(_anchored_group_members(pid, known))
+    for descendant in members:
+        if descendant == pid:
+            continue
+        try:
+            status = (_PROC_ROOT / str(descendant) / "status").read_text()
+            state = next(
+                line.split(":", 1)[1] for line in status.splitlines() if line.startswith("State:")
+            )
+            if not state.lstrip().startswith("Z"):
+                survivors.append(descendant)
+        except FileNotFoundError:
+            continue
+    return survivors
+
+
+def _confirm_cleanup(pid: int, known: dict[int, int]) -> None:
+    """Bound confirmation to observed tasks while the original leader is unreaped."""
+    deadline = time.monotonic() + 5
+    while _wait_status(pid) is None or _observed_survivors(pid, known):
+        if time.monotonic() >= deadline:
+            raise ResourceFailure("observed worker termination remains unconfirmed")
+        time.sleep(POLL_SECONDS)
 
 
 def _flush_parent_directory(parent: Path) -> None:
@@ -306,6 +430,8 @@ def supervise(argv: list[str], root: Path, outer_log: Path) -> int:
 
     The caller validates source, owner preflight and canonical output paths.
     Polling has finite detection latency; it is not a cgroup allocation guarantee.
+    Discovery covers the anchored private session/group and observed escaped
+    descendants. No subreaper or exhaustive escaped-orphan claim is made.
     """
     require_linux_capabilities()
     if root.exists() or not argv or outer_log != root.parent / (root.name + ".supervisor.json"):
@@ -318,6 +444,7 @@ def supervise(argv: list[str], root: Path, outer_log: Path) -> int:
     prior_phases: tuple[bytes, ...] = ()
     known: dict[int, int] = {}
     child: subprocess.Popen[bytes] | None = None
+    reaped = False
     stdout_path = root.parent / (root.name + ".worker-stdout.log")
     stderr_path = root.parent / (root.name + ".worker-stderr.log")
     with outer_log.open("x", encoding="utf-8") as log, ExitStack() as streams:
@@ -345,10 +472,10 @@ def supervise(argv: list[str], root: Path, outer_log: Path) -> int:
                 stdout=stdout,
                 stderr=stderr,
             )
+            known[child.pid] = _identity(child.pid)
             while True:
                 now = time.monotonic()
                 rss, live = _tree_usage(child.pid, known, cpus)
-                known.update(live)
                 output = _output_bytes(root) + sum(
                     path.stat().st_size for path in (outer_log, stdout_path, stderr_path)
                 )
@@ -376,24 +503,48 @@ def supervise(argv: list[str], root: Path, outer_log: Path) -> int:
                         "pids": sorted(live),
                     }
                 )
-                result = child.poll()
+                result = _wait_status(child.pid)
                 if result is not None:
-                    if result != 0 or phases != 16 or _group_alive(child.pid):
+                    survivors = _observed_survivors(child.pid, known)
+                    if result != 0 or phases != 16 or survivors:
                         raise ResourceFailure(
                             "worker failed, incomplete cells or surviving descendants"
                         )
+                    _kill(child.pid, known)
+                    _confirm_cleanup(child.pid, known)
+                    actual_result = child.wait(timeout=5)
+                    reaped = True
+                    if actual_result != result:
+                        raise ResourceFailure("worker reap status differs from exit observation")
                     os.fsync(stdout.fileno())
                     os.fsync(stderr.fileno())
-                    record({"event": "complete", "returncode": result})
+                    record(
+                        {
+                            "event": "complete",
+                            "returncode": result,
+                            "descendant_coverage": "anchored_group_and_observed_descendants",
+                            "group_cleanup": "unreaped_leader_anchored",
+                        }
+                    )
                     return result
                 time.sleep(POLL_SECONDS)
         except BaseException as error:
-            if child is not None:
-                _kill(child.pid, known)
+            if child is not None and not reaped:
                 try:
+                    _kill(child.pid, known)
+                    _confirm_cleanup(child.pid, known)
                     child.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    record({"event": "termination_unconfirmed", "error": str(error)})
+                    reaped = True
+                except BaseException as cleanup_error:
+                    record(
+                        {
+                            "event": "permanent_stop",
+                            "error": str(error),
+                            "error_type": type(error).__name__,
+                            "termination": "unconfirmed",
+                            "cleanup_error": str(cleanup_error),
+                        }
+                    )
                     raise ResourceFailure("worker termination is unconfirmed") from error
             record(
                 {"event": "permanent_stop", "error": str(error), "error_type": type(error).__name__}

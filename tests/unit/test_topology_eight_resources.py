@@ -44,6 +44,7 @@ def harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
         "count": 16,
         "code": 0,
         "events": [],
+        "survivors": [],
     }
 
     class FakeProcess:
@@ -60,13 +61,15 @@ def harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
             kwargs["stderr"].flush()
 
         def poll(self) -> int | None:
-            value = state["code"]
-            assert value is None or isinstance(value, int)
-            return value
+            raise AssertionError("poll would reap the process-group anchor")
 
         def wait(self, timeout: int) -> int:
             state["waited"] = True
-            return -9
+            state["reaped"] = True
+            state["events"].append("reap")
+            value = state["code"]
+            assert isinstance(value, int)
+            return value
 
     times = iter([0.0])
     monkeypatch.setattr(resources, "require_linux_capabilities", lambda: None)
@@ -76,8 +79,16 @@ def harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
     monkeypatch.setattr(resources, "_tree_usage", lambda *args: (state["rss"], {42: 100}))
     monkeypatch.setattr(resources, "_output_bytes", lambda root: state["output"])
-    monkeypatch.setattr(resources, "_kill", lambda pid, known: state["kills"].append(pid))
-    monkeypatch.setattr(resources, "_group_alive", lambda pid: False)
+
+    def kill(pid: int, known: dict[int, int]) -> None:
+        assert not state.get("reaped", False)
+        state["events"].append("group_cleanup")
+        state["kills"].append(pid)
+
+    monkeypatch.setattr(resources, "_kill", kill)
+    monkeypatch.setattr(resources, "_identity", lambda pid: 100)
+    monkeypatch.setattr(resources, "_wait_status", lambda pid: state["code"])
+    monkeypatch.setattr(resources, "_observed_survivors", lambda *args: state["survivors"])
     monkeypatch.setattr(
         resources, "_flush_parent_directory", lambda parent: state["events"].append("parent_flush")
     )
@@ -101,7 +112,9 @@ def test_one_session_and_controlled_cpu_environment(harness: dict[str, Any]) -> 
     assert kwargs["stderr"].name.endswith(".worker-stderr.log")
     assert kwargs["env"]["EPS_TOPOLOGY_SUPERVISOR_PID"] == str(os.getpid())
     assert all(kwargs["env"][key] == value for key, value in resources.THREAD_ENV.items())
-    assert harness["kills"] == []
+    assert harness["kills"] == [42]
+    assert harness["reaped"]
+    assert harness["events"].index("group_cleanup") < harness["events"].index("reap")
     records = [
         json.loads(line)
         for line in (harness["root"].parent / "study.supervisor.json").read_text().splitlines()
@@ -344,10 +357,11 @@ def test_child_limits_before_native_imports(monkeypatch: pytest.MonkeyPatch) -> 
     assert all(os.environ[key] == value for key, value in resources.THREAD_ENV.items())
 
 
-def test_surviving_unobserved_process_group_fails(
+def test_surviving_group_member_fails_before_successful_exit_cleanup(
     harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(resources, "_group_alive", lambda pid: True)
+    harness["survivors"] = [43]
+    monkeypatch.setattr(resources, "_confirm_cleanup", lambda *args: None)
     with pytest.raises(resources.ResourceFailure, match="surviving descendants"):
         run(harness)
     assert harness["kills"] == [42]
@@ -380,12 +394,24 @@ def test_process_and_each_thread_containment(
 
 def test_kill_preserves_reused_unrelated_pid(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[int, int]] = []
+    closed: list[int] = []
     monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
     monkeypatch.setattr(os, "killpg", lambda pid, sig: calls.append((pid, sig)), raising=False)
-    monkeypatch.setattr(os, "kill", lambda pid, sig: calls.append((pid, sig)))
-    monkeypatch.setattr(resources, "_identity", lambda pid: 100 if pid == 43 else 999)
-    resources._kill(42, {43: 100, 44: 101})
-    assert calls == [(42, 9), (43, 9)]
+    monkeypatch.setattr(os, "getpgid", lambda pid: 42, raising=False)
+    monkeypatch.setattr(os, "getsid", lambda pid: 42, raising=False)
+    monkeypatch.setattr(os, "pidfd_open", lambda pid, flags: pid + 1000, raising=False)
+    monkeypatch.setattr(
+        signal,
+        "pidfd_send_signal",
+        lambda fd, sig, info, flags: calls.append((fd, sig)),
+        raising=False,
+    )
+    monkeypatch.setattr(os, "close", lambda fd: closed.append(fd))
+    monkeypatch.setattr(resources, "_wait_status", lambda pid: None)
+    monkeypatch.setattr(resources, "_identity", lambda pid: {42: 100, 43: 101}.get(pid, 999))
+    resources._kill(42, {42: 100, 43: 101, 44: 102})
+    assert calls == [(42, 9), (1043, 9)]
+    assert closed == [1043, 1044]
 
 
 def test_scoped_descendants_and_pid_identity(
@@ -402,4 +428,187 @@ def test_scoped_descendants_and_pid_identity(
         (proc / "task" / str(pid) / "children").write_text(children)
         (proc / "stat").write_text(f"{pid} (process name) S " + "0 " * 18 + str(identity))
     monkeypatch.setattr(resources, "_PROC_ROOT", tmp_path)
-    assert resources._owned_processes(42, {99: 200}) == {42: 100, 43: 101, 44: 102}
+    assert resources._owned_processes(42, {42: 100, 99: 200}) == {42: 100, 43: 101, 44: 102}
+
+
+def fake_process(
+    root: Path,
+    pid: int,
+    identity: int,
+    group: int,
+    session: int,
+    children: str = "",
+    state: str = "S",
+) -> None:
+    proc = root / str(pid)
+    (proc / "task" / str(pid)).mkdir(parents=True)
+    fields = [state, "1", str(group), str(session), *(["0"] * 15), str(identity)]
+    (proc / "stat").write_text(f"{pid} (process name) " + " ".join(fields))
+    (proc / "status").write_text(f"State:\t{state}\n")
+    (proc / "task" / str(pid) / "children").write_text(children)
+
+
+@pytest.mark.parametrize("reused", [42, 43])
+def test_discovery_never_relabels_reused_root_or_member(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reused: int
+) -> None:
+    fake_process(tmp_path, 42, 999 if reused == 42 else 100, 42, 42, "43")
+    fake_process(tmp_path, 43, 999 if reused == 43 else 101, 42, 42, "44")
+    fake_process(tmp_path, 44, 102, 42, 42)
+    monkeypatch.setattr(resources, "_PROC_ROOT", tmp_path)
+    known = {42: 100, 43: 101}
+    if reused == 42:
+        with pytest.raises(resources.ResourceFailure, match="root identity changed"):
+            resources._owned_processes(42, known)
+    else:
+        assert resources._owned_processes(42, known) == {42: 100}
+    assert known == {42: 100, 43: 101}
+
+
+def test_anchored_group_detects_unobserved_reparented_survivor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_process(tmp_path, 42, 100, 42, 42, state="Z")
+    fake_process(tmp_path, 43, 101, 42, 42)
+    fake_process(tmp_path, 44, 102, 42, 42, state="Z")
+    fake_process(tmp_path, 99, 999, 99, 99)
+    monkeypatch.setattr(resources, "_PROC_ROOT", tmp_path)
+    monkeypatch.setattr(resources, "_assert_leader_anchor", lambda *args: None)
+    known = {42: 100}
+    assert resources._observed_survivors(42, known) == [43]
+    assert known == {42: 100, 43: 101, 44: 102}
+
+
+@pytest.mark.parametrize("code,status,expected", [(1, 7, 7), (2, 9, -9), (3, 11, -11)])
+def test_nonreaping_waitid_observation(
+    monkeypatch: pytest.MonkeyPatch, code: int, status: int, expected: int
+) -> None:
+    constants = {
+        "P_PID": 1,
+        "WEXITED": 4,
+        "WNOHANG": 1,
+        "WNOWAIT": 16,
+        "CLD_EXITED": 1,
+        "CLD_KILLED": 2,
+        "CLD_DUMPED": 3,
+    }
+    for name, value in constants.items():
+        monkeypatch.setattr(os, name, value, raising=False)
+    calls: list[tuple[int, int, int]] = []
+
+    def waitid(kind: int, pid: int, flags: int) -> SimpleNamespace:
+        calls.append((kind, pid, flags))
+        return SimpleNamespace(si_pid=pid, si_status=status, si_code=code)
+
+    monkeypatch.setattr(os, "waitid", waitid, raising=False)
+    assert resources._wait_status(42) == expected
+    assert calls == [(1, 42, 4 | 1 | 16)]
+
+
+def test_lost_wait_ownership_never_signals_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[int, int]] = []
+
+    def lost(pid: int) -> int:
+        raise resources.ResourceFailure("worker leader ownership lost")
+
+    monkeypatch.setattr(resources, "_wait_status", lost)
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: calls.append((pid, sig)), raising=False)
+    with pytest.raises(resources.ResourceFailure, match="ownership lost"):
+        resources._kill(42, {42: 100})
+    assert calls == []
+
+
+def test_reused_leader_never_signals_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[int, int]] = []
+    monkeypatch.setattr(resources, "_wait_status", lambda pid: 0)
+    monkeypatch.setattr(resources, "_identity", lambda pid: 999)
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: calls.append((pid, sig)), raising=False)
+    with pytest.raises(resources.ResourceFailure, match="identity unconfirmed"):
+        resources._kill(42, {42: 100})
+    assert calls == []
+
+
+@pytest.mark.parametrize("race", ["reuse_before_verify", "exit_after_verify"])
+def test_pidfd_signal_closes_handle_and_never_uses_numeric_pid(
+    monkeypatch: pytest.MonkeyPatch, race: str
+) -> None:
+    events: list[str] = []
+
+    def pidfd_open(pid: int, flags: int) -> int:
+        events.append("open_bound_handle")
+        return 17
+
+    def identity(pid: int) -> int:
+        assert events == ["open_bound_handle"]
+        events.append("identity_verify")
+        return 999 if race == "reuse_before_verify" else 100
+
+    def send(fd: int, sig: int, info: object, flags: int) -> None:
+        assert fd == 17
+        events.append("pidfd_signal")
+        raise ProcessLookupError("original handled task exited")
+
+    def numeric_signal(pid: int, sig: int) -> None:
+        raise AssertionError("reusable numeric PID must never be signalled")
+
+    monkeypatch.setattr(os, "pidfd_open", pidfd_open, raising=False)
+    monkeypatch.setattr(signal, "pidfd_send_signal", send, raising=False)
+    monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(os, "kill", numeric_signal)
+    monkeypatch.setattr(os, "close", lambda fd: events.append("close_handle"))
+    monkeypatch.setattr(resources, "_identity", identity)
+    resources._signal_bound_process(43, 100)
+    expected = ["open_bound_handle", "identity_verify"]
+    if race == "exit_after_verify":
+        expected.append("pidfd_signal")
+    assert events == [*expected, "close_handle"]
+
+
+def test_cleanup_uncertainty_is_logged_without_reaping(
+    harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness["code"] = 2
+
+    def lost(pid: int, known: dict[int, int]) -> None:
+        raise resources.ResourceFailure("worker leader ownership lost")
+
+    monkeypatch.setattr(resources, "_kill", lost)
+    with pytest.raises(resources.ResourceFailure, match="termination is unconfirmed"):
+        run(harness)
+    assert not harness.get("reaped", False)
+    terminal = json.loads(
+        (harness["root"].parent / "study.supervisor.json").read_text().splitlines()[-1]
+    )
+    assert terminal["event"] == "permanent_stop"
+    assert terminal["termination"] == "unconfirmed"
+    assert terminal["cleanup_error"] == "worker leader ownership lost"
+
+
+def test_postreap_evidence_failure_never_signals_group_again(
+    harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_fsync = os.fsync
+    injected = False
+
+    def fsync(descriptor: int) -> None:
+        nonlocal injected
+        if harness.get("reaped", False) and not injected:
+            injected = True
+            raise OSError("postreap evidence failure")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    with pytest.raises(OSError, match="postreap"):
+        run(harness)
+    assert harness["reaped"]
+    assert harness["kills"] == [42]
+
+
+def test_observed_termination_confirmation_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    times = iter([0.0, 1.0, 6.0])
+    monkeypatch.setattr(time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(resources, "_wait_status", lambda pid: 0)
+    monkeypatch.setattr(resources, "_observed_survivors", lambda *args: [43])
+    with pytest.raises(resources.ResourceFailure, match="termination remains unconfirmed"):
+        resources._confirm_cleanup(42, {42: 100, 43: 101})

@@ -578,6 +578,9 @@ def worker(source: Path, root: Path, human: Path) -> dict[str, Any]:
     os.chdir(source)
     plan, receipt = validate_preflight(source, root, human)
     machine = MachineReceipt.model_validate_json(receipt.machine.verify())
+    from epsbench.diagnostics.topology_eight_native import prepare_graphics_environment
+
+    prepare_graphics_environment()
     from epsbench.diagnostics.topology_eight_assessment import assess_cell, compare_study
     from epsbench.diagnostics.topology_eight_native import capture_cell, validate_saved_native
 

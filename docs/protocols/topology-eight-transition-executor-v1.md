@@ -12,6 +12,12 @@ It reuses unchanged single-occluder generation, canonical paired capture,
 typed loaders, topology derivation and independent reconstruction. The historical
 32-context qualification command remains outside this study.
 
+The existing data package now resolves its unchanged public exports lazily.
+Permission/path and inert-plan imports therefore do not eagerly import the
+generator/graphics backend. Worker OSMesa preparation precedes saved-assessment
+imports; a fresh-interpreter import sentinel verifies this boundary. Generation,
+validation, loader permission and renderer implementations are unchanged.
+
 `scripts/topology_eight_transition.py plan` is inert: it prints the prospective
 source/configuration/protocol/membership binding without a namespace or graphics.
 The sole execution operation is `capture --root <exact-wsl-path>
@@ -69,6 +75,14 @@ headroom and operator resource agreement must be resolved before capture; these
 CPU tests do not qualify TPUQMNG or demonstrate an actual Linux containment run.
 If the exact protocol limits cannot be enforced on that runtime, capture must not
 start. No remote access/dispatch is assumed.
+
+The supervisor observes exit without reaping and retains the original leader
+through process-group cleanup. It preserves bound PID/start-time identities and
+signals known escaped descendants through pidfds. Losing child ownership or
+failing to confirm cleanup stops permanently; a reaped group number is never
+signalled. Original session/group members are checked before successful exit;
+this does not establish exhaustive containment of unobserved escaped orphans.
+Required wait/pidfd interfaces and sole supervisor reaping must be available.
 
 Guarded CPU tests use synthetic arrays, fake SDK/native functions and mocked
 process/resource interfaces. They cannot provide executed native study evidence.
