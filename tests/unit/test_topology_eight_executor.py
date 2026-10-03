@@ -53,6 +53,7 @@ def run_fake(root: Path, **changes: Any) -> tuple[dict[str, Any], list[int]]:
         "recheck": lambda: None,
         "phase_start": lambda *_: None,
         "phase_complete": lambda *_: None,
+        "flush_artifacts": lambda _: None,
     }
     args.update(changes)
     result = e._execute_once(
@@ -232,3 +233,35 @@ def test_failed_constructor_native_receipt_is_retained_outside_ledger(tmp_path: 
     failure = json.loads((root / "operator/failure.json").read_bytes())
     assert failure["native_partial_receipt"] == partial
     assert failure["lock_present"] is True
+
+
+def test_durability_failure_stops_before_terminal_or_release(tmp_path: Path) -> None:
+    root = tmp_path / "synthetic-study"
+
+    def fail_flush(path: Path) -> None:
+        assert path == root
+        raise OSError("synthetic flush failure")
+
+    with pytest.raises(OSError, match="flush failure"):
+        run_fake(root, flush_artifacts=fail_flush)
+    records = [json.loads(path.read_bytes()) for path in sorted((root / "ledger").glob("*.json"))]
+    assert [record["event"] for record in records] == ["initialised", "reserved", "failed"]
+    assert (root / "capture-attempt.lock").is_file()
+    with pytest.raises(e.TopologyExecutionFailure):
+        run_fake(root)
+
+
+def test_durability_barrier_flushes_files_then_deepest_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "tree"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    (root / "one").write_bytes(b"one")
+    (nested / "two").write_bytes(b"two")
+    events: list[tuple[str, object]] = []
+    monkeypatch.setattr("os.fsync", lambda descriptor: events.append(("file", descriptor)))
+    monkeypatch.setattr(e, "_flush_directory", lambda path: events.append(("directory", path)))
+    e.flush_artifact_tree(root)
+    assert [event[0] for event in events] == ["file", "file", "directory", "directory"]
+    assert events[-2:] == [("directory", nested), ("directory", root)]

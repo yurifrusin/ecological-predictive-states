@@ -337,6 +337,31 @@ def inventory(root: Path) -> list[dict[str, Any]]:
     return files
 
 
+def _flush_directory(path: Path) -> None:
+    if os.name != "posix":
+        raise TopologyExecutionFailure("capture requires POSIX directory durability")
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def flush_artifact_tree(root: Path) -> None:
+    """Flush saved producer and analysis files before certifying a cell terminal."""
+    directories = [root]
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise TopologyExecutionFailure("linked artifact during durability barrier")
+        if path.is_dir():
+            directories.append(path)
+        else:
+            with open_owned_regular_file(root, path.relative_to(root).as_posix()) as item:
+                os.fsync(item.handle.fileno())
+    for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
+        _flush_directory(directory)
+
+
 class OperationalLedger:
     """Only this live invocation owns append state; opening a saved ledger is impossible."""
 
@@ -398,6 +423,7 @@ def _execute_once(
     phase_complete: Callable[[Path, int], None],
     publisher: Callable[[Path, bytes], object] = publish_bytes,
     operator_records: Mapping[str, bytes] | None = None,
+    flush_artifacts: Callable[[Path], None] = flush_artifact_tree,
 ) -> dict[str, Any]:
     """Internal injectable lifecycle. Only validated supervised entrypoints call it."""
     if root.exists() or root.is_symlink():
@@ -480,6 +506,7 @@ def _execute_once(
                 }
             )
             publisher(root / "receipts" / f"{name}.json", payload)
+            flush_artifacts(root)
             terminal = ledger.append("complete", ordinal, {"cell": name})
             active.release_after_success(terminal)
             active = None
@@ -490,6 +517,7 @@ def _execute_once(
         controls = compare(root, tuple(cell["name"] for cell in plan["cells"]))
         publisher(root / "comparisons" / "controls.json", canonical_json_bytes(controls))
         recheck()
+        flush_artifacts(root)
         ledger.append("finished", None, {"contexts": 8, "render_pairs": 48})
         publisher(
             root / "evidence-index.json",

@@ -38,6 +38,8 @@ wrong-order or excess native calls are rejected before the native function.
 Successful cells require saved native reconstruction, complete unchanged dataset
 validation, public topology reconstruction, privileged correspondence assessment,
 artifact inventory and cleanup. A cell terminal precedes lock release; a separate
+durability barrier fsyncs saved producer/assessment files and directories from
+deepest to root before the terminal. Unsupported or failed fsync stops permanently.
 release revision must return successfully before advancement. Every exception
 stops the live invocation, including errors after unlink or visible publication.
 Failure receipts are attempted independently of the ledger, with supervisor logs
