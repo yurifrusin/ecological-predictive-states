@@ -43,12 +43,14 @@ def harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
         "output": 1,
         "count": 16,
         "code": 0,
+        "events": [],
     }
 
     class FakeProcess:
         pid = 42
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
+            state["events"].append("popen")
             state["launches"].append((args, kwargs))
             phases(state["root"], state["count"])
             (state["root"] / "retained.lock").write_text("owned")
@@ -76,6 +78,9 @@ def harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     monkeypatch.setattr(resources, "_output_bytes", lambda root: state["output"])
     monkeypatch.setattr(resources, "_kill", lambda pid, known: state["kills"].append(pid))
     monkeypatch.setattr(resources, "_group_alive", lambda pid: False)
+    monkeypatch.setattr(
+        resources, "_flush_parent_directory", lambda parent: state["events"].append("parent_flush")
+    )
     return state
 
 
@@ -154,6 +159,101 @@ def test_worker_stream_never_overwritten(harness: dict[str, Any]) -> None:
         run(harness)
     assert stream.read_text() == "preserved diagnostics"
     assert harness["launches"] == []
+
+
+def test_external_evidence_fsynced_before_launch(
+    harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_fsync = os.fsync
+
+    def fsync(descriptor: int) -> None:
+        harness["events"].append("fsync")
+        real_fsync(descriptor)
+
+    def flush_parent(parent: Path) -> None:
+        assert parent == harness["root"].parent
+        assert (parent / "study.worker-stdout.log").exists()
+        assert (parent / "study.worker-stderr.log").exists()
+        records = (parent / "study.supervisor.json").read_text().splitlines()
+        assert json.loads(records[-1])["event"] == "launch"
+        harness["events"].append("parent_flush")
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(resources, "_flush_parent_directory", flush_parent)
+    assert run(harness) == 0
+    assert harness["events"][:5] == ["fsync", "fsync", "fsync", "parent_flush", "popen"]
+
+
+def test_failed_parent_flush_prevents_launch_preserves_failure(
+    harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(parent: Path) -> None:
+        raise OSError("parent fsync injected failure")
+
+    monkeypatch.setattr(resources, "_flush_parent_directory", fail)
+    with pytest.raises(OSError, match="parent fsync injected"):
+        run(harness)
+    assert harness["launches"] == []
+    assert not harness["root"].exists()
+    parent = harness["root"].parent
+    assert (parent / "study.worker-stdout.log").exists()
+    assert (parent / "study.worker-stderr.log").exists()
+    terminal = json.loads((parent / "study.supervisor.json").read_text().splitlines()[-1])
+    assert terminal["event"] == "permanent_stop"
+    assert terminal["error"] == "parent fsync injected failure"
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_linux_parent_flush_readonly_descriptor_closed_even_on_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: bool
+) -> None:
+    calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(os, "O_DIRECTORY", 65536, raising=False)
+    monkeypatch.setattr(os, "O_NOFOLLOW", 131072, raising=False)
+
+    def open_directory(path: Path, flags: int) -> int:
+        calls.append(("open", (path, flags)))
+        return 17
+
+    def fsync(descriptor: int) -> None:
+        calls.append(("fsync", descriptor))
+        if failure:
+            raise OSError("injected directory failure")
+
+    monkeypatch.setattr(os, "open", open_directory)
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(os, "close", lambda descriptor: calls.append(("close", descriptor)))
+    if failure:
+        with pytest.raises(OSError, match="injected directory failure"):
+            resources._flush_parent_directory(tmp_path)
+    else:
+        resources._flush_parent_directory(tmp_path)
+    assert calls == [
+        ("open", (tmp_path, os.O_RDONLY | 65536 | 131072)),
+        ("fsync", 17),
+        ("close", 17),
+    ]
+
+
+@pytest.mark.parametrize("bad_flag", [None, False, 0])
+def test_directory_flags_fail_closed_without_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bad_flag: object
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(os, "O_DIRECTORY", bad_flag, raising=False)
+    monkeypatch.setattr(os, "O_NOFOLLOW", 131072, raising=False)
+    with pytest.raises(resources.ResourceFailure, match="flags"):
+        resources._flush_parent_directory(tmp_path)
+
+
+def test_missing_directory_flag_has_no_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delattr(os, "O_DIRECTORY", raising=False)
+    with pytest.raises(AttributeError):
+        resources._flush_parent_directory(tmp_path)
 
 
 def test_non_linux_never_launches(monkeypatch: pytest.MonkeyPatch) -> None:

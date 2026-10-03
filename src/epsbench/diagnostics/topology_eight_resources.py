@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, cast
 
@@ -285,6 +286,21 @@ def _group_alive(pid: int) -> bool:
     return True
 
 
+def _flush_parent_directory(parent: Path) -> None:
+    """Durably retain external evidence names before a worker may start."""
+    if sys.platform != "linux":
+        raise ResourceFailure("parent-directory durability requires Linux/WSL")
+    directory = _linux_attribute(os, "O_DIRECTORY")
+    nofollow = _linux_attribute(os, "O_NOFOLLOW")
+    if type(directory) is not int or type(nofollow) is not int or directory <= 0 or nofollow <= 0:
+        raise ResourceFailure("required Linux directory-open flags are unavailable")
+    descriptor = os.open(parent, os.O_RDONLY | directory | nofollow)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def supervise(argv: list[str], root: Path, outer_log: Path) -> int:
     """Run exactly one new session, fail closed, and preserve all failure evidence.
 
@@ -304,19 +320,22 @@ def supervise(argv: list[str], root: Path, outer_log: Path) -> int:
     child: subprocess.Popen[bytes] | None = None
     stdout_path = root.parent / (root.name + ".worker-stdout.log")
     stderr_path = root.parent / (root.name + ".worker-stderr.log")
-    with (
-        outer_log.open("x", encoding="utf-8") as log,
-        stdout_path.open("xb") as stdout,
-        stderr_path.open("xb") as stderr,
-    ):
+    with outer_log.open("x", encoding="utf-8") as log, ExitStack() as streams:
+        stdout = None
+        stderr = None
 
         def record(value: dict[str, object]) -> None:
             log.write(json.dumps(value, allow_nan=False, sort_keys=True) + "\n")
             log.flush()
             os.fsync(log.fileno())
 
-        record({"event": "launch", "cpus": sorted(cpus), "monotonic_seconds": launch})
         try:
+            stdout = streams.enter_context(stdout_path.open("xb"))
+            stderr = streams.enter_context(stderr_path.open("xb"))
+            record({"event": "launch", "cpus": sorted(cpus), "monotonic_seconds": launch})
+            os.fsync(stdout.fileno())
+            os.fsync(stderr.fileno())
+            _flush_parent_directory(root.parent)
             child = subprocess.Popen(
                 argv,
                 env=environment,
@@ -376,9 +395,11 @@ def supervise(argv: list[str], root: Path, outer_log: Path) -> int:
                 except subprocess.TimeoutExpired:
                     record({"event": "termination_unconfirmed", "error": str(error)})
                     raise ResourceFailure("worker termination is unconfirmed") from error
-            os.fsync(stdout.fileno())
-            os.fsync(stderr.fileno())
             record(
                 {"event": "permanent_stop", "error": str(error), "error_type": type(error).__name__}
             )
+            if stdout is not None:
+                os.fsync(stdout.fileno())
+            if stderr is not None:
+                os.fsync(stderr.fileno())
             raise

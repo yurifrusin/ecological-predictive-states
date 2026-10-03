@@ -54,6 +54,7 @@ def run_fake(root: Path, **changes: Any) -> tuple[dict[str, Any], list[int]]:
         "phase_start": lambda *_: None,
         "phase_complete": lambda *_: None,
         "flush_artifacts": lambda _: None,
+        "flush_namespace": lambda _: None,
     }
     args.update(changes)
     result = e._execute_once(
@@ -263,5 +264,23 @@ def test_durability_barrier_flushes_files_then_deepest_directories(
     monkeypatch.setattr("os.fsync", lambda descriptor: events.append(("file", descriptor)))
     monkeypatch.setattr(e, "_flush_directory", lambda path: events.append(("directory", path)))
     e.flush_artifact_tree(root)
-    assert [event[0] for event in events] == ["file", "file", "directory", "directory"]
-    assert events[-2:] == [("directory", nested), ("directory", root)]
+    assert [event[0] for event in events] == ["file", "file", "directory", "directory", "directory"]
+    assert events[-3:] == [("directory", nested), ("directory", root), ("directory", root.parent)]
+
+
+def test_new_namespace_parent_flush_failure_prevents_constructor(tmp_path: Path) -> None:
+    root = tmp_path / "synthetic-study"
+
+    def fail_parent(path: Path) -> None:
+        assert path == root.parent
+        raise OSError("synthetic namespace durability failure")
+
+    def forbidden_capture(*args: Any) -> dict[str, Any]:
+        pytest.fail("capture reached before durable namespace")
+
+    with pytest.raises(OSError, match="namespace durability failure"):
+        run_fake(root, capture=forbidden_capture, flush_namespace=fail_parent)
+    assert root.is_dir()
+    assert not (root / "capture-attempt.lock").exists()
+    with pytest.raises(e.TopologyExecutionFailure, match="existing namespace"):
+        run_fake(root)

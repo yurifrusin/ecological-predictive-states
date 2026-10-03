@@ -340,7 +340,18 @@ def inventory(root: Path) -> list[dict[str, Any]]:
 def _flush_directory(path: Path) -> None:
     if os.name != "posix":
         raise TopologyExecutionFailure("capture requires POSIX directory durability")
-    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    directory_flag, nofollow_flag = (
+        getattr(os, "O_DIRECTORY", None),
+        getattr(os, "O_NOFOLLOW", None),
+    )
+    if (
+        type(directory_flag) is not int
+        or type(nofollow_flag) is not int
+        or directory_flag <= 0
+        or nofollow_flag <= 0
+    ):
+        raise TopologyExecutionFailure("required directory/no-follow flags unavailable")
+    descriptor = os.open(path, os.O_RDONLY | directory_flag | nofollow_flag)
     try:
         os.fsync(descriptor)
     finally:
@@ -360,6 +371,7 @@ def flush_artifact_tree(root: Path) -> None:
                 os.fsync(item.handle.fileno())
     for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
         _flush_directory(directory)
+    _flush_directory(root.parent)
 
 
 class OperationalLedger:
@@ -424,6 +436,7 @@ def _execute_once(
     publisher: Callable[[Path, bytes], object] = publish_bytes,
     operator_records: Mapping[str, bytes] | None = None,
     flush_artifacts: Callable[[Path], None] = flush_artifact_tree,
+    flush_namespace: Callable[[Path], None] = _flush_directory,
 ) -> dict[str, Any]:
     """Internal injectable lifecycle. Only validated supervised entrypoints call it."""
     if root.exists() or root.is_symlink():
@@ -456,6 +469,7 @@ def _execute_once(
                 raise TopologyExecutionFailure("confirmed cell evidence changed")
 
     try:
+        flush_namespace(root.parent)
         publisher(root / "plan.json", canonical_json_bytes(plan))
         for name, payload in (operator_records or {}).items():
             if Path(name).name != name or name in {"", ".", ".."}:
