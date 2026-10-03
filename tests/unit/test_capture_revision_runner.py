@@ -797,23 +797,36 @@ def test_attempt_lock_closes_before_successful_unlink(
     assert not lock.path.exists()
 
 
-def test_attempt_lock_retains_replacement_after_close(
+def test_attempt_lock_retains_distinct_replacement_after_close(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     terminal = tmp_path / "terminal.json"
     terminal.write_text("{}", encoding="utf-8")
     tampered = AttemptLock(tmp_path)
     tampered.acquire()
+    target_fd = tampered.fd
+    assert target_fd is not None
+    replacement = tmp_path / "foreign.lock"
+    replacement.write_text("foreign", encoding="utf-8")
+    replacement_info = replacement.stat(follow_symlinks=False)
+    # Both files exist here, so immediate inode recycling cannot defeat this
+    # distinct-identity rejection test. Same-identity reuse and stat/unlink races
+    # remain separate production limitations, not guarantees established here.
+    assert (replacement_info.st_dev, replacement_info.st_ino) != tampered.identity
     original_close = os.close
+    replaced = False
 
     def replace_after_close(fd: int) -> None:
+        nonlocal replaced
         original_close(fd)
-        tampered.path.unlink()
-        tampered.path.write_text("foreign", encoding="utf-8")
+        if fd == target_fd and not replaced:
+            replaced = True
+            os.replace(replacement, tampered.path)
 
     monkeypatch.setattr(os, "close", replace_after_close)
     with pytest.raises(RevisionCaptureFailure, match="identity changed"):
         tampered.release_after_success(terminal)
+    assert replaced
     assert tampered.path.read_text(encoding="utf-8") == "foreign"
 
 
