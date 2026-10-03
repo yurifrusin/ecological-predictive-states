@@ -198,3 +198,42 @@ def test_membership_mutation_is_rejected_before_plan(tmp_path: Path) -> None:
     path.write_text(json.dumps({"records": records}), encoding="utf-8")
     with pytest.raises(e.TopologyExecutionFailure, match="byte identity"):
         e.fixed_cells(tmp_path)
+
+
+def test_confirmed_cell_corruption_stops_before_next_capture(tmp_path: Path) -> None:
+    root = tmp_path / "synthetic-study"
+    checks = 0
+
+    def recheck() -> None:
+        nonlocal checks
+        checks += 1
+        if checks == 3:
+            (root / "datasets/00-forward-base-r0/synthetic.json").write_bytes(b"changed")
+
+    with pytest.raises(e.TopologyExecutionFailure, match="confirmed cell evidence changed"):
+        run_fake(root, recheck=recheck)
+    records = [json.loads(p.read_bytes()) for p in sorted((root / "ledger").glob("*.json"))]
+    assert not any(r["event"] == "reserved" and r["ordinal"] == 1 for r in records)
+    assert not (root / "capture-attempt.lock").exists()
+
+
+def test_failed_constructor_native_receipt_is_retained_outside_ledger(tmp_path: Path) -> None:
+    root = tmp_path / "synthetic-study"
+    partial = {"constructor_attempts": [{"ordinal": 0, "completed": False}], "native_events": []}
+
+    def capture(*args: Any) -> dict[str, Any]:
+        error = RuntimeError("synthetic failed constructor")
+        setattr(error, "native_receipt", partial)
+        raise error
+
+    with pytest.raises(RuntimeError, match="failed constructor"):
+        run_fake(root, capture=capture)
+    failure = json.loads((root / "operator/failure.json").read_bytes())
+    assert failure["native_partial_receipt"] == partial
+    assert failure["lock_present"] is True
+
+
+def test_preflight_pins_complete_software_apparatus() -> None:
+    assert e.ENVIRONMENT["MUJOCO_GL"] == e.ENVIRONMENT["PYOPENGL_PLATFORM"] == "osmesa"
+    assert e.ENVIRONMENT["LIBGL_ALWAYS_SOFTWARE"] == "1"
+    assert e.ENVIRONMENT["GALLIUM_DRIVER"] == "llvmpipe"
