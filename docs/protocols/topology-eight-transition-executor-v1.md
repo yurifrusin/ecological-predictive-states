@@ -27,6 +27,8 @@ The script refuses existing study roots or supervisor receipts. The internal
 worker requires its live script supervisor and applies kernel address-space and
 CPU-affinity limits before NumPy/graphics imports. Initial context preparation
 requires both OSMesa environment variables; no environment/backend fallback,
+and pins `LIBGL_ALWAYS_SOFTWARE=1`, `GALLIUM_DRIVER=llvmpipe`. The actual counted
+context must report llvmpipe; other software renderers are rejected before draws.
 preflight context, resume, retry, replacement, extension or search exists.
 Source and installed-runtime byte bindings are checked before each cell and after
 its saved-data assessment. Completed cell artifacts and ledger prefix are checked

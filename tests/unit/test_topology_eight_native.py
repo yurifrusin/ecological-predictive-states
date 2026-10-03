@@ -35,7 +35,7 @@ def runtime() -> dict[str, Any]:
         attachment_component_type=35863,
         gl_samples=0,
         gl_vendor="synthetic",
-        gl_renderer="synthetic software",
+        gl_renderer="synthetic llvmpipe",
         gl_version="synthetic",
     )
 
@@ -479,3 +479,25 @@ def test_adapter_uses_fixed_producer_arguments_and_retains_failure(
     }
     assert calls[0] == "runtime-osmesa"
     assert not output.exists()
+
+
+@pytest.mark.parametrize("renderer_name", ["softpipe", "software", "swrast"])
+def test_other_software_renderers_rejected_before_progress(
+    monkeypatch: pytest.MonkeyPatch, renderer_name: str
+) -> None:
+    module, calls, facts = fixture(monkeypatch)
+    facts["gl_renderer"] = renderer_name
+    monitor = n.NativeMonitor(module)
+    with monitor:
+        with pytest.raises(n.NativeCaptureFailure, match="llvmpipe"):
+            construct(module)
+        assert calls == ["construct", "close"]
+        assert monitor.contexts == [] and monitor.events == [] and monitor.proxies == []
+        assert monitor.constructor_attempts[0]["status"] == "failed"
+        assert monitor.constructor_attempts[0]["close_complete"] is True
+        with pytest.raises(n.NativeCaptureFailure, match="permanently stopped"):
+            construct(module)
+        assert calls == ["construct", "close"]
+    assert monitor.failed and monitor.restored
+    with pytest.raises(n.NativeCaptureFailure):
+        monitor.validate_complete()

@@ -41,6 +41,8 @@ RUNTIME = {
 ENVIRONMENT = {
     "MUJOCO_GL": "osmesa",
     "PYOPENGL_PLATFORM": "osmesa",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "GALLIUM_DRIVER": "llvmpipe",
     "LP_NUM_THREADS": "2",
     "OMP_NUM_THREADS": "1",
     "OPENBLAS_NUM_THREADS": "1",

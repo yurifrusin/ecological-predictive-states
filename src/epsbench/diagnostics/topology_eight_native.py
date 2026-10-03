@@ -87,12 +87,9 @@ def _validate_context(facts: Mapping[str, Any]) -> None:
             )
         )
         or "osmesa" not in str(binding["context_module"]).lower()
-        or not any(
-            s in str(binding["gl_renderer"]).lower()
-            for s in ("llvmpipe", "softpipe", "software", "swrast")
-        )
+        or "llvmpipe" not in str(binding["gl_renderer"]).lower()
     ):
-        raise NativeCaptureFailure("context is not software zero-sample OSMesa 160x120")
+        raise NativeCaptureFailure("context is not llvmpipe zero-sample OSMesa 160x120")
 
 
 def _read(root: Path, relative: str) -> bytes:
