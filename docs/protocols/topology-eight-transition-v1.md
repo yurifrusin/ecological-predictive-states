@@ -89,7 +89,8 @@ failures. No hidden inspection, diagnostic or validator rendering is permitted.
 
 ## 4. Runtime and bounded resources
 
-Target: DESKTOP-TPUQMNG, WSL/Linux, `MUJOCO_GL=osmesa`, software llvmpipe,
+Target: DESKTOP-TPUQMNG, WSL/Linux, `MUJOCO_GL=osmesa` and
+`PYOPENGL_PLATFORM=osmesa` set before graphics imports, software llvmpipe,
 zero samples, 160 x 120. Pin Python 3.11.15, MuJoCo 3.12.0, NumPy 2.4.6,
 PyOpenGL 3.1.10 and glfw 2.10.2 with the unchanged lock. Record complete package,
 installed Python SDK/native binary and OSMesa-library hashes before capture.
@@ -98,7 +99,8 @@ at the first counted context and every following context. Drift stops the study.
 The native evidence checks of canonical paired capture remain unchanged. These
 camera settings lie outside the old PR30 evidence and need fresh checks.
 
-Single worker, serial cells, at most two logical CPU cores and two llvmpipe
+Single worker and one non-resumable capture invocation for all serial cells,
+at most two logical CPU cores and two llvmpipe
 threads (`LP_NUM_THREADS=2`, `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`).
 The proposed operator envelope is at most 8 GiB memory, 1 GiB new output,
 five minutes per cell and 45 minutes total. These are resource limits, not
@@ -212,6 +214,12 @@ successful release before the next cell is eligible. A terminal without that
 confirmation is a stopped/uncertain prefix, even if the lock path is absent.
 This handles post-unlink fsync/publication errors conservatively without
 recreating a lock over a foreign path or claiming rollback durability.
+File presence alone never proves successful publication: no-replace publication
+can expose a final file before a later flush/readback error. The current invocation
+must observe successful release and confirmation publication with no exception
+before advancing its in-memory ordinal. Any exception latches permanent stop,
+even if apparently complete files are visible. Preserve outer failure/uncertainty
+logs; later read-only prefix inspection cannot authorise continued capture.
 
 Capture, provenance, reconstruction, permission, budget, source/runtime drift,
 publication, cleanup, timeout/resource or release errors permanently stop the
@@ -224,8 +232,11 @@ operation can accept an orphan, retained lock, unconfirmed release or failed tai
 
 No retry, resume of an uncertain/interrupted attempt, replacement namespace,
 extension, reset, auto-clear, tuning, seed search or changed masks/rules is included.
-Successful confirmed cells permit only the next not-yet-reserved ordinal, subject
-to fresh source/runtime/prefix checks. Stop after ordinal 7 and saved-data
+Successful confirmed cells permit only the next not-yet-reserved ordinal within
+that same uninterrupted invocation, subject to fresh source/runtime/prefix checks.
+There is no capture `next`/resume entrypoint. A new invocation must reject an
+existing study root regardless of visible confirmations; only read-only inspection
+is permitted after interruption. Stop after ordinal 7 and saved-data
 assessment. Lost contact is not evidence of termination: inspect existing state
 read-only and require operator confirmation; never relaunch blindly.
 
