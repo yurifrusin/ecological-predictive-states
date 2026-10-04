@@ -48,8 +48,10 @@ from epsbench.schema import (
     Modality,
     ModalityPermissionSet,
     OpticalTransportCoordinateConvention,
+    OrientedBoundaryElement,
     PrivilegedInstrumentation,
     SceneFamily,
+    SurfaceReference,
     TransitionRecord,
     parse_privileged_instrumentation_json,
 )
@@ -106,6 +108,49 @@ class LoadedComponentTopology:
     annotation: ComponentTopologyAnnotation
     before_component_labels: npt.NDArray[np.int32]
     after_component_labels: npt.NDArray[np.int32]
+
+
+@dataclass(frozen=True)
+class BeforeActionEcologicalView:
+    """Current-frame oracle snapshot, without outcome or privileged fields."""
+
+    action: Action
+    segmentation: npt.NDArray[np.int32]
+    surfaces: tuple[tuple[str, int], ...]
+    boundaries: tuple[OrientedBoundaryElement, ...]
+
+    def __post_init__(self) -> None:
+        pixels = self.segmentation
+        if pixels.dtype != np.int32 or pixels.ndim != 2 or min(pixels.shape) < 2:
+            raise ValueError("before segmentation must be a two-dimensional int32 image")
+        if np.any(pixels < 0):
+            raise ValueError("before segmentation labels must be nonnegative")
+        identifiers = [identifier for identifier, _ in self.surfaces]
+        labels = [label for _, label in self.surfaces]
+        for identifier, label in self.surfaces:
+            SurfaceReference(surface_id=identifier, segmentation_label=label)
+        present = set(int(label) for label in np.unique(pixels) if label)
+        if len(set(identifiers)) != len(identifiers) or len(set(labels)) != len(labels):
+            raise ValueError("before surface references must be one-to-one")
+        if set(labels) != present:
+            raise ValueError("before surface references must contain exactly visible labels")
+        for boundary in self.boundaries:
+            if boundary.frame_index != 0:
+                raise ValueError("before view rejects future-frame boundaries")
+            height, width = pixels.shape
+            if boundary.row >= height - int(
+                boundary.axis == "vertical"
+            ) or boundary.column >= width - int(boundary.axis == "horizontal"):
+                raise ValueError("before boundary is outside the current edge lattice")
+            references = (boundary.negative_surface_id, boundary.positive_surface_id)
+            if any(
+                identifier is not None and identifier not in identifiers
+                for identifier in references
+            ):
+                raise ValueError("before boundary refers to a nonvisible surface")
+        # Bytes-backed arrays cannot be made writable through setflags().
+        snapshot = np.frombuffer(pixels.tobytes(order="C"), dtype=np.int32).reshape(pixels.shape)
+        object.__setattr__(self, "segmentation", snapshot)
 
 
 @dataclass(frozen=True)
@@ -196,6 +241,32 @@ class DatasetLoader:
     def read_action(self, episode_index: int) -> Action:
         self._require(Modality.EXECUTED_ACTION)
         return self._transition(episode_index).action
+
+    def read_before_action(self, episode_index: int) -> BeforeActionEcologicalView:
+        """Check modalities before access; export only current-frame optical data."""
+
+        self._require(
+            Modality.EXECUTED_ACTION,
+            Modality.SURFACE_REGIONS,
+            Modality.ORIENTED_BOUNDARY_OWNERSHIP,
+        )
+        transition = self._transition(episode_index)
+        pixels = np.asarray(self._load_npy(transition.before.segmentation), dtype=np.int32)
+        present = set(int(label) for label in np.unique(pixels) if label)
+        return BeforeActionEcologicalView(
+            action=transition.action,
+            segmentation=pixels,
+            surfaces=tuple(
+                (surface.surface_id, surface.segmentation_label)
+                for surface in transition.surfaces
+                if surface.segmentation_label in present
+            ),
+            boundaries=tuple(
+                element
+                for element in transition.oriented_boundary_ownership.elements
+                if element.frame_index == 0
+            ),
+        )
 
     def read_scene_family(self) -> SceneFamily:
         self._require(Modality.SCENE_FAMILY)
