@@ -12,7 +12,7 @@ permissions:
 jobs:
   # Exact source publication route; this does not validate native study evidence.
   a1-source:
-    if: ${{ github.event_name == 'pull_request' && (github.head_ref == 'codex/a1-canonical-integration-20261005' || github.head_ref == 'codex/a1-retained-output-20261006' || github.head_ref == 'codex/a1-docker-execution-20261006' || github.head_ref == 'codex/causal-history-design-20261006') && github.base_ref == 'codex/a1-integration-base-20261005' }}
+    if: ${{ github.event_name == 'pull_request' && (github.head_ref == 'codex/a1-canonical-integration-20261005' || github.head_ref == 'codex/a1-retained-output-20261006' || github.head_ref == 'codex/a1-docker-execution-20261006' || github.head_ref == 'codex/causal-history-design-20261006' || github.head_ref == 'codex/causal-history-fixtures-20261006') && github.base_ref == 'codex/a1-integration-base-20261005' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -44,7 +44,7 @@ jobs:
         run: uv run --locked python scripts/check_a1_source.py
 
   quality:
-    if: ${{ !(github.event_name == 'pull_request' && (github.head_ref == 'codex/a1-canonical-integration-20261005' || github.head_ref == 'codex/a1-retained-output-20261006' || github.head_ref == 'codex/a1-docker-execution-20261006' || github.head_ref == 'codex/causal-history-design-20261006') && github.base_ref == 'codex/a1-integration-base-20261005') }}
+    if: ${{ !(github.event_name == 'pull_request' && (github.head_ref == 'codex/a1-canonical-integration-20261005' || github.head_ref == 'codex/a1-retained-output-20261006' || github.head_ref == 'codex/a1-docker-execution-20261006' || github.head_ref == 'codex/causal-history-design-20261006' || github.head_ref == 'codex/causal-history-fixtures-20261006') && github.base_ref == 'codex/a1-integration-base-20261005') }}
     runs-on: ubuntu-latest
     env:
       MUJOCO_GL: osmesa
@@ -370,7 +370,7 @@ jobs:
 
   qualify-wgl:
     name: qualify-wgl
-    if: ${{ github.event_name == 'pull_request' && !(github.event_name == 'pull_request' && (github.head_ref == 'codex/a1-canonical-integration-20261005' || github.head_ref == 'codex/a1-retained-output-20261006' || github.head_ref == 'codex/a1-docker-execution-20261006' || github.head_ref == 'codex/causal-history-design-20261006') && github.base_ref == 'codex/a1-integration-base-20261005') }}
+    if: ${{ github.event_name == 'pull_request' && !(github.event_name == 'pull_request' && (github.head_ref == 'codex/a1-canonical-integration-20261005' || github.head_ref == 'codex/a1-retained-output-20261006' || github.head_ref == 'codex/a1-docker-execution-20261006' || github.head_ref == 'codex/causal-history-design-20261006' || github.head_ref == 'codex/causal-history-fixtures-20261006') && github.base_ref == 'codex/a1-integration-base-20261005') }}
     runs-on: [self-hosted, Windows, X64, eps-wgl-ephemeral]
     outputs:
       packet-artifact-id: ${{ steps.upload-packet.outputs.artifact-id }}
@@ -526,7 +526,7 @@ jobs:
 
   qualify-osmesa:
     name: qualify-osmesa
-    if: ${{ github.event_name == 'pull_request' && !(github.event_name == 'pull_request' && (github.head_ref == 'codex/a1-canonical-integration-20261005' || github.head_ref == 'codex/a1-retained-output-20261006' || github.head_ref == 'codex/a1-docker-execution-20261006' || github.head_ref == 'codex/causal-history-design-20261006') && github.base_ref == 'codex/a1-integration-base-20261005') }}
+    if: ${{ github.event_name == 'pull_request' && !(github.event_name == 'pull_request' && (github.head_ref == 'codex/a1-canonical-integration-20261005' || github.head_ref == 'codex/a1-retained-output-20261006' || github.head_ref == 'codex/a1-docker-execution-20261006' || github.head_ref == 'codex/causal-history-design-20261006' || github.head_ref == 'codex/causal-history-fixtures-20261006') && github.base_ref == 'codex/a1-integration-base-20261005') }}
     needs: [quality, qualify-wgl]
     runs-on: ubuntu-latest
     env:
