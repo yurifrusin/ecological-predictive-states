@@ -27,6 +27,7 @@ from epsbench.schema import (
     TransitionRecord,
 )
 from epsbench.utils.canonical import canonical_json_bytes, sha256_bytes
+from epsbench.utils.seeding import derive_seed
 
 
 class A1CanonicalLoader(DatasetLoader):
@@ -123,7 +124,8 @@ class A1Files:
                 or manifest.root_seed != case.config.seed
                 or manifest.scene_family != case.config.scene_family
                 or manifest.appearance_profile_id != case.config.appearance.profile_id
-                or manifest.episodes[0].episode_seed != case.config.seed
+                or manifest.episodes[0].episode_seed
+                != derive_seed(case.config.seed, f"episode:{manifest.episodes[0].episode_index}")
             ):
                 raise ValueError("fixed dataset configuration/seed/family differs")
             before = loader.read_before_action(0)

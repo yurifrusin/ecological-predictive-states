@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from epsbench.data.loader import DatasetLoader
+from epsbench.data.output import ArtifactPublisher, OutputWriter
 from epsbench.data.validate import validate_dataset
 from epsbench.schema import ComponentTopologyAnnotation, ModalityPermissionSet
 
@@ -146,7 +147,14 @@ def _write_png_atomically_no_clobber(image: Image.Image, output: Path) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
-def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> Path:
+def create_inspection_image(
+    dataset: Path,
+    episode_index: int,
+    output: Path,
+    *,
+    publisher: ArtifactPublisher | None = None,
+    publication_prefix: str = "",
+) -> Path:
     root = dataset.resolve()
     resolved_output = output.resolve()
     if resolved_output.is_relative_to(root):
@@ -320,5 +328,13 @@ def create_inspection_image(dataset: Path, episode_index: int, output: Path) -> 
                 )
     for index, line in enumerate(detail_lines):
         draw.text((6, details_y + index * 18), line, fill="black")
-    _write_png_atomically_no_clobber(canvas, output)
+    if publisher is None:
+        _write_png_atomically_no_clobber(canvas, output)
+    else:
+        if not publication_prefix:
+            raise ValueError("retained inspection requires a stable prefix")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        OutputWriter(output.parent, publisher, publication_prefix=publication_prefix).png(
+            output, np.asarray(canvas.convert("RGB"))
+        )
     return output
