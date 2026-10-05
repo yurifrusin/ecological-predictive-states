@@ -17,7 +17,6 @@ from epsbench.diagnostics.causal_history_core import Array, CompletedFlow, Optic
 from epsbench.diagnostics.causal_history_sequence import (
     HEIGHT,
     WIDTH,
-    FlowEvidence,
     FrameEvidence,
     RetainedFlow,
     RetainedFrame,
@@ -26,6 +25,9 @@ from epsbench.diagnostics.causal_history_sequence import (
     canonical,
     commands,
     digest,
+)
+from epsbench.diagnostics.causal_history_sequence import (
+    admit_flow as admit_flow,
 )
 from epsbench.schema import (
     BoundaryAxis,
@@ -181,48 +183,6 @@ class ProducedSequence:
     frames: tuple[RetainedFrame, ...]
     flows: tuple[RetainedFlow, ...]
     operational: tuple[dict[str, Any], ...]
-
-
-def admit_flow(
-    validity: Array,
-    reasons: Array,
-    analytic_source: Array,
-    actual_source: Array,
-    actual_target: Array,
-    projected_samples: Array,
-) -> tuple[FlowEvidence, Array, Array]:
-    """Original validity is unchanged; mismatches deny ecological flow admission."""
-    shape = (HEIGHT, WIDTH)
-    if (
-        any(
-            a.shape != shape or a.dtype != np.int32
-            for a in (analytic_source, actual_source, actual_target)
-        )
-        or projected_samples.shape != (*shape, 2)
-        or projected_samples.dtype != np.int32
-        or validity.shape != shape
-        or validity.dtype != np.uint8
-        or reasons.shape != shape
-        or reasons.dtype != np.uint8
-        or np.any(validity > 1)
-        or np.any(reasons > 4)
-        or not np.array_equal(validity == 1, reasons == 0)
-    ):
-        raise ValueError("native/analytic admission array contract differs")
-    valid = validity == 1
-    source_mismatch = valid & ((analytic_source < 0) | (analytic_source != actual_source))
-    rows, columns = projected_samples[..., 1], projected_samples[..., 0]
-    inside = (rows >= 0) & (rows < HEIGHT) & (columns >= 0) & (columns < WIDTH)
-    sampled = actual_target[np.clip(rows, 0, HEIGHT - 1), np.clip(columns, 0, WIDTH - 1)]
-    target_mismatch = valid & (~inside | (sampled != analytic_source))
-    source_count, target_count = int(source_mismatch.sum()), int(target_mismatch.sum())
-    evidence = FlowEvidence(
-        admitted=source_count == target_count == 0,
-        source_mismatch_count=source_count,
-        target_mismatch_count=target_count,
-        reason_counts=tuple(int(np.count_nonzero(reasons == i)) for i in range(5)),
-    )
-    return evidence, source_mismatch, target_mismatch
 
 
 def produce_sequence(

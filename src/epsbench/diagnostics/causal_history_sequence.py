@@ -454,6 +454,60 @@ class FlowEvidence(Record):
         return self
 
 
+def admit_flow(
+    validity: Array,
+    reasons: Array,
+    analytic_source: Array,
+    actual_source: Array,
+    actual_target: Array,
+    projected_samples: Array,
+) -> tuple[FlowEvidence, Array, Array]:
+    """Original validity is unchanged; mismatches deny ecological flow admission."""
+    if any(
+        not isinstance(a, np.ndarray)
+        for a in (
+            validity,
+            reasons,
+            analytic_source,
+            actual_source,
+            actual_target,
+            projected_samples,
+        )
+    ):
+        raise ValueError("native/analytic admission requires typed arrays")
+    shape = (HEIGHT, WIDTH)
+    if (
+        any(
+            a.shape != shape or a.dtype != np.int32
+            for a in (analytic_source, actual_source, actual_target)
+        )
+        or projected_samples.shape != (*shape, 2)
+        or projected_samples.dtype != np.int32
+        or validity.shape != shape
+        or validity.dtype != np.uint8
+        or reasons.shape != shape
+        or reasons.dtype != np.uint8
+        or np.any(validity > 1)
+        or np.any(reasons > 4)
+        or not np.array_equal(validity == 1, reasons == 0)
+    ):
+        raise ValueError("native/analytic admission array contract differs")
+    valid = validity == 1
+    source_mismatch = valid & ((analytic_source < 0) | (analytic_source != actual_source))
+    rows, columns = projected_samples[..., 1], projected_samples[..., 0]
+    inside = (rows >= 0) & (rows < HEIGHT) & (columns >= 0) & (columns < WIDTH)
+    sampled = actual_target[np.clip(rows, 0, HEIGHT - 1), np.clip(columns, 0, WIDTH - 1)]
+    target_mismatch = valid & (~inside | (sampled != analytic_source))
+    source_count, target_count = int(source_mismatch.sum()), int(target_mismatch.sum())
+    evidence = FlowEvidence(
+        admitted=source_count == target_count == 0,
+        source_mismatch_count=source_count,
+        target_mismatch_count=target_count,
+        reason_counts=tuple(int(np.count_nonzero(reasons == i)) for i in range(5)),
+    )
+    return evidence, source_mismatch, target_mismatch
+
+
 class SequenceEvidence(Record):
     mapping: tuple[tuple[int, int, str], ...]
     compiled: dict[str, Any]
@@ -601,15 +655,68 @@ def encode_sequence(
     for i, retained_flow in enumerate(flows):
         if retained_flow.optical.source_index != i or len(retained_flow.arrays) != 12:
             raise ValueError("flow evidence/index differs")
-        prefix = f"flow-{i}/"
         flow = retained_flow.optical
+        # Validate every retained diagnostic before interpreting admission samples.
+        arrays = retained_flow.arrays
+        for array, dtype, shape in zip(
+            arrays,
+            (
+                np.int32,
+                np.int32,
+                np.bool_,
+                np.bool_,
+                np.int32,
+                np.int32,
+                np.uint8,
+                np.uint8,
+                np.int32,
+                np.int32,
+                np.bool_,
+                np.bool_,
+            ),
+            (
+                (HEIGHT, WIDTH),
+                (HEIGHT, WIDTH),
+                (HEIGHT, WIDTH),
+                (HEIGHT, WIDTH),
+                (HEIGHT, WIDTH),
+                (HEIGHT, WIDTH, 2),
+                (HEIGHT, WIDTH),
+                (HEIGHT, WIDTH),
+                (HEIGHT, WIDTH),
+                (HEIGHT, WIDTH, 2),
+                (HEIGHT, WIDTH),
+                (HEIGHT, WIDTH),
+            ),
+            strict=True,
+        ):
+            if not isinstance(array, np.ndarray) or array.dtype != dtype or array.shape != shape:
+                raise ValueError("retained admission diagnostic shape/dtype differs")
+        # The paired rasters below are the already encoded immutable frame bytes,
+        # so admission binds the same endpoint content as the eventual manifest.
+        actual_source = np.frombuffer(artifacts[frame_refs[i].arrays[0]], dtype=np.int32).reshape(
+            HEIGHT, WIDTH
+        )
+        actual_target = np.frombuffer(
+            artifacts[frame_refs[i + 1].arrays[0]], dtype=np.int32
+        ).reshape(HEIGHT, WIDTH)
+        recomputed, source_mismatch, target_mismatch = admit_flow(
+            flow.validity, flow.reasons, arrays[0], actual_source, actual_target, arrays[9]
+        )
+        if (
+            recomputed != retained_flow.evidence
+            or not np.array_equal(source_mismatch, arrays[10])
+            or not np.array_equal(target_mismatch, arrays[11])
+        ):
+            raise ValueError("retained admission evidence contradicts paired/analytic arrays")
+        prefix = f"flow-{i}/"
         flow_record = FlowRef(
             index=i,
             identity="0" * 64,
             source_frame=frame_refs[i].identity,
             target_frame=frame_refs[i + 1].identity,
             command=ExactCommand.from_command(flow.command),
-            admitted=retained_flow.evidence.admitted,
+            admitted=recomputed.admitted,
             vectors=add(
                 prefix + "vectors.bin", flow.vectors, Modality.ANALYTIC_OPTICAL_TRANSPORT, i + 1
             ),

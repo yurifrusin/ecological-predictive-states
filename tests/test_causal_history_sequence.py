@@ -12,7 +12,7 @@ from xml.etree.ElementTree import fromstring
 import numpy as np
 import pytest
 
-from epsbench.diagnostics.causal_history_core import Array, build_state
+from epsbench.diagnostics.causal_history_core import Array, CompletedFlow, OpticalFrame, build_state
 from epsbench.diagnostics.causal_history_native import (
     Capture,
     ProducedSequence,
@@ -28,6 +28,7 @@ from epsbench.diagnostics.causal_history_sequence import (
     MEMBERS,
     WIDTH,
     ArtifactProvider,
+    FlowEvidence,
     FrameEvidence,
     candidate,
     canonical,
@@ -325,16 +326,17 @@ def test_flow_mismatch_retained_and_denied_without_rewriting() -> None:
     flow = result.flows[0]
     actual = flow.arrays[0].copy()
     target = actual.copy()
-    target[0, 0] = 30
+    samples = flow.arrays[9].copy()
+    samples[0, 0] = (80, 0)
     source = actual.copy()
     source[0, 1] = 30
     evidence, sm, tm = admit_flow(
-        flow.optical.validity, flow.optical.reasons, source, actual, target, flow.arrays[9]
+        flow.optical.validity, flow.optical.reasons, source, actual, target, samples
     )
     assert not evidence.admitted and evidence.source_mismatch_count == 1
     assert evidence.target_mismatch_count == 2 and sm[0, 1] and tm[0, 0]
     assert evidence.reason_counts == (HEIGHT * WIDTH, 0, 0, 0, 0)
-    bad = replace(flow, evidence=evidence, arrays=(*flow.arrays[:10], sm, tm))
+    bad = replace(flow, evidence=evidence, arrays=(source, *flow.arrays[1:9], samples, sm, tm))
     retained = replace(result, flows=(bad, *result.flows[1:]))
     manifest, artifacts = encode(retained)
     reads: list[str] = []
@@ -476,3 +478,107 @@ def test_valid_transport_with_uncontrolled_source_fails_admission() -> None:
         flow.arrays[9],
     )
     assert not evidence.admitted and mismatch.all()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "analytic_source",
+        "projected_target",
+        "actual_target",
+        "source_mask",
+        "target_mask",
+        "asserted_counts",
+        "reason_histogram",
+        "source_dtype",
+        "projected_shape",
+        "mask_dtype",
+    ],
+)
+def test_encoder_rejects_contradictory_admission_before_seal(mutation: str) -> None:
+    result = produced()
+    retained = result.flows[0]
+    arrays = list(retained.arrays)
+    evidence = retained.evidence
+    optical = retained.optical
+    frames = result.frames
+    if mutation == "analytic_source":
+        arrays[0] = arrays[0].copy()
+        arrays[0][0, 0] = 30  # EPS-ER38-0001 repro: paired source remains10.
+    elif mutation == "projected_target":
+        arrays[9] = arrays[9].copy()
+        arrays[9][0, 0] = (80, 0)  # Same analytic source now samples paired surface20.
+    elif mutation == "actual_target":
+        target = frames[1]
+        raw = target.arrays[0].copy()
+        raw[0, 0] = 20
+        segmentation = target.optical.segmentation.copy()
+        label = next(label for raw_id, label, _ in result.sequence.mapping if raw_id == 20)
+        segmentation[0, 0] = label
+        optical_frame = OpticalFrame(
+            1, segmentation, target.optical.identities, target.optical.boundaries
+        )
+        updated = replace(target, optical=optical_frame, arrays=(raw, *target.arrays[1:]))
+        frames = (frames[0], updated, *frames[2:])
+    elif mutation in ("source_mask", "target_mask"):
+        index = 10 if mutation == "source_mask" else 11
+        arrays[index] = arrays[index].copy()
+        arrays[index][0, 0] = True
+    elif mutation == "asserted_counts":
+        evidence = FlowEvidence(
+            admitted=False,
+            source_mismatch_count=1,
+            target_mismatch_count=0,
+            reason_counts=evidence.reason_counts,
+        )
+    elif mutation == "reason_histogram":
+        validity = optical.validity.copy()
+        reasons = optical.reasons.copy()
+        validity[0, 0] = 0
+        reasons[0, 0] = 3
+        optical = CompletedFlow(0, optical.command, optical.vectors, validity, reasons)
+    elif mutation == "source_dtype":
+        arrays[0] = arrays[0].astype(np.int64)
+    elif mutation == "projected_shape":
+        arrays[9] = np.zeros((HEIGHT, WIDTH), dtype=np.int32)
+    elif mutation == "mask_dtype":
+        arrays[10] = arrays[10].astype(np.uint8)
+    contradicted = replace(retained, optical=optical, evidence=evidence, arrays=tuple(arrays))
+    with pytest.raises(ValueError, match="admission"):
+        encode(replace(result, frames=frames, flows=(contradicted, *result.flows[1:])))
+
+
+def test_consistent_invalid_reason_counts_retained_without_rewriting() -> None:
+    result = produced()
+    retained = result.flows[0]
+    validity = retained.optical.validity.copy()
+    reasons = retained.optical.reasons.copy()
+    validity[0, 0] = 0
+    reasons[0, 0] = 3
+    optical = CompletedFlow(
+        0, retained.optical.command, retained.optical.vectors, validity, reasons
+    )
+    evidence, sm, tm = admit_flow(
+        validity,
+        reasons,
+        retained.arrays[0],
+        result.frames[0].arrays[0],
+        result.frames[1].arrays[0],
+        retained.arrays[9],
+    )
+    updated = replace(
+        retained, optical=optical, evidence=evidence, arrays=(*retained.arrays[:10], sm, tm)
+    )
+    manifest, artifacts = encode(replace(result, flows=(updated, *result.flows[1:])))
+    provider = ArtifactProvider(
+        manifest,
+        tuple(artifacts),
+        artifacts.__getitem__,
+        ModalityPermissionSet.ecological_only(),
+        2,
+    )
+    decoded = provider.flow(0)
+    assert np.array_equal(decoded.vectors, optical.vectors)
+    assert np.array_equal(decoded.validity, validity)
+    assert np.array_equal(decoded.reasons, reasons)
+    assert evidence.reason_counts == (HEIGHT * WIDTH - 1, 0, 0, 1, 0)
