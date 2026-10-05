@@ -1,0 +1,171 @@
+{
+  "version": "causal-history-fixture-design-v1",
+  "camera": {
+    "forward": -3.0,
+    "height": 0.5,
+    "up_y": 0.16,
+    "fovy_degrees": 60.0,
+    "width": 160,
+    "height_pixels": 120
+  },
+  "support": {
+    "half_extent": [
+      4.0,
+      7.0
+    ],
+    "z": 0.0
+  },
+  "occluder": {
+    "lower": [
+      -0.75,
+      0.75,
+      0.0
+    ],
+    "upper": [
+      0.75,
+      0.85,
+      1.8
+    ]
+  },
+  "background_yz": {
+    "lower": [
+      2.45,
+      0.0
+    ],
+    "upper": [
+      2.55,
+      2.1
+    ]
+  },
+  "appearance": {
+    "rgba_support": [
+      0.25,
+      0.3,
+      0.35,
+      1.0
+    ],
+    "rgba_occluder": [
+      0.65,
+      0.25,
+      0.15,
+      1.0
+    ],
+    "rgba_background": [
+      0.15,
+      0.55,
+      0.7,
+      1.0
+    ],
+    "light_direction": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "ambient": [
+      0.6,
+      0.6,
+      0.6
+    ],
+    "diffuse": [
+      0.4,
+      0.4,
+      0.4
+    ],
+    "specular": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "shadows": false,
+    "textures": false
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "background_x": [
+        [
+          -1.5,
+          0.75
+        ],
+        [
+          -1.5,
+          1.0
+        ]
+      ],
+      "poses": [
+        1.0,
+        0.0,
+        0.125,
+        1.125
+      ],
+      "decision": 2,
+      "target": 3,
+      "seeds": [
+        202610061001,
+        202610061002
+      ],
+      "identities": [
+        "chf-v1-p1-a",
+        "chf-v1-p1-b"
+      ]
+    },
+    {
+      "pair": 2,
+      "background_x": [
+        [
+          -0.75,
+          0.75
+        ],
+        [
+          -0.75,
+          1.0
+        ]
+      ],
+      "poses": [
+        2.5,
+        2.0,
+        0.0,
+        0.125,
+        2.25
+      ],
+      "decision": 3,
+      "target": 4,
+      "seeds": [
+        202610061003,
+        202610061004
+      ],
+      "identities": [
+        "chf-v1-p2-a",
+        "chf-v1-p2-b"
+      ]
+    },
+    {
+      "pair": 3,
+      "background_x": [
+        [
+          -1.5,
+          0.75
+        ],
+        [
+          -1.5,
+          1.0
+        ]
+      ],
+      "poses": [
+        0.0,
+        0.125,
+        1.125
+      ],
+      "decision": 1,
+      "target": 2,
+      "seeds": [
+        202610061005,
+        202610061006
+      ],
+      "identities": [
+        "chf-v1-p3-a",
+        "chf-v1-p3-b"
+      ]
+    }
+  ]
+}

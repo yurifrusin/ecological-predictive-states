@@ -57,12 +57,24 @@ def main() -> int:
             "tests/test_a1_files.py",
             "tests/test_a1_retention.py",
             "tests/test_a1_execution.py",
+            "tests/test_causal_history_fixture.py",
             "-q",
         ]
     )
     check_loaded()
     if result:
         return int(result)
+    import json
+
+    from epsbench.diagnostics.causal_history_fixture import check_candidate
+
+    print(
+        json.dumps(
+            check_candidate(root / "configs/development/causal_history_fixture_design_v1.json"),
+            sort_keys=True,
+        )
+    )
+
     from epsbench.diagnostics.a1_action_contrast import CaptureHeldError
 
     sys.argv = ["a1_action_contrast.py", "capture"]
