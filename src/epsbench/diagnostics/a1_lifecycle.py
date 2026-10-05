@@ -454,14 +454,30 @@ class EvaluationJournal:
             stream.flush()
             os.fsync(stream.fileno())
 
+    def verify_exposure(self, bundle: Bundle) -> None:
+        """Validate and flush the entire persisted membership before file release."""
+        if not self.path.exists():
+            raise ValueError("durable whole-membership exposure required before target read")
+        record = json.loads(self.path.read_text(encoding="utf-8"))
+        expected = {
+            "study": STUDY,
+            "whole_membership_exposed": True,
+            "membership_root": bundle.study.root,
+            "seal": bundle.seal,
+            "members": [asdict(m) for m in bundle.study.members[4:]],
+        }
+        if record != expected:
+            raise ValueError("durable whole-membership exposure binding differs")
+        with self.path.open("r+b") as stream:
+            os.fsync(stream.fileno())
+
     def expose(self, bundle: Bundle) -> None:
         bundle.validate()
         self.verify_commit(bundle)
         self.deny_changed(bundle.seal)
         if self.exposed_seal() is not None:
             # A prior failed fsync cannot be converted into release by a retry.
-            with self.path.open("r+b") as stream:
-                os.fsync(stream.fileno())
+            self.verify_exposure(bundle)
             return
         record = {
             "study": STUDY,

@@ -19,9 +19,11 @@ seeds, partitions or model contracts change.
 The four held-out cases are a finite sanity comparison on one geometry.
 No EPS superiority, statistical generalization, appearance-OOD robustness,
 learned perception, memory or A2 inference follows. Model work and Gates 0C/0D
-remain separately unauthorized. Prior held-out outcome exposure is unknown at
-implementation time: any future prospective evaluation requires the owner's
-confirmation of no earlier exposure and separate exact-head launch authority.
+remain separately unauthorized. On 2026-10-05 the owner reported that nobody
+had rendered or inspected the four held-out outcomes since the October 5 review
+bundle. This is an owner report, not an independently audited fact; historical
+unknown-exposure evidence is retained. Separate exact-head launch authority
+remains required for any real-outcome access.
 
 ## Exactly one additional alignment control
 
@@ -86,8 +88,19 @@ binding is compared at evaluation. Predictors receive none of this metadata.
 
 Canonical before-fate identity is the existing artifact logical SHA-256, obtained
 from validated metadata without decoding held-out event pixels. Target decoding
-must validate that identity at release. Dataset integration remains dependency
-injected and cannot authorize native capture or real-data evaluation.
+must validate that identity at release. The A1-specific canonical file adapters
+now connect the permissioned loader to fixed membership, before, development and
+evaluator interfaces. Dataset/source/renderer/content-binding hashes are checked
+from actual metadata, and actual files are verified by owned-file decoding.
+The trusted control plane parses compound transition JSON, including inline
+future summaries, to validate the before projection; this is not a claim that
+zero future-containing bytes are parsed. Only own-before/action optical values
+reach predictors. Membership and forecast assembly open no held-out fate, after
+or privileged arrays. Declared paired endpoint hashes bind membership but this
+source-only adapter does not qualify or decode native paired evidence. The
+evaluator checks the complete retained bundle and persisted whole-membership
+exposure on each direct target read; early access fails. Neither file integration
+nor synthetic acceptance authorizes native capture or real-data evaluation.
 
 ## Source checks and remaining holds
 
