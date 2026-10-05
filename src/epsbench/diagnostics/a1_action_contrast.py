@@ -119,6 +119,12 @@ def _action_key(view: BeforeActionEcologicalView) -> tuple[str, float]:
     action = view.action
     if action.name not in {"lateral_left", "lateral_right"} or abs(action.delta_lateral) != 0.7:
         raise ValueError("A1 forecasts require the fixed left/right 0.7 action")
+    if (
+        action.delta_forward != 0.0
+        or action.delta_yaw != 0.0
+        or ((action.name == "lateral_right") != (action.delta_lateral > 0))
+    ):
+        raise ValueError("A1 action name/sign or forward/yaw differs")
     return action.name, action.delta_lateral
 
 
@@ -171,6 +177,14 @@ class DevelopmentTemplate:
     deletion_scores: npt.NDArray[np.float64]
 
     def __post_init__(self) -> None:
+        before = self.before
+        object.__setattr__(
+            self,
+            "before",
+            BeforeActionEcologicalView(
+                before.action, before.segmentation, before.surfaces, before.boundaries
+            ),
+        )
         values = self.deletion_scores
         if values.shape != self.before.segmentation.shape or not np.all(
             (values == 0) | (values == 1)
@@ -222,7 +236,7 @@ def average_precision(
 ) -> float | None:
     """Grouped-threshold AP: tied pixels enter together; no favorable tie order."""
     positives = int(np.count_nonzero(truth))
-    if not positives:
+    if not positives or positives == truth.size:
         return None
     order = np.argsort(-scores, kind="stable")
     ranked, labels = scores[order], truth[order]
@@ -260,5 +274,16 @@ def score_forecast(
         "template_average_precision": average_precision(
             prediction.template_scores[eligible], truth
         ),
-        "status": "INCONCLUSIVE" if counts[1] == 0 or counts[5] else "FINITE_CASE_ONLY",
+        "status": "INCONCLUSIVE"
+        if counts[0] == 0 or counts[1] == 0 or counts[5]
+        else "FINITE_CASE_ONLY",
+        "inconclusive_reasons": [
+            reason
+            for missing, reason in (
+                (counts[0] == 0, "NO_STABLE_NEGATIVES"),
+                (counts[1] == 0, "NO_DELETION_POSITIVES"),
+                (counts[5] > 0, "UNRESOLVED_OCCLUSION"),
+            )
+            if missing
+        ],
     }

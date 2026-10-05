@@ -120,6 +120,16 @@ class BeforeActionEcologicalView:
     boundaries: tuple[OrientedBoundaryElement, ...]
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "action", Action.model_validate(self.action.model_dump()))
+        object.__setattr__(self, "surfaces", tuple(tuple(pair) for pair in self.surfaces))
+        object.__setattr__(
+            self,
+            "boundaries",
+            tuple(
+                OrientedBoundaryElement.model_validate(edge.model_dump())
+                for edge in self.boundaries
+            ),
+        )
         pixels = self.segmentation
         if pixels.dtype != np.int32 or pixels.ndim != 2 or min(pixels.shape) < 2:
             raise ValueError("before segmentation must be a two-dimensional int32 image")
