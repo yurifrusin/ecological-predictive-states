@@ -146,6 +146,35 @@ def equal_transport(a: tuple[IntArray, BoolArray], b: tuple[IntArray, BoolArray]
 def check_candidate(path: Path) -> dict[str, Any]:
     """Evaluate only the prospectively recorded candidate; report failed relations."""
     config = json.loads(path.read_text(encoding="utf-8-sig"))
+    failures: list[str] = []
+    plane_height = config["support"].get("z")
+    if (
+        isinstance(plane_height, bool)
+        or not isinstance(plane_height, (int, float))
+        or plane_height != 0
+        or not math.isfinite(plane_height)
+    ):
+        failures.append("support:unsupported_z")
+    for pair in config["pairs"]:
+        target = pair.get("target")
+        decision = pair.get("decision")
+        if (
+            type(target) is not int
+            or type(decision) is not int
+            or target != len(pair["poses"]) - 1
+            or not 0 <= decision < target
+            or decision != target - 1
+        ):
+            failures.append(f"pair{pair['pair']}:invalid_target_timing")
+    if failures:
+        return {
+            "status": "ANALYTIC_FAILED",
+            "native_rgb_equality": "UNPROVEN",
+            "native_state_equality": "UNPROVEN",
+            "pose_count": sum(2 * len(p["poses"]) for p in config["pairs"]),
+            "failures": failures,
+            "pairs": [],
+        }
     camera_config = config["camera"]
     camera = Camera(
         camera_config["width"],
@@ -158,7 +187,6 @@ def check_candidate(path: Path) -> dict[str, Any]:
     occluder = Box(tuple(config["occluder"]["lower"]), tuple(config["occluder"]["upper"]))
     yz = config["background_yz"]
     reports = []
-    failures: list[str] = []
     for pair in config["pairs"]:
         poses = pair["poses"]
         decision = pair["decision"]
@@ -182,7 +210,10 @@ def check_candidate(path: Path) -> dict[str, Any]:
             equal_transport(a, b)
             for a, b in zip(transports[0][:decision], transports[1][:decision], strict=True)
         )
-        target_difference = int(np.count_nonzero((frames[0][-1] == 3) != (frames[1][-1] == 3)))
+        target = pair["target"]
+        target_difference = int(
+            np.count_nonzero((frames[0][target] == 3) != (frames[1][target] == 3))
+        )
         counts = [[int(np.count_nonzero(frame == 3)) for frame in member] for member in frames]
         support = [
             [int(np.count_nonzero((frames[m][i] == 3) & item[1])) for i, item in enumerate(member)]

@@ -1,8 +1,10 @@
 """Hand-derivable geometry checks; no native capture or ecological state construction."""
 
+import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from epsbench.diagnostics.causal_history_fixture import (
     Box,
@@ -82,8 +84,6 @@ def test_hand_derived_projection_scale_and_signed_motion() -> None:
 
 
 def test_failed_synthetic_relation_is_retained(tmp_path: Path) -> None:
-    import json
-
     source = (
         Path(__file__).resolve().parents[1]
         / "configs/development/causal_history_fixture_design_v1.json"
@@ -97,3 +97,77 @@ def test_failed_synthetic_relation_is_retained(tmp_path: Path) -> None:
     report = check_candidate(path)
     assert report["status"] == "ANALYTIC_FAILED"
     assert all(f"pair{pair}:target_masks_different" in report["failures"] for pair in (1, 2, 3))
+
+
+@pytest.mark.parametrize("field", ["target", "decision"])
+@pytest.mark.parametrize("value", [-1, 0, 1, 999, 1.5, True, False, None, "3"])
+def test_invalid_timing_fails_before_geometry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, value: object
+) -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "configs/development/causal_history_fixture_design_v1.json"
+    )
+    data = json.loads(source.read_text(encoding="utf-8-sig"))
+    data["pairs"][0][field] = value
+    path = tmp_path / "invalid-timing.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    def deny_geometry(*args: object) -> None:
+        pytest.fail("invalid timing reached geometry calculation")
+
+    monkeypatch.setattr(Scene, "frame", deny_geometry)
+    monkeypatch.setattr(Scene, "transport", deny_geometry)
+    report = check_candidate(path)
+    assert report["status"] == "ANALYTIC_FAILED"
+    assert report["failures"] == ["pair1:invalid_target_timing"]
+    assert report["pairs"] == []
+
+
+@pytest.mark.parametrize("field", ["target", "decision"])
+def test_missing_timing_fails_closed(tmp_path: Path, field: str) -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "configs/development/causal_history_fixture_design_v1.json"
+    )
+    data = json.loads(source.read_text(encoding="utf-8-sig"))
+    del data["pairs"][0][field]
+    path = tmp_path / "missing-timing.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert check_candidate(path)["failures"] == ["pair1:invalid_target_timing"]
+
+
+@pytest.mark.parametrize("value", [1, -1, True, False, None, "0", [], float("nan"), float("inf")])
+def test_unsupported_plane_height_fails_before_geometry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: object
+) -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "configs/development/causal_history_fixture_design_v1.json"
+    )
+    data = json.loads(source.read_text(encoding="utf-8-sig"))
+    data["support"]["z"] = value
+    path = tmp_path / "invalid-plane.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    def deny_geometry(*args: object) -> None:
+        pytest.fail("unsupported plane height reached geometry calculation")
+
+    monkeypatch.setattr(Scene, "frame", deny_geometry)
+    monkeypatch.setattr(Scene, "transport", deny_geometry)
+    report = check_candidate(path)
+    assert report["status"] == "ANALYTIC_FAILED"
+    assert report["failures"] == ["support:unsupported_z"]
+    assert report["pairs"] == []
+
+
+def test_missing_plane_height_fails_closed(tmp_path: Path) -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "configs/development/causal_history_fixture_design_v1.json"
+    )
+    data = json.loads(source.read_text(encoding="utf-8-sig"))
+    del data["support"]["z"]
+    path = tmp_path / "missing-plane.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert check_candidate(path)["failures"] == ["support:unsupported_z"]
