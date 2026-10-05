@@ -55,6 +55,7 @@ def main() -> int:
             "tests/test_a1_action_contrast.py",
             "tests/test_a1_controls.py",
             "tests/test_a1_files.py",
+            "tests/test_a1_retention.py",
             "-q",
         ]
     )
