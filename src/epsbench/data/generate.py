@@ -13,7 +13,6 @@ from typing import Any, Literal
 
 import mujoco
 import numpy as np
-from PIL import Image
 
 from epsbench import __version__
 from epsbench.annotations import (
@@ -95,6 +94,7 @@ from epsbench.data.identity import (
     compute_source_provenance_hash,
     compute_visibility_event_hash,
 )
+from epsbench.data.output import ArtifactPublisher, OutputWriter
 from epsbench.data.provenance import collect_source_provenance
 from epsbench.schema import (
     Action,
@@ -161,7 +161,6 @@ from epsbench.utils.canonical import (
     logical_array_hash,
     sha256_bytes,
     sha256_file,
-    write_canonical_json,
 )
 from epsbench.utils.seeding import derive_seed, rng_for
 
@@ -291,16 +290,18 @@ def _write_frame(
     opaque_surface_labels: dict[str, int] | None = None,
     source_provenance_sha256: str | None = None,
     renderer_execution_provenance_sha256: str | None = None,
+    writer: OutputWriter | None = None,
 ) -> FrameRecord | CanonicalPairedFrameRecord:
+    writer = writer or OutputWriter(root)
     stem = "before" if frame_index == 0 else "after"
     rgb_path = episode_directory / f"rgb_{stem}.png"
     depth_path = episode_directory / f"depth_{stem}.npy"
     segmentation_path = episode_directory / f"segmentation_{stem}.npy"
     camera_path = episode_directory / f"camera_{stem}.json"
-    Image.fromarray(rgb, mode="RGB").save(rgb_path, compress_level=9, optimize=False)
-    np.save(depth_path, depth, allow_pickle=False)
-    np.save(segmentation_path, segmentation, allow_pickle=False)
-    write_canonical_json(camera_path, camera)
+    writer.png(rgb_path, rgb)
+    writer.array(depth_path, depth, allow_pickle=False)
+    writer.array(segmentation_path, segmentation, allow_pickle=False)
+    writer.canonical(camera_path, camera)
     paired_artifact: ArtifactRecord | None = None
     if canonical_pair is not None:
         required = (
@@ -320,9 +321,9 @@ def _write_frame(
         native_id_path = episode_directory / f"paired_native_id_rgb_{stem}.npy"
         native_depth_path = episode_directory / f"paired_native_depth_{stem}.npy"
         producer_state_path = episode_directory / f"paired_producer_state_{stem}.json"
-        np.save(native_id_path, canonical_pair.native_id_rgb, allow_pickle=False)
-        np.save(native_depth_path, canonical_pair.native_depth_pre_metric, allow_pickle=False)
-        write_canonical_json(producer_state_path, dict(canonical_pair.stable_state))
+        writer.array(native_id_path, canonical_pair.native_id_rgb, allow_pickle=False)
+        writer.array(native_depth_path, canonical_pair.native_depth_pre_metric, allow_pickle=False)
+        writer.canonical(producer_state_path, dict(canonical_pair.stable_state))
         native_id_artifact = _array_artifact(
             native_id_path,
             root,
@@ -410,7 +411,7 @@ def _write_frame(
             }
         )
         provenance_path = episode_directory / f"paired_provenance_{stem}.json"
-        write_canonical_json(provenance_path, provenance)
+        writer.canonical(provenance_path, provenance)
         paired_artifact = _json_artifact(
             provenance_path,
             root,
@@ -456,13 +457,15 @@ def _write_transport_direction(
     source_frame_index: int,
     target_frame_index: int,
     arrays: DirectionalTransportArrays,
+    *,
+    writer: OutputWriter,
 ) -> DirectionalOpticalTransport:
     vectors_path = episode_directory / f"analytic_transport_{name}_vectors_fixed.npy"
     validity_path = episode_directory / f"analytic_transport_{name}_validity.npy"
     reasons_path = episode_directory / f"analytic_transport_{name}_reasons.npy"
-    np.save(vectors_path, arrays.vectors_fixed, allow_pickle=False)
-    np.save(validity_path, arrays.validity, allow_pickle=False)
-    np.save(reasons_path, arrays.reasons, allow_pickle=False)
+    writer.array(vectors_path, arrays.vectors_fixed, allow_pickle=False)
+    writer.array(validity_path, arrays.validity, allow_pickle=False)
+    writer.array(reasons_path, arrays.reasons, allow_pickle=False)
     return DirectionalOpticalTransport(
         source_frame_index=source_frame_index,  # type: ignore[arg-type]
         target_frame_index=target_frame_index,  # type: ignore[arg-type]
@@ -494,6 +497,8 @@ def _write_analytic_transport(
     root: Path,
     episode_directory: Path,
     arrays: AnalyticTransportArrays,
+    *,
+    writer: OutputWriter,
 ) -> AvailableDenseOpticalTransport:
     transport = AvailableDenseOpticalTransport(
         status="available",
@@ -538,6 +543,7 @@ def _write_analytic_transport(
             0,
             1,
             arrays.forward,
+            writer=writer,
         ),
         backward=_write_transport_direction(
             root,
@@ -546,6 +552,7 @@ def _write_analytic_transport(
             1,
             0,
             arrays.backward,
+            writer=writer,
         ),
         analytic_transport_sha256="0" * 64,
     )
@@ -655,15 +662,17 @@ def _write_event_direction(
     affected_raw_ids: np.ndarray[Any, Any],
     owner_raw_ids: np.ndarray[Any, Any],
     raw_surfaces: dict[int, SurfaceReference],
+    *,
+    writer: OutputWriter,
 ) -> DirectionalVisibilityEventMap:
     affected_labels = _raw_ids_to_labels(affected_raw_ids, raw_surfaces)
     owner_labels = _raw_ids_to_labels(owner_raw_ids, raw_surfaces)
     codes_path = episode_directory / f"visibility_events_{name}_codes.npy"
     affected_path = episode_directory / f"visibility_events_{name}_affected_labels.npy"
     owner_path = episode_directory / f"visibility_events_{name}_owner_labels.npy"
-    np.save(codes_path, codes, allow_pickle=False)
-    np.save(affected_path, affected_labels, allow_pickle=False)
-    np.save(owner_path, owner_labels, allow_pickle=False)
+    writer.array(codes_path, codes, allow_pickle=False)
+    writer.array(affected_path, affected_labels, allow_pickle=False)
+    writer.array(owner_path, owner_labels, allow_pickle=False)
     return DirectionalVisibilityEventMap(
         frame_index=frame_index,  # type: ignore[arg-type]
         direction=("before_frame_fate" if frame_index == 0 else "after_frame_origin"),
@@ -698,6 +707,8 @@ def _write_visibility_events(
     raw_surfaces: dict[int, SurfaceReference],
     boundary: AvailableOrientedBoundaryOwnership,
     transport: AvailableDenseOpticalTransport,
+    *,
+    writer: OutputWriter,
 ) -> AvailableEcologicalVisibilityEvents:
     events = AvailableEcologicalVisibilityEvents(
         status="available",
@@ -722,6 +733,7 @@ def _write_visibility_events(
             analysis.before_affected_raw_geom_ids,
             analysis.before_owner_raw_geom_ids,
             raw_surfaces,
+            writer=writer,
         ),
         after_origin=_write_event_direction(
             root,
@@ -732,6 +744,7 @@ def _write_visibility_events(
             analysis.after_affected_raw_geom_ids,
             analysis.after_owner_raw_geom_ids,
             raw_surfaces,
+            writer=writer,
         ),
         occluding_event_summaries=tuple(
             sorted(
@@ -950,10 +963,12 @@ def _with_component_topology(
     validity: tuple[ByteMap, ByteMap],
     reasons: tuple[ByteMap, ByteMap],
     codes: tuple[ByteMap, ByteMap],
+    *,
+    writer: OutputWriter,
 ) -> AvailableEcologicalVisibilityEvents:
     def publish(frame: FrameIndex, array: IntMap) -> ArtifactRecord:
         path = directory / f"component_labels_{frame}.npy"
-        np.save(path, array, allow_pickle=False)
+        writer.array(path, array, allow_pickle=False)
         return _array_artifact(path, root, array, Modality.COMPONENT_TOPOLOGY, "application/x-npy")
 
     topology = derive_component_topology(
@@ -992,6 +1007,8 @@ def _generate_single_occluder_episode(
     pair_operational_events: list[dict[str, object]],
     source_provenance_sha256: str,
     renderer_execution_provenance_sha256: str,
+    *,
+    writer: OutputWriter,
 ) -> EpisodeManifest:
     episode_id = f"episode-{episode_index:06d}"
     episode_seed = derive_seed(config.seed, f"episode:{episode_index}")
@@ -1052,6 +1069,7 @@ def _generate_single_occluder_episode(
         opaque_surface_labels=opaque_labels,
         source_provenance_sha256=source_provenance_sha256,
         renderer_execution_provenance_sha256=renderer_execution_provenance_sha256,
+        writer=writer,
     )
     after = _write_frame(
         root,
@@ -1073,6 +1091,7 @@ def _generate_single_occluder_episode(
         opaque_surface_labels=opaque_labels,
         source_provenance_sha256=source_provenance_sha256,
         renderer_execution_provenance_sha256=renderer_execution_provenance_sha256,
+        writer=writer,
     )
     visibility, correspondence, mask_changes = derive_visibility(
         before_segmentation,
@@ -1087,6 +1106,7 @@ def _generate_single_occluder_episode(
         root,
         episode_directory,
         rendered.analytic_transport,
+        writer=writer,
     )
     raw_surfaces = _surface_by_raw_id(rendered.raw_geom_ids, references)
     oriented_boundaries = _write_oriented_boundaries(
@@ -1102,6 +1122,7 @@ def _generate_single_occluder_episode(
         raw_surfaces,
         oriented_boundaries,
         analytic_transport,
+        writer=writer,
     )
     if component_topology:
         transport = rendered.analytic_transport
@@ -1118,6 +1139,7 @@ def _generate_single_occluder_episode(
                 rendered.boundary_visibility.before_fate_codes,
                 rendered.boundary_visibility.after_origin_codes,
             ),
+            writer=writer,
         )
     occluder_raw_id = rendered.raw_geom_ids["occluding_surface"]
     occluded_raw_id = rendered.raw_geom_ids["background_surface"]
@@ -1126,7 +1148,7 @@ def _generate_single_occluder_episode(
     for frame_index, frame in enumerate((rendered.before, rendered.after)):
         stem = "before" if frame_index == 0 else "after"
         counterfactual_path = episode_directory / f"counterfactual_segmentation_{stem}.npy"
-        np.save(
+        writer.array(
             counterfactual_path,
             frame.counterfactual_raw_geom_segmentation,
             allow_pickle=False,
@@ -1181,7 +1203,7 @@ def _generate_single_occluder_episode(
         }
     )
     transition_path = episode_directory / "transition.json"
-    write_canonical_json(transition_path, transition)
+    writer.canonical(transition_path, transition)
 
     instrumentation = SingleOccluderInstrumentation(
         schema_version=(
@@ -1218,7 +1240,7 @@ def _generate_single_occluder_episode(
         ),
     )
     instrumentation_path = episode_directory / "instrumentation.json"
-    write_canonical_json(instrumentation_path, instrumentation)
+    writer.canonical(instrumentation_path, instrumentation)
     episode_values = dict(
         episode_id=episode_id,
         episode_index=episode_index,
@@ -1271,6 +1293,8 @@ def _generate_corridor_episode(
     pair_operational_events: list[dict[str, object]],
     source_provenance_sha256: str,
     renderer_execution_provenance_sha256: str,
+    *,
+    writer: OutputWriter,
 ) -> EpisodeManifest:
     episode_id = f"episode-{episode_index:06d}"
     episode_seed = derive_seed(config.seed, f"episode:{episode_index}")
@@ -1334,6 +1358,7 @@ def _generate_corridor_episode(
         opaque_surface_labels=opaque_labels,
         source_provenance_sha256=source_provenance_sha256,
         renderer_execution_provenance_sha256=renderer_execution_provenance_sha256,
+        writer=writer,
     )
     after = _write_frame(
         root,
@@ -1354,6 +1379,7 @@ def _generate_corridor_episode(
         opaque_surface_labels=opaque_labels,
         source_provenance_sha256=source_provenance_sha256,
         renderer_execution_provenance_sha256=renderer_execution_provenance_sha256,
+        writer=writer,
     )
     visibility, correspondence, mask_changes = derive_visibility(
         before_segmentation,
@@ -1368,6 +1394,7 @@ def _generate_corridor_episode(
         root,
         episode_directory,
         rendered.analytic_transport,
+        writer=writer,
     )
     raw_surfaces = _surface_by_raw_id(rendered.raw_geom_ids, references)
     oriented_boundaries = _write_oriented_boundaries(
@@ -1383,6 +1410,7 @@ def _generate_corridor_episode(
         raw_surfaces,
         oriented_boundaries,
         analytic_transport,
+        writer=writer,
     )
     if component_topology:
         transport = rendered.analytic_transport
@@ -1399,6 +1427,7 @@ def _generate_corridor_episode(
                 rendered.boundary_visibility.before_fate_codes,
                 rendered.boundary_visibility.after_origin_codes,
             ),
+            writer=writer,
         )
     transition = TransitionRecord(
         schema_version="0.1.0-dev.10" if component_topology else "0.1.0-dev.9",
@@ -1427,7 +1456,7 @@ def _generate_corridor_episode(
         }
     )
     transition_path = episode_directory / "transition.json"
-    write_canonical_json(transition_path, transition)
+    writer.canonical(transition_path, transition)
 
     generation_seeds = GenerationSeeds(
         episode_seed=episode_seed,
@@ -1439,7 +1468,7 @@ def _generate_corridor_episode(
     for frame_index, frame in enumerate((rendered.before, rendered.after)):
         stem = "before" if frame_index == 0 else "after"
         raw_segmentation_path = episode_directory / f"raw_segmentation_{stem}.npy"
-        np.save(raw_segmentation_path, frame.raw_geom_segmentation, allow_pickle=False)
+        writer.array(raw_segmentation_path, frame.raw_geom_segmentation, allow_pickle=False)
         raw_segmentation_evidence.append(
             RawSegmentationFrameEvidence(
                 frame_index=frame_index,  # type: ignore[arg-type]
@@ -1493,7 +1522,7 @@ def _generate_corridor_episode(
         ),
     )
     instrumentation_path = episode_directory / "instrumentation.json"
-    write_canonical_json(instrumentation_path, instrumentation)
+    writer.canonical(instrumentation_path, instrumentation)
     scene_content_sha256 = compute_corridor_scene_content_hash(config, geometry)
     episode_values = dict(
         episode_id=episode_id,
@@ -1547,6 +1576,8 @@ def _generate_episode(
     pair_operational_events: list[dict[str, object]],
     source_provenance_sha256: str,
     renderer_execution_provenance_sha256: str,
+    *,
+    writer: OutputWriter,
 ) -> EpisodeManifest:
     if isinstance(config, SingleOccluderConfig):
         return _generate_single_occluder_episode(
@@ -1560,6 +1591,7 @@ def _generate_episode(
             pair_operational_events,
             source_provenance_sha256,
             renderer_execution_provenance_sha256,
+            writer=writer,
         )
     if isinstance(config, CorridorConfig):
         return _generate_corridor_episode(
@@ -1573,6 +1605,7 @@ def _generate_episode(
             pair_operational_events,
             source_provenance_sha256,
             renderer_execution_provenance_sha256,
+            writer=writer,
         )
     raise TypeError(f"unsupported scene configuration: {type(config).__name__}")
 
@@ -1599,11 +1632,16 @@ def generate_dataset(
     seed_registry: SeedRegistryType | None = None,
     component_topology: bool = False,
     capture_mode: Literal["legacy", "canonical_paired"] = "legacy",
+    publisher: ArtifactPublisher | None = None,
+    publication_prefix: str | None = None,
 ) -> DatasetManifest:
     """Generate a new dataset directory, refusing to overwrite existing content."""
 
     if episodes < 1:
         raise ValueError("episodes must be at least one")
+    if publisher is not None and not publication_prefix:
+        raise ValueError("retained generation requires an explicit stable publication prefix")
+    writer = OutputWriter(output, publisher, publication_prefix=publication_prefix or "")
     if capture_mode not in {"legacy", "canonical_paired"}:
         raise ValueError("unknown capture mode")
     if capture_mode == "canonical_paired":
@@ -1637,7 +1675,7 @@ def generate_dataset(
     evaluation_seed_registry_sha256 = seed_registry_hash(seed_registry)
     output.mkdir(parents=True, exist_ok=True)
     resolved_config_path = output / "resolved_config.json"
-    write_canonical_json(resolved_config_path, config)
+    writer.canonical(resolved_config_path, config)
     resolved_config_artifact = _json_artifact(
         resolved_config_path,
         output,
@@ -1646,7 +1684,7 @@ def generate_dataset(
         "application/json",
     )
     appearance_registry_path = output / "appearance_registry_snapshot.json"
-    write_canonical_json(appearance_registry_path, appearance_registry)
+    writer.canonical(appearance_registry_path, appearance_registry)
     appearance_registry_artifact = _json_artifact(
         appearance_registry_path,
         output,
@@ -1655,7 +1693,7 @@ def generate_dataset(
         "application/json",
     )
     evaluation_seed_registry_path = output / "evaluation_seed_registry_snapshot.json"
-    write_canonical_json(evaluation_seed_registry_path, seed_registry)
+    writer.canonical(evaluation_seed_registry_path, seed_registry)
     evaluation_seed_registry_artifact = _json_artifact(
         evaluation_seed_registry_path,
         output,
@@ -1676,6 +1714,7 @@ def generate_dataset(
             pair_operational_events,
             source_provenance_sha256,
             renderer_execution_provenance_sha256,
+            writer=writer,
         )
         for episode_index in range(episodes)
     )
@@ -1724,7 +1763,7 @@ def generate_dataset(
             ),
         }
     )
-    write_canonical_json(output / "manifest.json", manifest)
+    writer.canonical(output / "manifest.json", manifest)
     volatile_metadata: dict[str, object] = {
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "hostname": socket.gethostname(),
@@ -1733,8 +1772,5 @@ def generate_dataset(
     }
     if capture_mode == "canonical_paired":
         volatile_metadata["canonical_paired_events"] = pair_operational_events
-    (output / "run.json").write_text(
-        json.dumps(volatile_metadata, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    writer.text(output / "run.json", json.dumps(volatile_metadata, indent=2, sort_keys=True) + "\n")
     return manifest
