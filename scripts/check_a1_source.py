@@ -58,6 +58,7 @@ def main() -> int:
             "tests/test_a1_retention.py",
             "tests/test_a1_execution.py",
             "tests/test_causal_history_fixture.py",
+            "tests/test_causal_history_core.py",
             "-q",
         ]
     )
