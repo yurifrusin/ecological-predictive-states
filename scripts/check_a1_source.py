@@ -59,6 +59,7 @@ def main() -> int:
             "tests/test_a1_execution.py",
             "tests/test_causal_history_fixture.py",
             "tests/test_causal_history_core.py",
+            "tests/test_causal_history_sequence.py",
             "-q",
         ]
     )
