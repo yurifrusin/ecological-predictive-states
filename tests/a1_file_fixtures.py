@@ -27,6 +27,7 @@ from epsbench.schema import (
     TransitionRecord,
 )
 from epsbench.utils.canonical import canonical_json_bytes, logical_array_hash, sha256_bytes
+from epsbench.utils.seeding import derive_seed
 
 _Model = TypeVar("_Model", bound=BaseModel)
 
@@ -46,7 +47,11 @@ def _hash(value: BaseModel | dict[str, Any] | list[Any]) -> str:
 
 
 def make_dataset(
-    root: Path, config: SingleOccluderConfig, *, future_summary_delta: int = 0
+    root: Path,
+    config: SingleOccluderConfig,
+    *,
+    future_summary_delta: int = 0,
+    episode_seed: int | None = None,
 ) -> Path:
     """Write handcrafted public transition files bound to one fixed config.
 
@@ -58,6 +63,9 @@ def make_dataset(
     """
     root.mkdir(parents=True, exist_ok=False)
     (root / EPISODE).mkdir()
+    recorded_episode_seed = (
+        derive_seed(config.seed, "episode:0") if episode_seed is None else episode_seed
+    )
 
     def json_file(name: str, value: Any, modality: Modality) -> ArtifactRecord:
         logical = canonical_json_bytes(value)
@@ -166,7 +174,7 @@ def make_dataset(
             association="shared_raster_id_depth",
             episode_id=EPISODE,
             frame_index=index,
-            episode_seed=config.seed,
+            episode_seed=recorded_episode_seed,
             scene_family=config.scene_family,
             config_logical_sha256=config_hash,
             scene_content_sha256=fake,
@@ -420,7 +428,7 @@ def make_dataset(
         CanonicalPairedEpisodeManifest,
         episode_id=EPISODE,
         episode_index=0,
-        episode_seed=config.seed,
+        episode_seed=recorded_episode_seed,
         transition=json_file(f"{EPISODE}/transition.json", transition, Modality.TRANSITION_RECORD),
         privileged_instrumentation=json_file(
             f"{EPISODE}/instrumentation.json", {"synthetic": True}, private

@@ -9,6 +9,7 @@ import os
 import re
 import stat
 import struct
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
@@ -227,6 +228,7 @@ class RetainedArchive:
     ) -> None:
         _digest(study)
         self.path = path
+        self.study = study
         self.budget = budget
         self.staging_limit = budget.staging
         self.sequence = 0
@@ -235,6 +237,10 @@ class RetainedArchive:
         self.poisoned = False
         self.staging_reserved = 0
         self.artifact_reserved = 0
+        self.artifact_length = 0
+        self.artifact_digest = hashlib.sha256()
+        self.committed: dict[str, tuple[int, str, int, int]] = {}
+        self.artifact_start = 0
         if expected_history is None:
             if path.exists() or path.is_symlink():
                 raise ValueError("existing history requires exact resume receipt")
@@ -251,6 +257,21 @@ class RetainedArchive:
             self.staging_reserved = state.staging_reserved
             self.used = {item[0] for item in state.committed}
             self.stream = path.open("ab")
+            start = 0
+            name = ""
+            with path.open("rb") as existing:
+                while header := existing.read(4):
+                    position = existing.tell() - 4
+                    record = json.loads(existing.read(struct.unpack("!I", header)[0]))
+                    if record["kind"] == "START":
+                        name, start = record["path"], position
+                    elif record["kind"] == "COMMIT":
+                        self.committed[name] = (
+                            record["length"],
+                            record["sha256"],
+                            start,
+                            existing.tell(),
+                        )
 
     def _flush(self) -> None:
         self.stream.flush()
@@ -284,10 +305,38 @@ class RetainedArchive:
         _path(path)
         if self.pending is not None or path in self.used:
             raise ValueError("unfinished or duplicate artifact")
+        self.artifact_start = self.stream.tell()
         self._append({"kind": "START", "path": path})
         self.used.add(path)
         self.pending = path
         self.artifact_reserved = 0
+        self.artifact_length = 0
+        self.artifact_digest = hashlib.sha256()
+
+    def chunk(self, data: bytes) -> None:
+        """Admit a bounded transfer chunk through the same archive rules."""
+        if (
+            self.pending is None
+            or not isinstance(data, bytes)
+            or not 0 < len(data) <= CHUNK
+            or self.artifact_length + len(data) > self.artifact_reserved
+        ):
+            raise ValueError("unreserved or oversized transfer")
+        self._append({"kind": "CHUNK", "data": base64.b64encode(data).decode("ascii")})
+        self.artifact_length += len(data)
+        self.artifact_digest.update(data)
+
+    def commit_transfer(self, length: int, sha256: str) -> None:
+        _digest(sha256)
+        if (
+            self.pending is None
+            or type(length) is not int
+            or (length, sha256) != (self.artifact_length, self.artifact_digest.hexdigest())
+        ):
+            raise ValueError("transfer length/hash differs")
+        self._append({"kind": "COMMIT", "length": length, "sha256": sha256})
+        self.committed[self.pending] = (length, sha256, self.artifact_start, self.stream.tell())
+        self.pending = None
 
     def reserve_staging(self, size: int) -> None:
         if size == 0:
@@ -318,19 +367,68 @@ class RetainedArchive:
             while data := stream.read(CHUNK):
                 if length + len(data) > before.st_size:
                     raise ValueError("artifact changed during transfer")
-                self._append({"kind": "CHUNK", "data": base64.b64encode(data).decode("ascii")})
+                self.chunk(data)
                 digest.update(data)
                 length += len(data)
         if _identity(path.stat()) != _identity(before) or length != before.st_size:
             raise ValueError("artifact changed during transfer")
-        self._append({"kind": "COMMIT", "length": length, "sha256": digest.hexdigest()})
-        self.pending = None
+        self.commit_transfer(length, digest.hexdigest())
 
     def failure(self, reason: str) -> None:
         if not isinstance(reason, str) or len(reason) > 128:
             raise ValueError("bounded failure reason required")
         self._append({"kind": "FAILURE", "reason": reason}, terminal=True)
         self.pending = None
+
+    def put(self, relative: str, data: bytes) -> None:
+        """Retain small control-plane content; charge its in-memory materialization."""
+        self.start(relative)
+        self.reserve_staging(len(data))
+        for offset in range(0, len(data), CHUNK):
+            self.chunk(data[offset : offset + CHUNK])
+        self.commit_transfer(len(data), hashlib.sha256(data).hexdigest())
+
+    def entries(self) -> tuple[tuple[str, int, str], ...]:
+        return tuple((name, value[0], value[1]) for name, value in self.committed.items())
+
+    def history(self) -> str:
+        self._flush()
+        result = hashlib.sha256()
+        with self.path.open("rb") as stream:
+            while data := stream.read(CHUNK):
+                result.update(data)
+        return result.hexdigest()
+
+    def read_chunks(self, relative: str) -> Iterator[bytes]:
+        """Yield validated committed content using bounded reads, never bulk arrays."""
+        if relative not in self.committed:
+            raise KeyError(relative)
+        length, sha, start, end = self.committed[relative]
+        observed = hashlib.sha256()
+        count = 0
+        with self.path.open("rb") as stream:
+            stream.seek(start)
+            while stream.tell() < end:
+                header = stream.read(4)
+                size = struct.unpack("!I", header)[0]
+                if not 0 < size <= MAX_RECORD:
+                    raise ValueError("changed indexed frame")
+                record = json.loads(stream.read(size))
+                if record["kind"] == "CHUNK":
+                    data = base64.b64decode(record["data"], validate=True)
+                    if not 0 < len(data) <= CHUNK:
+                        raise ValueError("changed indexed chunk bound")
+                    count += len(data)
+                    observed.update(data)
+                    yield data
+        if count != length or observed.hexdigest() != sha:
+            raise ValueError("changed indexed artifact")
+
+    def reserve_copy(self, relative: str, length: int) -> None:
+        """Durable charge before re-materializing retained bytes into staging."""
+        self.start(relative)
+        self.reserve_staging(length)
+        self.commit_transfer(0, hashlib.sha256(b"").hexdigest())
 
     def close(self) -> None:
         self.stream.close()

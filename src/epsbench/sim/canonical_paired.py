@@ -511,6 +511,8 @@ def require_supported_runtime(backend: str) -> None:
     """Reject opt-in production use outside the qualified candidate runtime."""
 
     python_version = platform.python_version()
+    from epsbench.diagnostics.a1_docker_runtime import docker_candidate
+
     if (
         platform.system() != "Linux"
         or backend != SUPPORTED_RUNTIME["backend"]
@@ -518,7 +520,9 @@ def require_supported_runtime(backend: str) -> None:
         or mujoco.__version__ != SUPPORTED_RUNTIME["mujoco"]
         or np.__version__ != SUPPORTED_RUNTIME["numpy"]
         or os.environ.get("PYOPENGL_PLATFORM") != "osmesa"
-        or not (os.environ.get("WSL_INTEROP") or os.environ.get("WSL_DISTRO_NAME"))
+        or not (
+            os.environ.get("WSL_INTEROP") or os.environ.get("WSL_DISTRO_NAME") or docker_candidate()
+        )
         or any(
             importlib.metadata.version(name) != SUPPORTED_RUNTIME[name]
             for name in ("PyOpenGL", "glfw")

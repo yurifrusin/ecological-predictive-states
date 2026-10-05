@@ -56,6 +56,7 @@ def main() -> int:
             "tests/test_a1_controls.py",
             "tests/test_a1_files.py",
             "tests/test_a1_retention.py",
+            "tests/test_a1_execution.py",
             "-q",
         ]
     )

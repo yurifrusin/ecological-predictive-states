@@ -373,6 +373,15 @@ def check_target(study: Study, member: Member, target: Target) -> None:
         raise ValueError("target content changed")
 
 
+class JournalBacking(Protocol):
+    """Evaluator-only durable storage; a successful write is a flushed ACK."""
+
+    def exists(self, name: str) -> bool: ...
+    def read(self, name: str) -> str: ...
+    def write(self, name: str, content: str) -> None: ...
+    def append(self, name: str, content: str) -> None: ...
+
+
 class EvaluationJournal:
     """Durable whole-study exposure anchor; retain this directory across attempts.
 
@@ -380,13 +389,29 @@ class EvaluationJournal:
     filename. Owner confirmation of no prior exposure remains a launch condition.
     """
 
-    def __init__(self, protected_directory: Path) -> None:
-        self.path = protected_directory / f"{STUDY}-target-exposure.json"
+    def __init__(self, protected_directory: Path | JournalBacking) -> None:
+        self.backing = None if isinstance(protected_directory, Path) else protected_directory
+        self.path = (
+            protected_directory if isinstance(protected_directory, Path) else Path("journal")
+        ) / f"{STUDY}-target-exposure.json"
+
+    def _exists(self, path: Path) -> bool:
+        return self.backing.exists(path.name) if self.backing else path.exists()
+
+    def _read(self, path: Path) -> str:
+        return self.backing.read(path.name) if self.backing else path.read_text(encoding="utf-8")
+
+    def _sync(self, path: Path) -> None:
+        if self.backing:
+            self.backing.read(path.name)  # backing validates its durable committed identity
+        else:
+            with path.open("r+b") as stream:
+                os.fsync(stream.fileno())
 
     def exposed_seal(self) -> str | None:
-        if not self.path.exists():
+        if not self._exists(self.path):
             return None
-        record = json.loads(self.path.read_text(encoding="utf-8"))
+        record = json.loads(self._read(self.path))
         if record["study"] != STUDY or record["whole_membership_exposed"] is not True:
             raise ValueError("invalid exposure history; release denied")
         return str(record["seal"])
@@ -428,6 +453,10 @@ class EvaluationJournal:
         self.deny_changed()
         destination = self.path.with_name(f"{STUDY}-bundle-{bundle.seal}.json")
         content = self.retained_content(bundle)
+        if self.backing:
+            self.backing.write(destination.name, content)
+            self.deny_changed()
+            return
         descriptor, name = tempfile.mkstemp(prefix="a1-commit-", dir=self.path.parent)
         temporary = Path(name)
         try:
@@ -442,13 +471,17 @@ class EvaluationJournal:
 
     def verify_commit(self, bundle: Bundle) -> None:
         destination = self.path.with_name(f"{STUDY}-bundle-{bundle.seal}.json")
-        if destination.read_text(encoding="utf-8") != self.retained_content(bundle):
+        if self._read(destination) != self.retained_content(bundle):
             raise ValueError("retained complete bundle differs")
-        with destination.open("r+b") as stream:
-            os.fsync(stream.fileno())
+        self._sync(destination)
 
     def retain_evaluation(self, bundle: Bundle, value: dict[str, object]) -> None:
         history = self.path.with_name(f"{STUDY}-evaluation-{bundle.seal}.jsonl")
+        if self.backing:
+            self.backing.append(
+                history.name, json.dumps(value, sort_keys=True, allow_nan=False) + "\n"
+            )
+            return
         with history.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(value, sort_keys=True, allow_nan=False) + "\n")
             stream.flush()
@@ -456,9 +489,9 @@ class EvaluationJournal:
 
     def verify_exposure(self, bundle: Bundle) -> None:
         """Validate and flush the entire persisted membership before file release."""
-        if not self.path.exists():
+        if not self._exists(self.path):
             raise ValueError("durable whole-membership exposure required before target read")
-        record = json.loads(self.path.read_text(encoding="utf-8"))
+        record = json.loads(self._read(self.path))
         expected = {
             "study": STUDY,
             "whole_membership_exposed": True,
@@ -468,8 +501,7 @@ class EvaluationJournal:
         }
         if record != expected:
             raise ValueError("durable whole-membership exposure binding differs")
-        with self.path.open("r+b") as stream:
-            os.fsync(stream.fileno())
+        self._sync(self.path)
 
     def expose(self, bundle: Bundle) -> None:
         bundle.validate()
@@ -486,6 +518,9 @@ class EvaluationJournal:
             "seal": bundle.seal,
             "members": [asdict(m) for m in bundle.study.members[4:]],
         }
+        if self.backing:
+            self.backing.write(self.path.name, json.dumps(record, sort_keys=True, allow_nan=False))
+            return
         # Exclusive creation prevents concurrent attempts from replacing history.
         # Any write/fsync failure leaves a conservative record and denies release.
         with self.path.open("x", encoding="utf-8") as stream:

@@ -103,6 +103,25 @@ def test_changed_manifest_and_membership_rejected(tmp_path: Path) -> None:
         data.before_reader().read_before(data.study.members[4])
 
 
+def test_episode_seed_binding_uses_generator_derivation(tmp_path: Path) -> None:
+    # The ordinary fixture path records derive_seed(config.seed, "episode:0"),
+    # and files() above exercises successful membership with that production seed.
+    source_cases = cases(SOURCE)
+    loaders = tuple(
+        A1CanonicalLoader(
+            make_dataset(
+                tmp_path / f"root-seed-{case.ordinal}",
+                case.config,
+                episode_seed=case.config.seed,
+            ),
+            ModalityPermissionSet.all_modalities(),
+        )
+        for case in source_cases
+    )
+    with pytest.raises(ValueError, match="configuration/seed/family"):
+        A1Files.membership(SOURCE, "b" * 40, "c" * 40, "d" * 64, loaders)
+
+
 def test_target_file_hash_and_exposure_membership_binding(tmp_path: Path) -> None:
     data = files(tmp_path)
     journal = life.EvaluationJournal(tmp_path)
