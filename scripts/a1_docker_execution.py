@@ -19,6 +19,7 @@ def main() -> int:
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--receipts", type=Path, required=True)
     parser.add_argument("--expected-history")
+    parser.add_argument("--expected-receipt-history")
     parser.add_argument("--authorization", type=Path, required=True)
     args = parser.parse_args()
     from epsbench.diagnostics.a1_execution import (
@@ -36,6 +37,7 @@ def main() -> int:
         or authorization.get("receipts_path") != str(args.receipts.resolve())
         or authorization.get("phase") != args.phase
         or authorization.get("expected_history") != args.expected_history
+        or authorization.get("expected_receipt_history") != args.expected_receipt_history
         or authorization.get("phase_gate_effect") != "NONE"
         or not isinstance(authorization.get("decision"), str)
         or not authorization["decision"].strip()
@@ -49,15 +51,27 @@ def main() -> int:
 
     _digest(authorization["dummy_qualification_sha256"])
     initial = args.expected_history is None
+    if initial != (args.expected_receipt_history is None):
+        raise ValueError("both archive and receipt checkpoints are required for continuation")
     if initial and (args.archive.exists() or args.phase != "development"):
         raise ValueError("initial creation only for a missing archive in development phase")
     receipts = HostReceipts(args.receipts, binding, initial=initial)
     try:
         expected = initialize(args.archive, binding, receipts) if initial else args.expected_history
+        receipt_expected = receipts.root if initial else args.expected_receipt_history
         result = DockerController(args.docker, args.archive, binding, receipts).phase(
-            args.phase, authorization["decision"], expected
+            args.phase, authorization["decision"], expected, receipt_expected
         )
-        print(json.dumps({"history_sha256": result, "binding": vars(binding), "phase": args.phase}))
+        print(
+            json.dumps(
+                {
+                    "history_sha256": result,
+                    "receipt_history_sha256": receipts.root,
+                    "binding": vars(binding),
+                    "phase": args.phase,
+                }
+            )
+        )
     finally:
         receipts.close()
     return 0

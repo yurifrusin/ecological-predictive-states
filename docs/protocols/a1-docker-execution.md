@@ -43,6 +43,16 @@ typed enforcement and chronology, not hostile-process confinement: a hostile pro
 could modify its writable archive file. External witnessed hashes detect history
 changes and missing history denies continuation.
 
+The host receipt format is canonical checksummed-chain version
+`a1_host_receipts_v2`: each record binds its sequence and predecessor checksum.
+Recovery checks canonical bytes, the full checksum chain and this driver's
+finite legal chronology instead of trusting fields such as `COMPLETE.elapsed`.
+Elapsed values must be finite, nonnegative numbers, excluding booleans; successful
+cumulative active time cannot exceed 2700 seconds. Native completion requires the
+fixed ordered attempts and their successful create/inspect/start/inspect/inspect/remove
+command receipts. Unknown, premature, changed or uncertain histories do not release
+another phase. Older unchained receipts remain preserved but cannot be silently migrated.
+
 ## Fixed identity, reservations and continuation
 
 The binding fixes source HEAD/tree, the complete ordered configuration root,
@@ -74,6 +84,27 @@ source/image, expected history, decision text and a prior dummy-qualification re
 hash. This file records operational launch authorization; it is not automated
 review disposition or gate-state evaluation. Supplying arbitrary text cannot itself
 establish the scientific or engineering authority described by the review protocol.
+
+Continuation additionally requires the exact externally authorized receipt-chain
+root (`expected_receipt_history`), supplied alongside the archive checkpoint.
+Before writing a host `PHASE` receipt or launching any container, the controller
+commits an immutable `operations/phase-<phase>-consumed.json` archive marker binding
+both prelaunch roots and the phase decision. The resulting archive checkpoint is
+carried into the first launch. Restoring a valid older receipt prefix therefore
+does not erase the consumed attempt: its archive checkpoint no longer matches,
+and the marker path cannot be reused. A crash between the two durable stores is
+uncertain and denies continuation, never granting a retry. This protects the
+cooperative retained chronology, not hostile joint rollback of every independent
+anchor or forgery of new owner authorization.
+
+Dummy qualification retains the separate initialize → named attempt → bounded
+command → matching checkpoint or terminal failure chronology without native
+phases. Its finite task set is `dummy-complete`, `dummy-interrupted`,
+`dummy-sink-failure`, `dummy-timeout` and `dummy-limits-overflow`; command verbs are
+limited to create, inspect, start and remove. The last task names a separately
+reviewed mechanical qualification component, not a new native entry task or
+permission to substitute scientific capture. Intentional timeout/overflow stays a
+terminal failed attempt whose evidence may be assessed by qualification.
 
 The host controller enforces five minutes for each attached cell process and a
 45-minute cumulative active-execution deadline across the two phases. Elapsed

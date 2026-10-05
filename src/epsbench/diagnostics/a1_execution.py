@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -22,6 +23,7 @@ from epsbench.diagnostics.a1_retention import (
     MIB,
     Budget,
     RetainedArchive,
+    _digest,
     _safe_file,
     recover,
 )
@@ -30,6 +32,14 @@ LABEL = "eps.a1.execution-owner"
 BUDGET = Budget(archive=767 * MIB)
 RECEIPT_LIMIT = MIB
 CONTROL_BOUND = 16 * 1024
+ZERO_CHAIN = "0" * 64
+DUMMY_TASKS = {
+    "dummy-complete",
+    "dummy-interrupted",
+    "dummy-sink-failure",
+    "dummy-timeout",
+    "dummy-limits-overflow",
+}
 
 
 @dataclass(frozen=True)
@@ -83,11 +93,212 @@ def history(path: Path) -> str:
     return result.hexdigest()
 
 
+@dataclass
+class ReceiptState:
+    checkpoint: str | None = None
+    phase: str | None = None
+    completed: tuple[str, ...] = ()
+    tasks: tuple[str, ...] = ()
+    task_index: int = 0
+    attempt: str | None = None
+    elapsed: float = 0.0
+    failed: bool = False
+
+
+def _elapsed(value: Any) -> float:
+    try:
+        valid = type(value) in {int, float} and math.isfinite(value) and value >= 0
+    except OverflowError:
+        valid = False
+    if not valid:
+        raise ValueError("finite nonnegative elapsed required")
+    return float(value)
+
+
+def replay_receipts(records: list[dict[str, Any]], binding: Binding) -> ReceiptState:
+    """Replay only this driver's finite operational vocabulary, including dummy attempts."""
+    state = ReceiptState()
+    previous = ZERO_CHAIN
+    commands: list[dict[str, Any]] = []
+    dummy_seen: set[str] = set()
+    for index, record in enumerate(records):
+        if (
+            type(record.get("sequence")) is not int
+            or record["sequence"] != index
+            or record.get("previous_sha256") != previous
+        ):
+            raise ValueError("receipt chain sequence/parent differs")
+        body = {k: v for k, v in record.items() if k != "sha256"}
+        if record.get("sha256") != digest(body):
+            raise ValueError("receipt checksum differs")
+        previous = record["sha256"]
+        value = {k: v for k, v in body.items() if k not in {"sequence", "previous_sha256"}}
+        kind = value.get("kind")
+        if state.failed and kind != "FAILURE":
+            raise ValueError("terminal receipt history cannot continue")
+        if index == 0:
+            if value != {
+                "kind": "BINDING",
+                "version": "a1_host_receipts_v2",
+                "binding": vars(binding),
+                "budget": vars(BUDGET),
+                "host_receipt_bytes": RECEIPT_LIMIT,
+            }:
+                raise ValueError("receipt binding/version differs")
+        elif kind == "CHECKPOINT":
+            if set(value) != {"kind", "task", "history"}:
+                raise ValueError("invalid checkpoint fields")
+            _digest(value["history"])
+            if index == 1 and value["task"] == "initialize":
+                state.checkpoint = value["history"]
+            else:
+                if (
+                    state.attempt != value["task"]
+                    or not commands
+                    or any(c["exit"] != 0 or c["timeout"] or c["overflow"] for c in commands)
+                ):
+                    raise ValueError("task checkpoint lacks successful attempt")
+                if binding.purpose == "a1_native_study_v1" and tuple(
+                    c["args"][0] for c in commands
+                ) != ("create", "inspect", "start", "inspect", "inspect", "rm"):
+                    raise ValueError("native task command chronology differs")
+                state.checkpoint = value["history"]
+                state.attempt = None
+                state.task_index += 1
+                commands = []
+        elif kind == "PHASE":
+            fields = {
+                "kind",
+                "phase",
+                "decision",
+                "ordinals",
+                "contexts",
+                "render_read_pairs",
+                "cumulative_seconds",
+                "binding",
+                "prior_history",
+                "history",
+                "receipt_history",
+            }
+            phase = value.get("phase")
+            if (
+                set(value) != fields
+                or binding.purpose != "a1_native_study_v1"
+                or phase not in {"development", "continuation"}
+                or state.phase is not None
+                or state.attempt is not None
+                or state.checkpoint is None
+                or value["prior_history"] != state.checkpoint
+                or value["receipt_history"] != record["previous_sha256"]
+                or value["binding"] != vars(binding)
+                or not isinstance(value["decision"], str)
+                or not value["decision"].strip()
+                or state.completed != (() if phase == "development" else ("development",))
+            ):
+                raise ValueError("illegal phase chronology")
+            ordinals = [0, 1] if phase == "development" else list(range(2, 8))
+            if (
+                value["ordinals"] != ordinals
+                or type(value["contexts"]) is not int
+                or value["contexts"] != len(ordinals)
+                or type(value["render_read_pairs"]) is not int
+                or value["render_read_pairs"] != 6 * len(ordinals)
+                or type(value["cumulative_seconds"]) is not int
+                or value["cumulative_seconds"] != 2700
+            ):
+                raise ValueError("fixed phase reservation differs")
+            _digest(value["history"])
+            state.phase = phase
+            state.checkpoint = value["history"]
+            state.tasks = (
+                *(f"cell-{i:02d}" for i in ordinals),
+                "inspect-development" if phase == "development" else "evaluate",
+            )
+            state.task_index = 0
+        elif kind == "ATTEMPT":
+            if (
+                set(value) != {"kind", "task", "name", "token", "expected_history", "seconds"}
+                or state.attempt is not None
+                or state.checkpoint is None
+                or value["expected_history"] != state.checkpoint
+                or type(value["seconds"]) is not int
+                or value["seconds"] != 300
+                or not isinstance(value["token"], str)
+                or re.fullmatch("[0-9a-f]{32}", value["token"]) is None
+                or value["name"] != "eps-a1-" + value["token"]
+            ):
+                raise ValueError("illegal attempt chronology")
+            task = value["task"]
+            if binding.purpose == "a1_native_study_v1":
+                if (
+                    state.phase is None
+                    or state.task_index >= len(state.tasks)
+                    or task != state.tasks[state.task_index]
+                ):
+                    raise ValueError("fixed native attempt order differs")
+            elif task not in DUMMY_TASKS or task in dummy_seen:
+                raise ValueError("unknown/repeated dummy attempt")
+            dummy_seen.add(task)
+            state.attempt = task
+            commands = []
+        elif kind == "COMMAND":
+            if (
+                set(value) != {"kind", "args", "exit", "timeout", "overflow", "stdout", "stderr"}
+                or state.attempt is None
+                or not isinstance(value["args"], list)
+                or not value["args"]
+                or value["args"][0] not in {"create", "inspect", "start", "rm"}
+                or any(not isinstance(a, str) or len(a) > 8192 for a in value["args"])
+                or type(value["exit"]) is not int
+                or type(value["timeout"]) is not bool
+                or type(value["overflow"]) is not bool
+                or any(
+                    not isinstance(value[k], str) or len(value[k]) > CONTROL_BOUND
+                    for k in ("stdout", "stderr")
+                )
+            ):
+                raise ValueError("illegal command receipt")
+            commands.append(value)
+        elif kind == "COMPLETE":
+            if (
+                set(value) != {"kind", "phase", "elapsed"}
+                or state.phase is None
+                or state.phase != value["phase"]
+                or state.attempt is not None
+                or state.task_index != len(state.tasks)
+            ):
+                raise ValueError("premature or unknown phase completion")
+            state.elapsed += _elapsed(value["elapsed"])
+            if state.elapsed > 2700:
+                raise ValueError("cumulative active deadline exceeded")
+            state.completed += (state.phase,)
+            state.phase = None
+        elif kind == "FAILURE":
+            if set(value) == {"kind", "task", "error", "observed_history"}:
+                if value["task"] != state.attempt:
+                    raise ValueError("failure task differs")
+            elif set(value) == {"kind", "phase", "error", "elapsed", "observed_history"}:
+                next_phase = "development" if not state.completed else "continuation"
+                if value["phase"] != (state.phase or next_phase):
+                    raise ValueError("failure phase differs")
+                _elapsed(value["elapsed"])
+            else:
+                raise ValueError("invalid terminal receipt")
+            if not isinstance(value["error"], str) or not value["error"]:
+                raise ValueError("failure reason required")
+            _digest(value["observed_history"])
+            state.failed = True
+        else:
+            raise ValueError("unknown or misplaced receipt kind")
+    return state
+
+
 class HostReceipts:
     """Fixed 1 MiB append-only witness; missing/torn history denies resume."""
 
     def __init__(self, path: Path, binding: Binding, *, initial: bool) -> None:
         self.path = path
+        self.binding = binding
         self.poisoned = False
         self.records: list[dict[str, Any]] = []
         if initial:
@@ -101,6 +312,7 @@ class HostReceipts:
             self.append(
                 {
                     "kind": "BINDING",
+                    "version": "a1_host_receipts_v2",
                     "binding": vars(binding),
                     "budget": vars(BUDGET),
                     "host_receipt_bytes": RECEIPT_LIMIT,
@@ -118,18 +330,19 @@ class HostReceipts:
                     if not line.endswith(b"\n"):
                         raise ValueError("torn witness denies continuation")
                     record = json.loads(line)
-                    if type(record.get("sequence")) is not int or record["sequence"] != len(
-                        self.records
+                    if (
+                        not isinstance(record, dict)
+                        or json.dumps(
+                            record, sort_keys=True, separators=(",", ":"), allow_nan=False
+                        ).encode()
+                        + b"\n"
+                        != line
                     ):
-                        raise ValueError("witness sequence differs")
+                        raise ValueError("noncanonical witness record")
                     self.records.append(record)
-                if (
-                    not self.records
-                    or self.records[0].get("binding") != vars(binding)
-                    or self.records[0].get("budget") != vars(BUDGET)
-                    or self.records[0].get("host_receipt_bytes") != RECEIPT_LIMIT
-                ):
-                    raise ValueError("missing or changed witness binding")
+                if not self.records:
+                    raise ValueError("missing receipt history")
+                replay_receipts(self.records, binding)
             except BaseException:
                 self.stream.close()
                 raise
@@ -154,11 +367,16 @@ class HostReceipts:
     def append(self, value: dict[str, Any]) -> None:
         if self.poisoned:
             raise ValueError("failed witness cannot acknowledge")
-        record = {"sequence": len(self.records), **value}
+        if set(value) & {"sequence", "previous_sha256", "sha256"}:
+            raise ValueError("reserved receipt chain fields")
+        body = {"sequence": len(self.records), "previous_sha256": self.root, **value}
+        record = {**body, "sha256": digest(body)}
         payload = (
             json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
             + b"\n"
         )
+        record = json.loads(payload)
+        replay_receipts([*self.records, record], self.binding)
         reserve = 0 if value.get("kind") == "FAILURE" else 64 * 1024
         if self.stream.tell() + len(payload) > RECEIPT_LIMIT - reserve:
             raise ValueError("host receipt admission denied")
@@ -171,6 +389,10 @@ class HostReceipts:
             self.poisoned = True
             raise
         self.records.append(record)
+
+    @property
+    def root(self) -> str:
+        return str(self.records[-1]["sha256"]) if self.records else ZERO_CHAIN
 
     def close(self) -> None:
         self.stream.close()
@@ -409,10 +631,14 @@ class DockerController:
         self.receipts.append({"kind": "CHECKPOINT", "task": task, "history": observed})
         return observed
 
-    def phase(self, phase: str, decision: str, expected: str) -> str:
+    def phase(self, phase: str, decision: str, expected: str, expected_receipt_history: str) -> str:
         if self.binding.purpose != "a1_native_study_v1":
             raise ValueError("dummy history cannot become a native study")
         records = self.receipts.records
+        replay_receipts(records, self.binding)
+        _digest(expected_receipt_history)
+        if expected_receipt_history != self.receipts.root:
+            raise ValueError("stale receipt-bound authorization")
         if phase not in {"development", "continuation"} or not decision.strip():
             raise ValueError("explicit phase decision required")
         if any(r["kind"] == "FAILURE" for r in records):
@@ -430,19 +656,43 @@ class DockerController:
         started = time.monotonic()
         deadline = started + max(0, 2700 - used)
         ordinals = (0, 1) if phase == "development" else tuple(range(2, 8))
-        self.receipts.append(
-            {
-                "kind": "PHASE",
-                "phase": phase,
-                "decision": decision,
-                "ordinals": ordinals,
-                "contexts": len(ordinals),
-                "render_read_pairs": 6 * len(ordinals),
-                "cumulative_seconds": 2700,
-                "binding": vars(self.binding),
-            }
-        )
         try:
+            # Durable consumption precedes both the host PHASE receipt and any container.
+            archive = RetainedArchive(
+                self.archive, self.binding.root, BUDGET, expected_history=expected
+            )
+            try:
+                archive.put(
+                    f"operations/phase-{phase}-consumed.json",
+                    json.dumps(
+                        {
+                            "phase": phase,
+                            "binding": vars(self.binding),
+                            "prior_history": expected,
+                            "receipt_history": expected_receipt_history,
+                            "decision": decision,
+                        },
+                        sort_keys=True,
+                    ).encode(),
+                )
+                prior_history, expected = expected, archive.history()
+            finally:
+                archive.close()
+            self.receipts.append(
+                {
+                    "kind": "PHASE",
+                    "phase": phase,
+                    "decision": decision,
+                    "ordinals": ordinals,
+                    "contexts": len(ordinals),
+                    "render_read_pairs": 6 * len(ordinals),
+                    "cumulative_seconds": 2700,
+                    "binding": vars(self.binding),
+                    "prior_history": prior_history,
+                    "history": expected,
+                    "receipt_history": expected_receipt_history,
+                }
+            )
             for ordinal in ordinals:
                 expected = self.launch(f"cell-{ordinal:02d}", expected, deadline)
             expected = self.launch(
