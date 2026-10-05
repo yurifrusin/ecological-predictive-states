@@ -101,8 +101,9 @@ class SyntheticReaders:
                 case.ordinal,
                 case.partition,
                 life.digest(case.config.model_dump(mode="json")),
-                f"episode-{case.ordinal}",
-                f"transition-{case.ordinal}",
+                life.DatasetIdentity(f"{case.ordinal + 1:064x}"),
+                "episode-000000",
+                life.digest({"transition": case.ordinal}),
                 life.view_identity(view),
                 life.digest(view.action.model_dump(mode="json")),
                 logical_array_hash(codes),
@@ -122,6 +123,15 @@ class SyntheticReaders:
     def target(self, member: life.Member) -> life.Target:
         return life.Target(
             member,
+            life.ObservedTargetMetadata(
+                member.dataset,
+                member.episode,
+                member.transition,
+                member.before_digest,
+                member.action_digest,
+                member.fate_digest,
+                member.provenance_digest,
+            ),
             self.study.source_head,
             self.study.source_tree,
             self.study.root,
@@ -317,3 +327,241 @@ def test_predictor_call_receives_one_own_view_and_fixed_development_only(
     life.assemble(reader.study, SOURCE, reader, reader, reader.journal)
     assert calls == [m.before_digest for m in reader.study.members[4:]]
     assert not reader.reads
+
+
+def test_dataset_composite_identity_allows_repeated_canonical_episode(tmp_path: Path) -> None:
+    reader = SyntheticReaders(tmp_path)
+    assert {m.episode for m in reader.study.members} == {"episode-000000"}
+    assert len({m.dataset for m in reader.study.members}) == 8
+    first, second = reader.study.members[:2]
+    duplicate = replace(
+        second, dataset=first.dataset, transition=first.transition, fate_digest=first.fate_digest
+    )
+    with pytest.raises(ValueError, match="duplicate canonical"):
+        replace(reader.study, members=(first, duplicate, *reader.study.members[2:]))
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "dataset",
+        "provenance_digest",
+        "action_digest",
+        "before_digest",
+        "episode",
+        "transition",
+        "fate_digest",
+    ],
+)
+def test_observed_target_binding_substitution_fails_with_valid_pixels(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    reader = SyntheticReaders(tmp_path)
+    bundle = life.assemble(reader.study, SOURCE, reader, reader, reader.journal)
+    member = reader.study.members[4]
+    valid = reader.target(member)
+    observed = valid.observed
+    if field == "dataset":
+        observed = replace(observed, dataset=life.DatasetIdentity("f" * 64))
+    elif field == "episode":
+        observed = replace(observed, episode="episode-999999")
+    elif field == "transition":
+        observed = replace(observed, transition="f" * 64)
+    elif field == "before_digest":
+        observed = replace(observed, before_digest="f" * 64)
+    elif field == "action_digest":
+        observed = replace(observed, action_digest="f" * 64)
+    elif field == "fate_digest":
+        observed = replace(observed, fate_digest="f" * 64)
+    else:
+        observed = replace(observed, provenance_digest="f" * 64)
+    substituted = replace(valid, observed=observed)
+    assert substituted.member == member
+    assert np.array_equal(substituted.codes, valid.codes)
+    monkeypatch.setattr(reader, "read_held_out_target", lambda requested: substituted)
+    with pytest.raises(ValueError, match="observed target canonical"):
+        life.evaluate(bundle, reader.journal, reader)
+    assert reader.journal.exposed_seal() == bundle.seal
+
+
+def test_unselected_template_duplicate_is_rejected_before_hamming_selection() -> None:
+    own = before()
+    distant = before(offset=4)
+    duplicate = BeforeActionEcologicalView(
+        distant.action,
+        distant.segmentation,
+        distant.surfaces,
+        (*distant.boundaries, distant.boundaries[0]),
+    )
+    mask = np.zeros((5, 10))
+    with pytest.raises(ValueError, match="duplicate contour"):
+        controlled_forecast(
+            own, (DevelopmentTemplate(own, mask), DevelopmentTemplate(duplicate, mask))
+        )
+
+
+def test_every_development_view_validated_at_assembly(tmp_path: Path) -> None:
+    reader = SyntheticReaders(tmp_path)
+    original = reader.study.members[3]
+    view = reader.views[original]
+    duplicate = BeforeActionEcologicalView(
+        view.action, view.segmentation, view.surfaces, (*view.boundaries, view.boundaries[0])
+    )
+    replacement = replace(original, before_digest=life.view_identity(duplicate))
+    reader.study = replace(
+        reader.study, members=(*reader.study.members[:3], replacement, *reader.study.members[4:])
+    )
+    reader.views[replacement] = duplicate
+    reader.codes[replacement] = reader.codes[original]
+    with pytest.raises(ValueError, match="duplicate contour"):
+        life.assemble(reader.study, SOURCE, reader, reader, reader.journal)
+    assert not reader.reads
+    assert reader.journal.exposed_seal() is None
+    assert not list(tmp_path.glob("*-bundle-*.json"))
+
+
+def test_same_median_distinct_displacements_are_reported_without_map_change() -> None:
+    own = before(offset=4)
+    altered = BeforeActionEcologicalView(
+        own.action,
+        own.segmentation,
+        own.surfaces,
+        tuple(
+            edge.model_copy(update={"column": edge.column + int(edge.row >= 3)})
+            for edge in own.boundaries
+        ),
+    )
+    development = (DevelopmentTemplate(before(), np.ones((5, 10))),)
+    uniform = controlled_forecast(own, development)
+    mixed = controlled_forecast(altered, development)
+    assert uniform.alignment.shift == mixed.alignment.shift == 1
+    assert np.array_equal(uniform.aligned, mixed.aligned)
+    assert uniform.alignment.minimum_displacement == uniform.alignment.maximum_displacement == 1
+    assert uniform.alignment.displacements_differing_from_shift == 0
+    assert mixed.alignment.minimum_displacement == 1
+    assert mixed.alignment.maximum_displacement == 2
+    assert mixed.alignment.displacements_differing_from_shift == 4
+    empty = BeforeActionEcologicalView(own.action, own.segmentation, own.surfaces, ())
+    unsupported = controlled_forecast(empty, (DevelopmentTemplate(empty, np.ones((5, 10))),))
+    assert unsupported.alignment.minimum_displacement is None
+    assert unsupported.alignment.maximum_displacement is None
+    assert unsupported.alignment.displacements_differing_from_shift == 0
+
+
+def test_canonical_record_factory_accepts_validated_metadata_and_rejects_substitution(
+    tmp_path: Path,
+) -> None:
+    from epsbench.schema import ArtifactRecord, CanonicalPairedEpisodeManifest, Modality
+
+    reader = SyntheticReaders(tmp_path)
+    view = reader.views[reader.study.members[4]]
+    neutral = ArtifactRecord(
+        path="episodes/episode-000000/transition.json",
+        modality=Modality.TRANSITION_RECORD,
+        media_type="application/json",
+        dtype="json",
+        shape=(1,),
+        logical_sha256="1" * 64,
+        file_sha256="2" * 64,
+        byte_count=1,
+    )
+    privileged = neutral.model_copy(
+        update={
+            "modality": Modality.PRIVILEGED_GENERATION_RECORDS,
+            "path": "episodes/episode-000000/instrumentation.json",
+        }
+    )
+    episode = CanonicalPairedEpisodeManifest(
+        episode_id="episode-000000",
+        episode_index=0,
+        episode_seed=1729,
+        transition=neutral,
+        privileged_instrumentation=privileged,
+        scene_content_sha256="3" * 64,
+        ecological_label_sha256="4" * 64,
+        analytic_transport_sha256="5" * 64,
+        oriented_boundary_sha256="6" * 64,
+        visibility_event_sha256="7" * 64,
+        appearance_instance_sha256="8" * 64,
+        rgb_logical_sha256=("9" * 64, "a" * 64),
+        paired_output_provenance_sha256=("b" * 64, "c" * 64),
+    )
+    fate = ArtifactRecord(
+        path="episodes/episode-000000/before_fate.npy",
+        modality=Modality.ECOLOGICAL_VISIBILITY_EVENTS,
+        media_type="application/x-npy",
+        dtype="uint8",
+        shape=(120, 160),
+        logical_sha256="d" * 64,
+        file_sha256="e" * 64,
+        byte_count=19200,
+    )
+    dataset = life.DatasetIdentity("f" * 64)
+    metadata = life.ObservedTargetMetadata.from_canonical_records(
+        dataset,
+        episode,
+        view.action,
+        view,
+        fate,
+        "0" * 64,
+        "1" * 64,
+    )
+    assert metadata.dataset == dataset
+    assert metadata.episode == "episode-000000"
+    assert metadata.transition == "1" * 64
+    assert metadata.before_digest == life.view_identity(view)
+    assert metadata.action_digest == life.digest(view.action.model_dump(mode="json"))
+    assert metadata.fate_digest == "d" * 64
+    assert metadata.provenance_digest == life.digest(
+        {"source": "0" * 64, "paired_endpoints": ("b" * 64, "c" * 64), "content_binding": "1" * 64}
+    )
+    for invalid in (
+        fate.model_copy(update={"modality": Modality.DEPTH}),
+        fate.model_copy(update={"dtype": "float32"}),
+        fate.model_copy(update={"shape": (120, 159)}),
+    ):
+        with pytest.raises(ValueError, match="artifact metadata"):
+            life.ObservedTargetMetadata.from_canonical_records(
+                dataset,
+                episode,
+                view.action,
+                view,
+                invalid,
+                "0" * 64,
+                "1" * 64,
+            )
+    with pytest.raises(ValueError, match="actual before action"):
+        life.ObservedTargetMetadata.from_canonical_records(
+            dataset,
+            episode,
+            before(0.7).action,
+            view,
+            fate,
+            "0" * 64,
+            "1" * 64,
+        )
+    invalid_episode = episode.model_copy(update={"episode_id": "invented-episode"})
+    with pytest.raises(ValueError):
+        life.ObservedTargetMetadata.from_canonical_records(
+            dataset,
+            invalid_episode,
+            view.action,
+            view,
+            fate,
+            "0" * 64,
+            "1" * 64,
+        )
+    # Paths and container-file identities are not hashed into logical provenance.
+    renamed = fate.model_copy(update={"path": "other/before_fate.npy", "file_sha256": "0" * 64})
+    same = life.ObservedTargetMetadata.from_canonical_records(
+        dataset,
+        episode,
+        view.action,
+        view,
+        renamed,
+        "0" * 64,
+        "1" * 64,
+    )
+    assert same == metadata

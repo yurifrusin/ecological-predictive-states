@@ -32,6 +32,9 @@ class Alignment:
     support: str
     median_index: int | None
     shift: int
+    minimum_displacement: int | None
+    maximum_displacement: int | None
+    displacements_differing_from_shift: int
     nonzero_before: int
     retained: int
     clipped: int
@@ -78,11 +81,13 @@ def controlled_forecast(
         raise ValueError("no same-action development template")
     if any(d.before.segmentation.shape != own.segmentation.shape for _, d in eligible):
         raise ValueError("template raster dimensions differ")
+    validated = {i: contours(d.before) for i, d in eligible}
+    current = contours(own)
     ordinal, selected = min(
         eligible, key=lambda item: int(np.count_nonzero(boundary_layout(item[1].before) != layout))
     )
     distance = int(np.count_nonzero(boundary_layout(selected.before) != layout))
-    template, current = contours(selected.before), contours(own)
+    template = validated[ordinal]
     shifts = sorted(
         c - t
         for group in sorted(template.keys() & current.keys())
@@ -123,6 +128,9 @@ def controlled_forecast(
             "SUPPORTED" if shifts else "NO_ALIGNMENT_SUPPORT",
             index,
             shift,
+            shifts[0] if shifts else None,
+            shifts[-1] if shifts else None,
+            sum(displacement != shift for displacement in shifts),
             total,
             retained,
             total - retained,

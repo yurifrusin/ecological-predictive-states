@@ -25,8 +25,21 @@ from epsbench.diagnostics.a1_action_contrast import (
     _action_key,
     cases,
 )
-from epsbench.diagnostics.a1_controls import ControlledForecast, controlled_forecast, score_controls
-from epsbench.utils.canonical import logical_array_hash
+from epsbench.diagnostics.a1_controls import (
+    ControlledForecast,
+    contours,
+    controlled_forecast,
+    score_controls,
+)
+from epsbench.schema import (
+    Action,
+    ArtifactRecord,
+    CanonicalPairedEpisodeManifest,
+    DatasetManifest,
+    Modality,
+    TransitionRecord,
+)
+from epsbench.utils.canonical import canonical_json_bytes, logical_array_hash, sha256_bytes
 
 ALGORITHM = "a1_rank_pair_lower_median_v1"
 
@@ -57,10 +70,24 @@ def view_identity(view: BeforeActionEcologicalView) -> str:
 
 
 @dataclass(frozen=True)
+class DatasetIdentity:
+    """Canonical dataset logical identity; never a path or run namespace."""
+
+    logical_sha256: str
+
+    def __post_init__(self) -> None:
+        if len(self.logical_sha256) != 64 or any(
+            c not in "0123456789abcdef" for c in self.logical_sha256
+        ):
+            raise ValueError("canonical dataset logical identity required")
+
+
+@dataclass(frozen=True)
 class Member:
     ordinal: int
     partition: str
     configuration_digest: str
+    dataset: DatasetIdentity
     episode: str
     transition: str
     before_digest: str
@@ -69,10 +96,13 @@ class Member:
     provenance_digest: str
 
     def __post_init__(self) -> None:
+        if not isinstance(self.dataset, DatasetIdentity):
+            raise ValueError("typed canonical dataset identity required")
         if not self.episode or not self.transition:
             raise ValueError("canonical episode and transition required")
         for name in (
             "configuration_digest",
+            "transition",
             "before_digest",
             "action_digest",
             "fate_digest",
@@ -101,10 +131,7 @@ class Study:
             raise ValueError("complete ordered eight-member membership required")
         if tuple(m.partition for m in self.members) != ("development",) * 4 + ("held_out",) * 4:
             raise ValueError("fixed development/held-out partitions required")
-        if (
-            len({m.episode for m in self.members}) != 8
-            or len({m.transition for m in self.members}) != 8
-        ):
+        if len({(m.dataset, m.episode, m.transition) for m in self.members}) != 8:
             raise ValueError("duplicate canonical member identity")
 
     @property
@@ -122,8 +149,114 @@ class Study:
 
 
 @dataclass(frozen=True)
+class ObservedTargetMetadata:
+    """Observed control-plane identity, independently derived from canonical metadata.
+
+    This carries no requested Member. Readers obtain it from the validated actual
+    dataset/transition and the actual before snapshot, never from requested fields.
+    """
+
+    dataset: DatasetIdentity
+    episode: str
+    transition: str
+    before_digest: str
+    action_digest: str
+    fate_digest: str
+    provenance_digest: str
+
+    @classmethod
+    def from_canonical_metadata(
+        cls,
+        manifest: DatasetManifest,
+        transition: TransitionRecord,
+        before: BeforeActionEcologicalView,
+    ) -> ObservedTargetMetadata:
+        # Revalidate owned metadata; callers must also use permissioned artifact
+        # decoding/file-hash validation. No held-out event pixels are read here.
+        manifest = DatasetManifest.model_validate(manifest.model_dump())
+        transition = TransitionRecord.model_validate(transition.model_dump())
+        matches = [e for e in manifest.episodes if e.episode_id == transition.episode_id]
+        if len(matches) != 1 or not isinstance(matches[0], CanonicalPairedEpisodeManifest):
+            raise ValueError("actual canonical paired episode metadata required")
+        episode = matches[0]
+        transition_digest = sha256_bytes(canonical_json_bytes(transition))
+        if episode.transition.logical_sha256 != transition_digest:
+            raise ValueError("actual transition artifact identity differs")
+        if logical_array_hash(before.segmentation) != transition.before.segmentation.logical_sha256:
+            raise ValueError("actual before segmentation identity differs")
+        labels = set(int(label) for label in np.unique(before.segmentation) if label)
+        projected = BeforeActionEcologicalView(
+            transition.action,
+            before.segmentation,
+            tuple(
+                (s.surface_id, s.segmentation_label)
+                for s in transition.surfaces
+                if s.segmentation_label in labels
+            ),
+            tuple(e for e in transition.oriented_boundary_ownership.elements if e.frame_index == 0),
+        )
+        if view_identity(projected) != view_identity(before):
+            raise ValueError("actual before/action/boundary snapshot differs")
+        return cls.from_canonical_records(
+            DatasetIdentity(manifest.dataset_logical_sha256),
+            episode,
+            transition.action,
+            projected,
+            transition.ecological_visibility_events.before_fate.event_codes,
+            manifest.source_provenance_sha256,
+            manifest.content_provenance_binding_sha256,
+        )
+
+    @classmethod
+    def from_canonical_records(
+        cls,
+        dataset: DatasetIdentity,
+        episode: CanonicalPairedEpisodeManifest,
+        actual_action: Action,
+        before: BeforeActionEcologicalView,
+        fate_artifact: ArtifactRecord,
+        source_provenance_digest: str,
+        content_binding_digest: str,
+    ) -> ObservedTargetMetadata:
+        """Project already verified actual records, never requested member metadata.
+
+        Permissioned decoding must bind these records to their actual transition.
+        The full-manifest factory above verifies that binding before delegating.
+        """
+        episode = CanonicalPairedEpisodeManifest.model_validate(episode.model_dump())
+        actual_action = Action.model_validate(actual_action.model_dump())
+        fate_artifact = ArtifactRecord.model_validate(fate_artifact.model_dump())
+        if digest(actual_action.model_dump(mode="json")) != digest(
+            before.action.model_dump(mode="json")
+        ):
+            raise ValueError("actual before action differs")
+        if (
+            fate_artifact.modality != Modality.ECOLOGICAL_VISIBILITY_EVENTS
+            or fate_artifact.dtype != "uint8"
+            or fate_artifact.shape != (120, 160)
+        ):
+            raise ValueError("canonical before-fate artifact metadata differs")
+        return cls(
+            dataset,
+            episode.episode_id,
+            episode.transition.logical_sha256,
+            view_identity(before),
+            digest(actual_action.model_dump(mode="json")),
+            fate_artifact.logical_sha256,
+            digest(
+                {
+                    "source": source_provenance_digest,
+                    "paired_endpoints": episode.paired_output_provenance_sha256,
+                    "content_binding": content_binding_digest,
+                }
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class Target:
     member: Member
+    observed: ObservedTargetMetadata
     source_head: str
     source_tree: str
     membership_root: str
@@ -225,7 +358,18 @@ def check_target(study: Study, member: Member, target: Target) -> None:
         or target.membership_root != study.root
     ):
         raise ValueError("target member/source/membership binding differs")
-    if logical_array_hash(target.codes) != member.fate_digest:
+    observed = target.observed
+    if (
+        observed.dataset != member.dataset
+        or observed.episode != member.episode
+        or observed.transition != member.transition
+        or observed.before_digest != member.before_digest
+        or observed.action_digest != member.action_digest
+        or observed.fate_digest != member.fate_digest
+        or observed.provenance_digest != member.provenance_digest
+    ):
+        raise ValueError("observed target canonical binding differs")
+    if logical_array_hash(target.codes) != observed.fate_digest:
         raise ValueError("target content changed")
 
 
@@ -349,6 +493,7 @@ def assemble(
     for member in study.members[:4]:
         view = before_reader.read_before(member)
         check_view(member, view)
+        contours(view)  # every development view, before outcome assembly or selection
         target = development_reader.read_development_target(member)
         check_target(study, member, target)
         template = DevelopmentTemplate(view, (target.codes == 1).astype(np.float64))
