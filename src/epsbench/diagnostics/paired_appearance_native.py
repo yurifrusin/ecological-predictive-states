@@ -11,12 +11,10 @@ from typing import Any
 import numpy as np
 
 from epsbench.diagnostics.paired_appearance import (
-    FIXED,
     HEIGHT,
     ORIENTATION,
     SDK_RENDERER_SHA256,
     SURFACES,
-    VERSION,
     WIDTH,
     Family,
     Frame,
@@ -123,6 +121,9 @@ class NativeCapture:
     ):
         if type(binding) is not AppearanceExecutionBinding:
             raise PermissionError("exact appearance execution binding required before SDK import")
+        self.study = binding.preparation.study
+        if appearance not in self.study.appearances or family not in SURFACES:
+            raise PermissionError("cross-study capture membership denied before SDK access")
         require_native_binding(repository, binding)
         if (source_head, source_tree) != (
             binding.preparation.source_head,
@@ -140,7 +141,7 @@ class NativeCapture:
 
         # Existing native producer runtime guard is unchanged; no false causal task purpose.
         require_supported_runtime("osmesa")
-        fixed_config((repository / "configs/development/paired_appearance_v1.json").read_bytes())
+        fixed_config((repository / self.study.config_path).read_bytes(), study=self.study)
         import importlib
         import inspect
         import re
@@ -162,18 +163,18 @@ class NativeCapture:
             != renderer_file.resolve()
         ):
             raise ValueError("pinned ordinary RGB SDK implementation required")
-        self.protection = protection_check(repository)
+        self.protection = protection_check(repository, study=self.study)
         self.family, self.appearance = family, appearance
         self.source_head, self.source_tree = source_head, source_tree
         self.progress, self.next_index, self.failed = progress, 0, False
         self.renderer: Any = None
-        plan = visual_plan(family, appearance)
+        plan = visual_plan(family, appearance, study=self.study)
         # Old config is only the existing builder geometry adapter; its appearance fallback
         # is never used. The separately typed plan/record identifies the actual appearance.
         common = {
             "schema_version": "0.1.0-dev.4",
             "scene_family": family,
-            "seed": FIXED["roots"][0 if family == "single_occluder" else 1],
+            "seed": self.study.fixed["roots"][0 if family == "single_occluder" else 1],
             "render": {"width": WIDTH, "height": HEIGHT},
             "appearance": {
                 "registry_version": "appearance_candidate_registry_v1",
@@ -238,7 +239,7 @@ class NativeCapture:
                 field_of_view_degrees=55.0,
             )
             xml = build_corridor_scene_xml(config, geometry, plan)
-        validate_xml(family, appearance, xml)
+        validate_xml(family, appearance, xml, study=self.study)
         self.xml, self.plan, self.mujoco = xml, plan, mujoco
         self.model = mujoco.MjModel.from_xml_string(xml, plan.asset_bytes)
         self.model.vis.quality.offsamples = 0
@@ -251,7 +252,9 @@ class NativeCapture:
         )
         self.compiled = json.loads(canonical_json_bytes(asdict(compiled)))
         validate_compiled(family, self.compiled)
-        self.remap = mapping(family, tuple(compiled.raw_geom_ids[n] for n in SURFACES[family]))
+        self.remap = mapping(
+            family, tuple(compiled.raw_geom_ids[n] for n in SURFACES[family]), study=self.study
+        )
         try:
             self.renderer = mujoco.Renderer(self.model, height=HEIGHT, width=WIDTH)
             self.paired = CanonicalPairedRenderer(
@@ -310,7 +313,7 @@ class NativeCapture:
         try:
             self._emit("endpoint_attempt", None)
             axis = 0 if self.family == "single_occluder" else 1
-            position = FIXED["single" if axis == 0 else "corridor"]["poses"][index]
+            position = self.study.fixed["single" if axis == 0 else "corridor"]["poses"][index]
             self.model.cam_pos[self.camera_id, axis] = position
             self.mujoco.mj_forward(self.model, self.data)
             self.renderer.update_scene(self.data, camera=self.camera_id)
@@ -342,15 +345,15 @@ class NativeCapture:
                 "fovy": float(self.model.cam_fovy[self.camera_id]),
             }
             evidence = {
-                "schema": VERSION + ":endpoint",
+                "schema": self.study.schema + ":endpoint",
                 "source_head": self.source_head,
                 "source_tree": self.source_tree,
-                "config_sha256": sha256_bytes(config_bytes()),
+                "config_sha256": sha256_bytes(config_bytes(study=self.study)),
                 "appearance_record": self.plan.record,
                 "scene_xml_sha256": sha256_bytes(self.xml.encode()),
                 "compiled": self.compiled,
                 "camera": camera,
-                "action": FIXED["single" if axis == 0 else "corridor"]["delta"],
+                "action": self.study.fixed["single" if axis == 0 else "corridor"]["delta"],
                 "runtime": pair.stable_state["context_runtime"],
                 "mapping": [list(v) for v in self.remap],
                 "scene_map": [[v.segid_plus_one, v.objid, v.objtype] for v in pair.scene_map],
@@ -383,8 +386,9 @@ class NativeCapture:
                 opaque[:, :-1] != opaque[:, 1:],
                 opaque[:-1] != opaque[1:],
                 evidence,
+                study=self.study,
             )
-            validate_frame(frame)
+            validate_frame(frame, study=self.study)
             self._emit("endpoint_complete", frame)
             self.next_index += 1
             return frame
@@ -404,4 +408,4 @@ def validate_retained_native(frame: Frame) -> None:
     from epsbench.sim.canonical_paired import validate_saved_state
 
     validate_saved_state(frame.evidence["paired_stable"], WIDTH, HEIGHT)
-    validate_frame(frame)
+    validate_frame(frame, frame.study)

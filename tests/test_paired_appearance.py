@@ -14,6 +14,7 @@ import pytest
 from PIL import Image
 
 from epsbench.diagnostics import paired_appearance as p
+from epsbench.diagnostics.appearance_study import PAIRED_V1, StudySpec
 from epsbench.schema import ModalityPermissionSet
 from epsbench.utils.canonical import canonical_json_bytes, sha256_bytes
 
@@ -22,7 +23,9 @@ NEAR = float(np.float32(0.01))
 FAR = 20.0
 
 
-def synthetic(appearance: str = p.APPEARANCES[0], index: int = 0) -> p.Frame:
+def synthetic(
+    appearance: str = p.APPEARANCES[0], index: int = 0, study: StudySpec = PAIRED_V1
+) -> p.Frame:
     # Arbitrary three vertical label regions; not an evaluation of either candidate scene.
     raw = np.zeros((p.HEIGHT, p.WIDTH), dtype=np.int32)
     raw[:, 53:106] = 1
@@ -32,12 +35,12 @@ def synthetic(appearance: str = p.APPEARANCES[0], index: int = 0) -> p.Frame:
     native_depth = np.full(raw.shape, 0.5, dtype=np.float32)
     scene_map = ((1, 0, 5), (2, 1, 5), (3, 2, 5))
     _, depth = p.derive_pair(native, native_depth, scene_map, NEAR, FAR)
-    remap = p.mapping("single_occluder", (0, 1, 2))
+    remap = p.mapping("single_occluder", (0, 1, 2), study=study)
     opaque = np.zeros_like(raw)
     for r, label, _ in remap:
         opaque[raw == r] = label
     rgb = np.full((*raw.shape, 3), 200, dtype=np.uint8)
-    if appearance == p.APPEARANCES[1]:
+    if appearance == study.appearances[1]:
         rows, cols = np.indices(raw.shape)
         rgb[((rows + cols) % 2) == 0] = 60
     geometry = p.expected_geometry("single_occluder")
@@ -144,13 +147,13 @@ def synthetic(appearance: str = p.APPEARANCES[0], index: int = 0) -> p.Frame:
     rgb_state = copy.deepcopy(stable)
     rgb_state.update({"segment_enabled": False, "idcolor_enabled": False})
     rgb_state["scene_flags"][8:10] = [0, 0]
-    material = p.expected_material("single_occluder", appearance, compiled)
+    material = p.expected_material("single_occluder", appearance, compiled, study=study)
     evidence = {
-        "schema": p.VERSION + ":endpoint",
+        "schema": study.schema + ":endpoint",
         "source_head": "a" * 40,
         "source_tree": "b" * 40,
-        "config_sha256": sha256_bytes(p.config_bytes()),
-        "appearance_record": p.visual_plan("single_occluder", appearance).record,
+        "config_sha256": sha256_bytes(p.config_bytes(study=study)),
+        "appearance_record": p.visual_plan("single_occluder", appearance, study=study).record,
         "scene_xml_sha256": "c" * 64,
         "compiled": compiled,
         "camera": {
@@ -191,6 +194,7 @@ def synthetic(appearance: str = p.APPEARANCES[0], index: int = 0) -> p.Frame:
         opaque[:, :-1] != opaque[:, 1:],
         opaque[:-1] != opaque[1:],
         evidence,
+        study=study,
     )
 
 
@@ -426,7 +430,7 @@ def test_record_free_builder_source_compatibility() -> None:
 
 def test_ci_exact_isolation_and_narrow_capture_source() -> None:
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
-    assert ci.count("github.head_ref == 'codex/paired-appearance-diagnostic-20261006')") == 4
+    assert ci.count("github.head_ref == 'codex/paired-appearance-diagnostic-20261006' ||") == 4
     assert "python scripts/check_paired_appearance_source.py" in ci
     source = (ROOT / "src/epsbench/diagnostics/paired_appearance_native.py").read_text()
     assert "counterfactual" not in source and "compute_analytic_transport" not in source
@@ -505,14 +509,14 @@ def test_pure_lazy_progress_preserves_completed_bytes_and_bounds() -> None:
         instance._paired_progress("draw_input", b"0" * 65537)
 
 
-def synthetic_corridor(appearance: str, index: int) -> p.Frame:
-    template = synthetic(appearance, index)
+def synthetic_corridor(appearance: str, index: int, study: StudySpec = PAIRED_V1) -> p.Frame:
+    template = synthetic(appearance, index, study=study)
     evidence = copy.deepcopy(template.evidence)
     geometry = p.expected_geometry("corridor")
     raw = np.repeat(np.arange(4, dtype=np.int32), 40)[None, :].repeat(p.HEIGHT, axis=0)
     native = np.zeros((*raw.shape, 3), dtype=np.uint8)
     native[..., 0] = raw + 1
-    remap = p.mapping("corridor", (0, 1, 2, 3))
+    remap = p.mapping("corridor", (0, 1, 2, 3), study=study)
     opaque = np.zeros_like(raw)
     for r, label, _ in remap:
         opaque[raw == r] = label
@@ -534,7 +538,7 @@ def synthetic_corridor(appearance: str, index: int) -> p.Frame:
     evidence["action"] = [0.7, 0.0, 0.0]
     evidence["mapping"] = [list(v) for v in remap]
     evidence["scene_map"] = [[i + 1, i, 5] for i in range(4)]
-    evidence["appearance_record"] = p.visual_plan("corridor", appearance).record
+    evidence["appearance_record"] = p.visual_plan("corridor", appearance, study=study).record
     for key in ("rgb_stable", "paired_stable"):
         state = evidence[key]
         state["ngeom"] = 4
@@ -547,7 +551,7 @@ def synthetic_corridor(appearance: str, index: int) -> p.Frame:
         evidence[key]["far"] = 30.0
         evidence[key]["scene_geometry"] = p.expected_draw_geometry(compiled)
         evidence[key]["scene_cameras"] = p.expected_scene_cameras(evidence["camera"], NEAR, 30.0)
-    evidence["rgb_material"] = p.expected_material("corridor", appearance, compiled)
+    evidence["rgb_material"] = p.expected_material("corridor", appearance, compiled, study=study)
     evidence["paired_material"] = copy.deepcopy(evidence["rgb_material"])
     return replace(
         template,
@@ -744,7 +748,18 @@ def test_canonical_asset_denial(
     assets = p.canonical_assets()
     for slot, raw in assets.items():
         (tmp_path / f"brick-slot-{slot}.png").write_bytes(raw)
-    monkeypatch.setattr(p, "CANONICAL_ASSET_DIRECTORY", tmp_path)
+    # Redirect only filesystem reads to damaged copies, keeping source authority immutable.
+    directory = p.CANONICAL_ASSET_DIRECTORY
+    original_read = Path.read_bytes
+    original_iter = Path.iterdir
+    monkeypatch.setattr(
+        Path, "iterdir", lambda path: original_iter(tmp_path if path == directory else path)
+    )
+    monkeypatch.setattr(
+        Path,
+        "read_bytes",
+        lambda path: original_read(tmp_path / path.name if path.parent == directory else path),
+    )
     victim = tmp_path / "brick-slot-3.png"
     if damage == "missing":
         victim.unlink()
@@ -763,9 +778,7 @@ def test_canonical_asset_denial(
         image.save(stream, format="PNG")
         raw = stream.getvalue()
         victim.write_bytes(raw)
-        # Bypass only the byte gate to exercise the independent decoded contract.
-        hashes = (*p.CANONICAL_ASSET_SHA256[:3], sha256_bytes(raw))
-        monkeypatch.setattr(p, "CANONICAL_ASSET_SHA256", hashes)
+        # Byte authority remains pinned; any encoded replacement must fail closed.
     # The solid plan must also deny an incomplete inventory before construction.
     with pytest.raises(ValueError, match="canonical appearance asset"):
         p.visual_plan("single_occluder", p.APPEARANCES[0])

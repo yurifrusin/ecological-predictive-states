@@ -13,8 +13,8 @@ from typing import Any, Protocol
 import numpy as np
 
 from epsbench.diagnostics import paired_appearance as p
+from epsbench.diagnostics.appearance_study import PAIRED_V1, StudySpec, require_spec
 from epsbench.diagnostics.paired_appearance_runtime import (
-    NATIVE,
     AppearanceExecutionBinding,
     LaunchDecision,
     require_decision,
@@ -137,6 +137,7 @@ class ByteBoundedSink:
 
     def __init__(self, root: Path, binding: AppearanceExecutionBinding):
         consumed(root, binding)
+        self.study = binding.preparation.study
         self.root, self.binding = root, binding
         self.poisoned = False
         self.context = -1
@@ -257,10 +258,10 @@ class ByteBoundedSink:
             elif stage == "endpoint_complete":
                 if type(value) is not p.Frame:
                     raise ValueError("completed frame type")
-                family, appearance, _ = p.contexts()[self.context]
+                family, appearance, _ = p.contexts(study=self.study)[self.context]
                 if (value.family, value.appearance, value.index) != (family, appearance, index):
                     raise ValueError("frame membership")
-                p.validate_frame(value)
+                p.validate_frame(value, study=self.study)
                 if (value.evidence["source_head"], value.evidence["source_tree"]) != (
                     self.binding.preparation.source_head,
                     self.binding.preparation.source_tree,
@@ -344,6 +345,7 @@ def replay(
     root: Path, binding: AppearanceExecutionBinding, *, native: bool = False
 ) -> dict[str, Any]:
     """Validate complete prefix. Incomplete suffix is reported; never resumes capture."""
+    study = binding.preparation.study
     frames: dict[tuple[int, int], p.Frame] = {}
     counts = {
         k: 0
@@ -440,7 +442,7 @@ def replay(
                 )
             if stage == "endpoint_complete":
                 meta = p.strict_json(payloads[prefix + "frame.json"])
-                family, appearance, _ = p.contexts()[context]
+                family, appearance, _ = p.contexts(study=study)[context]
                 if (
                     set(meta) != {"family", "appearance", "index", "evidence", "arrays"}
                     or type(meta["index"]) is not int
@@ -455,7 +457,9 @@ def replay(
                         raise ValueError("array component path")
                     raw = read_ref(root, meta["arrays"][name], 76800)
                     arrays[name] = np.frombuffer(raw, dtype=dtype).reshape(shape)
-                frame = p.Frame(family, appearance, index, **arrays, evidence=meta["evidence"])
+                frame = p.Frame(
+                    family, appearance, index, **arrays, evidence=meta["evidence"], study=study
+                )
                 if (frame.evidence["source_head"], frame.evidence["source_tree"]) != (
                     binding.preparation.source_head,
                     binding.preparation.source_tree,
@@ -506,7 +510,7 @@ def replay(
                 stable["offscreen_attachments"] = attachments
                 if stable != frame.evidence["paired_stable"]:
                     raise ValueError("retained paired state differs from callback")
-                p.validate_frame(frame)
+                p.validate_frame(frame, study=study)
                 if native:
                     from epsbench.diagnostics.paired_appearance_native import (
                         validate_retained_native,
@@ -543,19 +547,25 @@ class Capture(Protocol):
 Factory = Callable[[int, Callable[[str, int, Any], None]], Capture]
 
 
-def ready(frames: dict[tuple[int, int], p.Frame], context: int, index: int) -> dict[str, Any]:
-    family, appearance, repeat = p.contexts()[context]
+def ready(
+    frames: dict[tuple[int, int], p.Frame], context: int, index: int, study: StudySpec = PAIRED_V1
+) -> dict[str, Any]:
+    require_spec(study)
+    family, appearance, repeat = p.contexts(study=study)[context]
     frame = frames[(context, index)]
-    if appearance == p.APPEARANCES[1]:
+    if (frame.family, frame.appearance, frame.index) != (family, appearance, index):
+        raise ValueError("ready frame membership differs")
+    p.validate_frame(frame, study)
+    if appearance == study.appearances[1]:
         # Existing textured-only per-surface criteria become decidable at this endpoint.
         # comparison uses the fixed matched solid; it also checks every existing texture condition.
-        solid = p.contexts().index((family, p.APPEARANCES[0], repeat))
-        comparison = p.comparison(frames[(solid, index)], frame)
+        solid = p.contexts(study=study).index((family, study.appearances[0], repeat))
+        comparison = p.comparison(frames[(solid, index)], frame, study=study)
         if comparison["status"] == "FAIL":
             return comparison
     if repeat == 1:
-        original = p.contexts().index((family, appearance, 0))
-        if not p.repeat_equal(frames[(original, index)], frame):
+        original = p.contexts(study=study).index((family, appearance, 0))
+        if not p.repeat_equal(frames[(original, index)], frame, study=study):
             return {"status": "FAIL", "reason": "exact regeneration mismatch"}
     return {"status": "PASS"}
 
@@ -564,11 +574,12 @@ def run_matrix(
     sink: ByteBoundedSink, factory: Factory, deadline: float, *, native_replay: bool = False
 ) -> dict[str, Any]:
     """Pure control seam: source tests inject arbitrary fixtures; native entry binds its factory."""
+    study = sink.study
     frames: dict[tuple[int, int], p.Frame] = {}
     reason: dict[str, Any] = {"status": "INCONCLUSIVE", "reason": "incomplete fixed matrix"}
     operational_error: str | None = None
     try:
-        for context, _ in enumerate(p.contexts()):
+        for context, _ in enumerate(p.contexts(study=study)):
             if time.monotonic() >= deadline:
                 raise TimeoutError("work watchdog exhausted")
             sink.begin_context(context)
@@ -586,7 +597,7 @@ def run_matrix(
                     ):
                         raise ValueError(retained.get("reason", "retained endpoint unavailable"))
                     frames = retained["frames"]
-                    check = ready(frames, context, index)
+                    check = ready(frames, context, index, study)
                     if check["status"] == "FAIL":
                         reason = check
                         break
@@ -599,9 +610,9 @@ def run_matrix(
         else:
             complete = {
                 key: (frames[(ordinal, 0)], frames[(ordinal, 1)])
-                for ordinal, key in enumerate(p.contexts())
+                for ordinal, key in enumerate(p.contexts(study=study))
             }
-            reason = p.assess(complete)
+            reason = p.assess(complete, study=study)
             if reason["status"] == "PASS":
                 reason = {**reason, "status": "CAPTURE_COMPLETE"}
         if time.monotonic() >= deadline:
@@ -645,12 +656,13 @@ def run_native(
 ) -> dict[str, Any]:
     require_decision(binding, decision)
     require_native_binding(repository, binding)
-    if binding.purpose != NATIVE:
+    study = binding.preparation.study
+    if binding.purpose != study.native_purpose:
         raise PermissionError("dummy cannot become a native matrix")
     from epsbench.diagnostics.paired_appearance_native import NativeCapture
 
     def factory(context: int, progress: Callable[[str, int, Any], None]) -> Capture:
-        family, appearance, _ = p.contexts()[context]
+        family, appearance, _ = p.contexts(study=study)[context]
         return NativeCapture(
             repository,
             family,
