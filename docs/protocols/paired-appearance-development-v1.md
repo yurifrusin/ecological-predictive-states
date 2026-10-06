@@ -198,3 +198,86 @@ Projection/modelview matrices are actual retained values compared across operati
 and appearances, not a new metric-accuracy claim. Additional metadata remains
 inside the existing 64 KiB scientific snapshot and 1 MiB endpoint caps; the
 unchanged retention calculation includes all six bounded metadata copies.
+
+## Separate bounded execution source (prospective, unexecuted)
+
+DUAL_REVIEW / PUBLIC_REPOSITORY_ONLY / phase-gate NONE. The separate execution
+package adds a distinct native purpose `paired_appearance_native_v1` and dummy
+purpose `paired_appearance_dummy_v1`; NativeCapture denies missing/wrong purpose
+before SDK import. The canonical guard retains all existing Linux/backend/package
+checks and existing admissions, with only the new exact appearance candidate branch.
+Preparation/source/config/asset/protection/membership/image/output/attempt binding
+must agree with a separate substantive launch decision before native construction.
+Source publication supplies no launch permission.
+
+The direct fixed-order driver has eight contexts, sixteen endpoints and at most
+32 planned RGB/owned-pair operations; one context is live. Completed callbacks
+write exclusive component files and small closed receipts, flush before returning,
+then replay reconstructs Frames without additional draws. RGB is stored once,
+referenced by final evidence. Raw readbacks survive later failure. A fresh consumed
+attempt cannot be resumed/replaced; write faults poison the sink, preserving partial
+files. Existing typed ecological permissions remain authoritative.
+
+At each completed endpoint, replay validates the prefix and checks every now-ready
+repeat and matched appearance relation before another capture. Textured-only
+criteria are applied to the prescribed brick evidence, with no extra solid-texture
+conditions. Valid fixed-criterion failure is terminal FAIL; malformed/missing,
+provenance/runtime/budget/retention failure is terminal INCONCLUSIVE. Missing later
+cells cannot erase a valid early FAIL. PASS requires the entire matrix, every fixed
+relation, full replay and successful exact owned-container cleanup. No retry/tuning.
+
+Byte allocation is unchanged: per-endpoint479720 scientific array bytes plus134400
+immediate paired read bytes plus six65536-byte metadata envelopes =1007336 bytes,
+leaving41240 framing/hash bytes within1MiB. Original16MiB endpoints plus2MiB shared
+<=18MiB; at most two inclusive18MiB later copies and1MiB host/control <=55MiB.
+All four dummy cases jointly reserve<=256KiB inside that existing host allowance,
+leaving>=768KiB actual host receipts. Temporary8MiB and shared-memory1MiB give
+<=64MiB application capacities. No extra full dummy tree/temporary full-tree rewrite.
+The sink enforces actual lengths before writes; partial files stay charged.
+Installed source/dependencies/image/engine preparation storage is separate
+infrastructure requiring separate preparation authority/accounting. This is no
+host-wide disk guarantee or hostile-host quota. Flush is ordinary process/container
+retention under the Desktop bind filesystem, not power-loss durability.
+
+Prospective confinement is2GiB/no extra swap,2CPUs0,1/2renderer threads,64PIDs,
+read-only root/no network/no capabilities/no escalation/no restart/no daemon logs,
+8MiBtmp/1MiBshm and only one writable owned output bind. Memory sufficiency remains
+unmeasured. One nonrefundable300-second actual slot includes275seconds work,
+<=20seconds owned cleanup and5seconds final receipt. External commands are bounded
+by remaining allowance, with no endpoint/phase reset. Host/daemon scheduling and
+flush stalls may overrun a requested deadline: record overruns/incomplete cleanup,
+never claim a hard host termination guarantee or automatically enlarge/retry.
+
+Exactly four later native-free tiny qualification cases are implemented but HELD:
+normal durable callback/replay; interruption after paired read retaining RGB;
+deadline/owned cleanup; one-byte-over-budget poisoning. Once each,<=60seconds
+inclusive, all retained payloads/receipts/partials jointly<=256KiB. Full actual-shape
+matrix validation is guarded synthetic source checking/in-memory, not another
+container case. Other malformed/ownership/relaunch/fault checks stay source tests.
+No Docker/service/build/dummy/native/geometry activity occurred in this package.
+The apt package list is resolved rather than fully pinned; a later preparation
+records package versions and immutable final image digest, not recipe-identical
+image reproducibility. Historical failed Slice6/incomplete Gate0B and18/21 recovery
+remain, all A1/causal/return studies stay closed, helpers parked, no ML before0D.
+
+
+The capture-level terminal is CAPTURE_COMPLETE pending cleanup, not final PASS.
+Only the host result after exact owned-container removal can report PASS. Control
+command timeouts and the entry deadline share the original outer work allowance;
+entry does not receive a fresh275seconds. The host monotonic watchdog remains
+valid if its cross-container wall-clock deadline bridge shifts.
+
+Docker-managed special system mounts (such as /dev or managed /etc files) need
+not be universally unwritable. Read-only root and specified user output/tmp/shm
+mounts remain checked. The64MiB proof covers admitted application records/copies
+and declared temporary allocations under the reviewed cooperative writer. It is
+not a complete process/host filesystem quota or hostile-process guarantee.
+Project writes use only the owned sink; bytecode generation and Mesa shader
+cache are disabled, temporary/cache settings point to /tmp. Native/library write
+behavior remains unobserved until separately authorized preparation/qualification.
+No extra mount, privilege or confinement programme is introduced.
+
+Host apparatus_status and operational_status are separate. An immutable early
+valid FAIL remains in apparatus_status and the original capture/comparison
+terminal even if cleanup/control makes aggregate status INCONCLUSIVE. Such an
+operational failure prevents overall PASS, without erasing negative evidence.
