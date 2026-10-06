@@ -413,7 +413,7 @@ def test_record_free_builder_source_compatibility() -> None:
     # Structural protocol remains compatible with existing concrete plan dataclass by static typing.
     import epsbench.diagnostics.paired_appearance_native as native
 
-    with pytest.raises(RuntimeError, match="forbidden"):
+    with pytest.raises(PermissionError, match="before SDK import"):
         native.NativeCapture(
             ROOT,
             "single_occluder",
@@ -424,14 +424,14 @@ def test_record_free_builder_source_compatibility() -> None:
         )
 
 
-def test_ci_exact_isolation_and_no_capture_driver() -> None:
+def test_ci_exact_isolation_and_narrow_capture_source() -> None:
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     assert ci.count("github.head_ref == 'codex/paired-appearance-diagnostic-20261006')") == 4
     assert "python scripts/check_paired_appearance_source.py" in ci
     source = (ROOT / "src/epsbench/diagnostics/paired_appearance_native.py").read_text()
     assert "counterfactual" not in source and "compute_analytic_transport" not in source
     assert "self.renderer.render()" in source and "pair = self.paired.capture()" in source
-    assert not (ROOT / "scripts/paired_appearance_execution.py").exists()
+    # The separately authorized execution package now owns the driver; this adapter stays narrow.
 
 
 def test_codec_expansion_hash_and_duplicate_json_rejection() -> None:

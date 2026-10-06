@@ -30,6 +30,10 @@ from epsbench.diagnostics.paired_appearance import (
     validate_xml,
     visual_plan,
 )
+from epsbench.diagnostics.paired_appearance_runtime import (
+    AppearanceExecutionBinding,
+    require_native_binding,
+)
 from epsbench.utils.canonical import canonical_json_bytes, logical_array_hash, sha256_bytes
 
 Progress = Callable[[str, int, Any], None]
@@ -115,7 +119,16 @@ class NativeCapture:
         source_head: str,
         source_tree: str,
         progress: Progress,
+        binding: AppearanceExecutionBinding | None = None,
     ):
+        if type(binding) is not AppearanceExecutionBinding:
+            raise PermissionError("exact appearance execution binding required before SDK import")
+        require_native_binding(repository, binding)
+        if (source_head, source_tree) != (
+            binding.preparation.source_head,
+            binding.preparation.source_tree,
+        ):
+            raise PermissionError("capture source differs from runtime binding")
         import mujoco
 
         from epsbench.config import CorridorConfig, SingleOccluderConfig, parse_config
