@@ -293,3 +293,14 @@ replay after the cleanup attempt can recover a valid negative from the unchanged
 retained prefix despite nonzero exit or missing terminal, without retrying a poisoned
 writer. Damaged negative evidence is not claimed valid; replay/retention errors stay
 visible and prevent overall PASS. These are guarded source corrections only.
+
+
+Canonical asset source correction: the four fixed palette-slot PNGs under
+`src/epsbench/diagnostics/source_assets/paired_appearance_v1` preserve the original
+Windows encoded bytes and decoded uint8 RGB brick formula. Every visual plan
+validates the complete inventory, pinned encoded hashes, PNG RGB dimensions and
+pixel equality before construction. Missing, extra or corrupt assets fail closed;
+there is no serialization fallback. The original preparation asset root remains
+`8a049cc723851fd7b4c7253351ae042985bebcec3448e452ffd7b7099b46799e`.
+The failed historical image remains inadmissible. This source correction requires
+independent exact-head review and separate future preparation authorization.
