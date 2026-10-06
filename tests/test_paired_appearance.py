@@ -18,6 +18,8 @@ from epsbench.schema import ModalityPermissionSet
 from epsbench.utils.canonical import canonical_json_bytes, sha256_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
+NEAR = float(np.float32(0.01))
+FAR = 20.0
 
 
 def synthetic(appearance: str = p.APPEARANCES[0], index: int = 0) -> p.Frame:
@@ -29,7 +31,7 @@ def synthetic(appearance: str = p.APPEARANCES[0], index: int = 0) -> p.Frame:
     native[..., 0] = raw + 1
     native_depth = np.full(raw.shape, 0.5, dtype=np.float32)
     scene_map = ((1, 0, 5), (2, 1, 5), (3, 2, 5))
-    _, depth = p.derive_pair(native, native_depth, scene_map, 0.1, 10.0)
+    _, depth = p.derive_pair(native, native_depth, scene_map, NEAR, FAR)
     remap = p.mapping("single_occluder", (0, 1, 2))
     opaque = np.zeros_like(raw)
     for r, label, _ in remap:
@@ -67,8 +69,8 @@ def synthetic(appearance: str = p.APPEARANCES[0], index: int = 0) -> p.Frame:
             "modelview_matrix_float32": np.eye(4).reshape(-1).tolist(),
             "scene_flags": [0] * 10,
             "scene_map": [{"segid_plus_one": a, "objid": b, "objtype": c} for a, b, c in scene_map],
-            "near": 0.1,
-            "far": 10.0,
+            "near": NEAR,
+            "far": FAR,
             "segment_enabled": True,
             "idcolor_enabled": True,
             "context_runtime": {"synthetic": "no_native_evidence"},
@@ -110,35 +112,6 @@ def synthetic(appearance: str = p.APPEARANCES[0], index: int = 0) -> p.Frame:
         },
         "offFBO_r": {"present": False},
     }
-    stable["scene_cameras"] = [
-        {
-            "pos": [0.0, 0.0, 0.0],
-            "forward": [0.0, 0.0, -1.0],
-            "up": [0.0, 1.0, 0.0],
-            "frustum_near": 0.1,
-            "frustum_far": 10.0,
-            "frustum_top": 1.0,
-            "frustum_bottom": -1.0,
-            "frustum_center": 0.0,
-            "frustum_width": 2.0,
-            "orthographic": 0,
-        }
-        for _ in range(2)
-    ]
-    stable["scene_geometry"] = [
-        {
-            "type": 0,
-            "objid": i,
-            "objtype": 5,
-            "segid": i,
-            "category": 0,
-            "dataid": 0,
-            "pos": v[0],
-            "mat": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-            "size": v[1],
-        }
-        for i, v in enumerate(geometry.values())
-    ]
     stable["ngeom"] = 3
     stable["context_runtime"] = {
         "actual_backend": "osmesa",
@@ -161,10 +134,17 @@ def synthetic(appearance: str = p.APPEARANCES[0], index: int = 0) -> p.Frame:
         "gl_renderer": "SYNTHETIC_NO_NATIVE",
         "gl_version": "SYNTHETIC",
     }
+    stable["scene_geometry"] = p.expected_draw_geometry(compiled)
+    camera = {
+        "world_position": [(-0.35, 0.35)[index], -3.0, 1.25],
+        "rotation_row_major": rotation,
+        "fovy": 55.0,
+    }
+    stable["scene_cameras"] = p.expected_scene_cameras(camera, NEAR, FAR)
     rgb_state = copy.deepcopy(stable)
     rgb_state.update({"segment_enabled": False, "idcolor_enabled": False})
     rgb_state["scene_flags"][8:10] = [0, 0]
-    material = {"model": {"synthetic": True}, "scene_geoms": [], "scene_lights": []}
+    material = p.expected_material("single_occluder", appearance, compiled)
     evidence = {
         "schema": p.VERSION + ":endpoint",
         "source_head": "a" * 40,
@@ -182,8 +162,8 @@ def synthetic(appearance: str = p.APPEARANCES[0], index: int = 0) -> p.Frame:
         "runtime": stable["context_runtime"],
         "mapping": [list(v) for v in remap],
         "scene_map": [list(v) for v in scene_map],
-        "near": 0.1,
-        "far": 10.0,
+        "near": NEAR,
+        "far": FAR,
         "orientation": p.ORIENTATION,
         "paired_stable": stable,
         "rgb_stable": rgb_state,
@@ -271,7 +251,7 @@ def test_raw_zero_background_and_owned_serialization_inspection() -> None:
     native = frame.native_id.copy()
     native[0, 0] = 0
     raw, depth = p.derive_pair(
-        native, frame.native_depth, ((1, 0, 5), (2, 1, 5), (3, 2, 5)), 0.1, 10.0
+        native, frame.native_depth, ((1, 0, 5), (2, 1, 5), (3, 2, 5)), NEAR, FAR
     )
     assert raw[0, 0] == -1 and raw[0, 1] == 0 and depth.dtype == np.float32
     encoded = p.encode(frame)
@@ -379,13 +359,13 @@ def test_derivation_rejects_wrong_ids_depth_and_scene_map() -> None:
     native = frame.native_id.copy()
     native[0, 0] = [4, 0, 0]
     with pytest.raises(ValueError):
-        p.derive_pair(native, frame.native_depth, ((1, 0, 5),), 0.1, 10.0)
+        p.derive_pair(native, frame.native_depth, ((1, 0, 5),), NEAR, FAR)
     invalid = frame.native_depth.copy()
     invalid[0, 0] = np.nan
     with pytest.raises(ValueError):
-        p.derive_pair(frame.native_id, invalid, ((1, 0, 5), (2, 1, 5), (3, 2, 5)), 0.1, 10.0)
+        p.derive_pair(frame.native_id, invalid, ((1, 0, 5), (2, 1, 5), (3, 2, 5)), NEAR, FAR)
     with pytest.raises(ValueError):
-        p.derive_pair(frame.native_id, frame.native_depth, ((1, 0, 4),), 0.1, 10.0)
+        p.derive_pair(frame.native_id, frame.native_depth, ((1, 0, 4),), NEAR, FAR)
 
 
 def builder(family: str) -> Any:
@@ -486,7 +466,7 @@ def test_missing_matrix_is_inconclusive_and_observed_negative_preserved() -> Non
     native = texture.native_id.copy()
     native[0, 0] = [2, 0, 0]
     raw, depth = p.derive_pair(
-        native, texture.native_depth, ((1, 0, 5), (2, 1, 5), (3, 2, 5)), 0.1, 10.0
+        native, texture.native_depth, ((1, 0, 5), (2, 1, 5), (3, 2, 5)), NEAR, FAR
     )
     opaque = np.zeros_like(raw)
     for r, label, _ in p.mapping("single_occluder", (0, 1, 2)):
@@ -558,24 +538,21 @@ def synthetic_corridor(appearance: str, index: int) -> p.Frame:
     for key in ("rgb_stable", "paired_stable"):
         state = evidence[key]
         state["ngeom"] = 4
-        state["scene_geometry"] = [
-            {
-                "type": 0,
-                "objid": i,
-                "objtype": 5,
-                "segid": i,
-                "category": 0,
-                "dataid": 0,
-                "pos": v[0],
-                "mat": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-                "size": v[1],
-            }
-            for i, v in enumerate(geometry.values())
-        ]
         state["scene_map"] = [{"segid_plus_one": i + 1, "objid": i, "objtype": 5} for i in range(4)]
+    evidence["far"] = 30.0
+    _, depth = p.derive_pair(
+        native, template.native_depth, tuple(tuple(v) for v in evidence["scene_map"]), NEAR, 30.0
+    )
+    for key in ("rgb_stable", "paired_stable"):
+        evidence[key]["far"] = 30.0
+        evidence[key]["scene_geometry"] = p.expected_draw_geometry(compiled)
+        evidence[key]["scene_cameras"] = p.expected_scene_cameras(evidence["camera"], NEAR, 30.0)
+    evidence["rgb_material"] = p.expected_material("corridor", appearance, compiled)
+    evidence["paired_material"] = copy.deepcopy(evidence["rgb_material"])
     return replace(
         template,
         family="corridor",
+        depth=depth,
         native_id=native,
         raw=raw,
         opaque=opaque,
@@ -610,3 +587,128 @@ def test_complete_synthetic_matrix_and_repeat_failure() -> None:
     rgb[0, 0] = 1
     typed[key] = (replace(before, rgb=rgb), after)
     assert p.assess(typed)["status"] == "FAIL"
+
+
+@pytest.mark.parametrize("family", p.FAMILIES)
+@pytest.mark.parametrize("appearance", p.APPEARANCES)
+@pytest.mark.parametrize(
+    "corruption", ("geometry", "camera", "empty_material", "light", "texture", "material")
+)
+def test_common_draw_corruption_rejects(family: p.Family, appearance: str, corruption: str) -> None:
+    frame = (
+        synthetic(appearance) if family == "single_occluder" else synthetic_corridor(appearance, 0)
+    )
+    evidence = copy.deepcopy(frame.evidence)
+    if corruption in ("geometry", "camera"):
+        field = "scene_geometry" if corruption == "geometry" else "scene_cameras"
+        for key in ("rgb_stable", "paired_stable"):
+            evidence[key][field][0]["pos"][0] = 123.0
+    else:
+        for key in ("rgb_material", "paired_material"):
+            value = evidence[key]
+            if corruption == "empty_material":
+                evidence[key] = {"model": {}, "scene_geoms": [], "scene_lights": []}
+            elif corruption == "light":
+                value["scene_lights"][0]["diffuse"][0] = 0.9
+            elif corruption == "texture":
+                value["model"]["tex_data_sha256"] = "0" * 64
+            else:
+                value["scene_geoms"][0]["specular"] = 0.5
+    with pytest.raises(ValueError):
+        p.validate_frame(replace(frame, evidence=evidence))
+
+
+@pytest.mark.parametrize(
+    "field", ("projection_matrix_float32", "modelview_matrix_float32", "scene_flags")
+)
+def test_cross_appearance_actual_state_drift_rejects(field: str) -> None:
+    solid, texture = synthetic(), synthetic(p.APPEARANCES[1])
+    evidence = copy.deepcopy(texture.evidence)
+    for key in ("rgb_stable", "paired_stable"):
+        evidence[key][field][0 if field != "scene_flags" else 1] = (
+            2 if field != "scene_flags" else 1
+        )
+    changed = replace(texture, evidence=evidence)
+    p.validate_frame(changed)
+    with pytest.raises(ValueError, match="cross-appearance actual"):
+        p.comparison(solid, changed)
+
+
+@pytest.mark.parametrize("field", ("geom_rgba", "mat_texrepeat", "light_ambient", "cam_ipd"))
+def test_common_model_plan_corruption_rejects(field: str) -> None:
+    frame = synthetic(p.APPEARANCES[1])
+    evidence = copy.deepcopy(frame.evidence)
+    for key in ("rgb_material", "paired_material"):
+        value = evidence[key]["model"][field]
+        if isinstance(value[0], list):
+            value[0][0] = 0.123
+        else:
+            value[0] = 0.123
+    with pytest.raises(ValueError, match="closed actual material"):
+        p.validate_frame(replace(frame, evidence=evidence))
+
+
+def test_closed_material_native_extraction_without_sdk() -> None:
+    # Distinct explicit fake SDK arrays; only the read-only extraction helper is called.
+    from epsbench.diagnostics.paired_appearance_native import _material_state
+
+    frame = synthetic(p.APPEARANCES[1])
+    material = frame.evidence["paired_material"]
+    model = SimpleNamespace(
+        **{k: np.asarray(v) for k, v in material["model"].items() if k != "tex_data_sha256"}
+    )
+    model.tex_data = np.concatenate([p.brick(slot).reshape(-1) for slot in p.slots(frame.family)])
+    scene = SimpleNamespace(
+        ngeom=3,
+        nlight=1,
+        geoms=[SimpleNamespace(**g) for g in material["scene_geoms"]],
+        lights=[SimpleNamespace(**g) for g in material["scene_lights"]],
+    )
+    assert _material_state(model, SimpleNamespace(scene=scene)) == material
+    assert material["model"]["mat_texid"][0] == [-1, 0, -1, -1, -1, -1, -1, -1, -1, -1]
+    assert material["scene_geoms"][0]["rgba"] == [1.0] * 4
+    assert material["scene_lights"][0]["attenuation"] == [0.0] * 3
+    assert len(canonical_json_bytes(frame.evidence)) < 65536
+
+
+def test_invalid_fixed_evidence_is_inconclusive_in_full_matrix() -> None:
+    frames = {
+        context: tuple(
+            synthetic(app, i) if family == "single_occluder" else synthetic_corridor(app, i)
+            for i in range(2)
+        )
+        for context in p.contexts()
+        for family, app, _ in (context,)
+    }
+    key: tuple[p.Family, str, int] = ("single_occluder", p.APPEARANCES[1], 0)
+    frame, after = frames[key]
+    evidence = copy.deepcopy(frame.evidence)
+    for field in ("rgb_material", "paired_material"):
+        evidence[field] = {"model": {}, "scene_geoms": [], "scene_lights": []}
+    frames[key] = (replace(frame, evidence=evidence), after)
+    assert (
+        p.assess(cast(dict[tuple[p.Family, str, int], tuple[p.Frame, p.Frame]], frames))["status"]
+        == "INCONCLUSIVE"
+    )
+
+
+@pytest.mark.parametrize("family", p.FAMILIES)
+@pytest.mark.parametrize("appearance", p.APPEARANCES)
+def test_corrected_metadata_stays_inside_existing_caps(family: p.Family, appearance: str) -> None:
+    frame = (
+        synthetic(appearance) if family == "single_occluder" else synthetic_corridor(appearance, 0)
+    )
+    p.validate_frame(frame)
+    assert len(canonical_json_bytes(frame.evidence)) <= 65536
+    assert (
+        len(
+            canonical_json_bytes(
+                {"stable": frame.evidence["rgb_stable"], "material": frame.evidence["rgb_material"]}
+            )
+        )
+        <= 65536
+    )
+    for raw in p.visual_plan(family, appearance).asset_bytes.values():
+        image = Image.open(io.BytesIO(raw))
+        assert image.mode == "RGB" and image.size == (128, 128)
+        assert "srgb" not in image.info and "icc_profile" not in image.info

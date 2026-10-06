@@ -162,3 +162,39 @@ serialization/inspection, resource arithmetic, partial-byte forwarding and build
 compatibility. No native model compilation, rays or apparatus outcome screening runs. All four
 CI job predicates route this exact branch/base to the dedicated guarded selector. Checks provide
 source evidence only, not independent approval or apparatus qualification.
+
+Retained fixed-apparatus replay binds every actual draw primitive to its controlled
+compiled raw ID, type, static category, segmentation ordinal, primitive data ID and
+float32 position/rotation/size. It also binds the two actual GL cameras to the
+fixed camera world pose/rotation, default IPD 0.068, perspective fovy frustum and
+source clipping map multiplied by retained extent. No geometry outcome is used
+to select a tolerance. Across matched appearances, every `REGISTRATION_KEYS`
+field and all paired scene flags must agree, including the actual projection and
+modelview arrays; the existing within-endpoint RGB-versus-pair ID-flag exception
+remains unchanged.
+
+Material evidence is a closed exact model/scene representation: complete controlled
+geom/material inventory, RGBA and attachments, ten texture-role IDs (RGB role 1),
+repeat/uniform/emission/specular/shininess/reflectance, texture dimensions/type/
+colorspace/addresses and logical concatenated uint8 texture-data hash, fixed-camera
+IPD/projection/sensor size, and the single active directional non-shadow light.
+Scene material/light values must correspond to those model values and the fixed
+visual plan. Empty, missing or commonly corrupted RGB/pair content is invalid;
+full-matrix analysis returns INCONCLUSIVE for invalid fixed evidence. The brick
+PNG assets have no sRGB declaration and no requested flips; the compiled 2D
+textures retain the generated RGB bytes in declaration order. Solid appearance
+has no textures and binds the empty uint8 texture buffer hash.
+
+These representation rules follow pinned MuJoCo 3.12.0 source, without native
+qualification: [primitive, material, camera and light conversion](https://github.com/google-deepmind/mujoco/blob/3.12.0/src/engine/engine_vis_visualize.c),
+[default camera/material/texture values](https://github.com/google-deepmind/mujoco/blob/3.12.0/src/user/user_init.c),
+[PNG loading and light direction normalization](https://github.com/google-deepmind/mujoco/blob/3.12.0/src/user/user_objects.cc),
+[model array storage](https://github.com/google-deepmind/mujoco/blob/3.12.0/src/user/user_model.cc),
+[normalization arithmetic](https://github.com/google-deepmind/mujoco/blob/3.12.0/src/user/user_util.cc),
+and [enum roles](https://github.com/google-deepmind/mujoco/blob/3.12.0/include/mujoco/mjtype.h).
+Actual geometry/camera/scene arrays are compared with prescribed float32 casts;
+model light direction uses the source normalization before the scene float cast.
+Projection/modelview matrices are actual retained values compared across operations
+and appearances, not a new metric-accuracy claim. Additional metadata remains
+inside the existing 64 KiB scientific snapshot and 1 MiB endpoint caps; the
+unchanged retention calculation includes all six bounded metadata copies.

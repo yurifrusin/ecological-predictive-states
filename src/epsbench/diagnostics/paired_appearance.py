@@ -525,6 +525,7 @@ def validate_frame(frame: Frame) -> None:
     validate_registration(e)
     validate_compiled(frame.family, e["compiled"])
     validate_camera(frame.family, frame.index, e["camera"], e["action"])
+    validate_fixed_draw(frame.family, frame.appearance, e)
     raw_ids = tuple(e["compiled"]["raw_geom_ids"][name] for name in SURFACES[frame.family])
     remap = mapping(frame.family, raw_ids)
     if e["mapping"] != [list(v) for v in remap]:
@@ -649,6 +650,9 @@ def comparison(solid: Frame, texture: Frame) -> dict[str, Any]:
         )
     ):
         raise ValueError("matched structure/provenance differs")
+    for key in (*REGISTRATION_KEYS, "scene_flags"):
+        if solid.evidence["paired_stable"][key] != texture.evidence["paired_stable"][key]:
+            raise ValueError("cross-appearance actual renderer state differs")
     invariant = all(
         np.array_equal(getattr(solid, n), getattr(texture, n))
         for n in ("raw", "depth", "opaque", "controlled", "horizontal", "vertical")
@@ -930,6 +934,163 @@ def expected_geometry(family: Family) -> dict[str, tuple[list[float], list[float
         "corridor_right_surface": ([1.5, 3.0, 2.5], [0.05, 3.0, 2.5], "box"),
         "corridor_end_surface": ([0.0, 6.0, 2.5], [1.5, 0.05, 2.5], "box"),
     }
+
+
+def float32_values(value: Any) -> Any:
+    """Pinned SDK mjtNum-to-float conversion, with no fitted comparison tolerance."""
+    return np.asarray(value, dtype=np.float32).tolist()
+
+
+def expected_draw_geometry(compiled: dict[str, Any]) -> list[dict[str, Any]]:
+    ids = compiled["raw_geom_ids"]
+    if sorted(ids.values()) != list(range(len(ids))):
+        raise ValueError("complete fixed raw geom inventory")
+    result = []
+    for name in sorted(ids, key=ids.__getitem__):
+        raw = ids[name]
+        plane = compiled["raw_geom_types"][name] == "plane"
+        result.append(
+            {
+                "type": 0 if plane else 6,
+                "objid": raw,
+                "objtype": 5,
+                "segid": raw,
+                "category": 1,
+                "dataid": 0 if plane else -1,
+                "pos": float32_values(compiled["raw_geom_world_positions"][name]),
+                "mat": float32_values(compiled["raw_geom_world_rotations_row_major"][name]),
+                "size": float32_values(compiled["raw_geom_compiled_sizes"][name]),
+            }
+        )
+    return result
+
+
+def expected_scene_cameras(camera: dict[str, Any], near: float, far: float) -> list[dict[str, Any]]:
+    # 3.12.0 user_init.c default fixed-camera IPD; visualize.c cameraFrame/updateCamera.
+    import math
+
+    rotation = np.asarray(camera["rotation_row_major"]).reshape(3, 3)
+    top = float(np.float32(float(np.float32(near)) * math.tan(camera["fovy"] * math.pi / 360)))
+    return [
+        {
+            "pos": float32_values(
+                np.asarray(camera["world_position"]) + sign * 0.034 * rotation[:, 0]
+            ),
+            "forward": float32_values(-rotation[:, 2]),
+            "up": float32_values(rotation[:, 1]),
+            "frustum_near": float(np.float32(near)),
+            "frustum_far": float(np.float32(far)),
+            "frustum_top": top,
+            "frustum_bottom": -top,
+            "frustum_center": 0.0,
+            "frustum_width": 0.0,
+            "orthographic": 0,
+        }
+        for sign in (-1, 1)
+    ]
+
+
+def expected_material(family: Family, appearance: str, compiled: dict[str, Any]) -> dict[str, Any]:
+    """Closed 3.12 model/scene representation of this exact source plan; no native work."""
+    import math
+
+    plan = visual_plan(family, appearance)
+    names = SURFACES[family]
+    ids = compiled["raw_geom_ids"]
+    count = len(names)
+    textured = appearance == APPEARANCES[1]
+    rgba = {n: float32_values([float(v) for v in plan.rgba_by_surface[n].split()]) for n in names}
+    direction = FIXED["visual"]["directions"][FAMILIES.index(family)]
+    norm = math.sqrt(sum(v * v for v in direction))
+    direction = [v / norm for v in direction]
+    position = FIXED["visual"]["positions"][FAMILIES.index(family)]
+    role_ids = [[-1, i if textured else -1, *([-1] * 8)] for i in range(count)]
+    texture_data = (
+        np.concatenate([brick(slot).reshape(-1) for slot in slots(family)])
+        if textured
+        else np.empty(0, dtype=np.uint8)
+    )
+    model = {
+        "geom_rgba": [rgba[n] for n in sorted(ids, key=ids.__getitem__)],
+        "geom_matid": [names.index(n) for n in sorted(ids, key=ids.__getitem__)],
+        "mat_rgba": [[1.0] * 4 for _ in names],
+        "mat_texid": role_ids,
+        "mat_texrepeat": [[1.0, 1.0] for _ in names],
+        "mat_texuniform": [False] * count,
+        **{
+            k: [0.0] * count
+            for k in ("mat_emission", "mat_specular", "mat_shininess", "mat_reflectance")
+        },
+        "tex_type": [0] * count if textured else [],
+        "tex_colorspace": [1] * count if textured else [],
+        "tex_height": [128] * count if textured else [],
+        "tex_width": [128] * count if textured else [],
+        "tex_nchannel": [3] * count if textured else [],
+        "tex_adr": [i * 128 * 128 * 3 for i in range(count)] if textured else [],
+        "tex_data_sha256": logical_array_hash(texture_data),
+        "light_pos": [position],
+        "light_dir": [direction],
+        "light_ambient": [float32_values([0.1] * 3)],
+        "light_diffuse": [float32_values([0.7] * 3)],
+        "light_specular": [[0.0] * 3],
+        "light_castshadow": [False],
+        "light_type": [1],
+        "light_active": [True],
+        "light_texid": [-1],
+        "cam_ipd": [0.068],
+        "cam_projection": [0],
+        "cam_sensorsize": [[0.0, 0.0]],
+    }
+    geoms = [
+        {
+            "objid": ids[n],
+            "matid": i,
+            "texid": i if textured else -1,
+            "texuniform": 0,
+            "texcoord": 0,
+            "rgba": rgba[n],
+            "texrepeat": [1.0, 1.0],
+            "emission": 0.0,
+            "specular": 0.0,
+            "shininess": 0.0,
+            "reflectance": 0.0,
+        }
+        for i, n in enumerate(names)
+    ]
+    geoms.sort(key=lambda g: g["objid"])
+    lights = [
+        {
+            "id": 0,
+            "type": 1,
+            "texid": -1,
+            "headlight": 0,
+            "castshadow": 0,
+            "pos": float32_values(position),
+            "dir": float32_values(direction),
+            "ambient": float32_values([0.1] * 3),
+            "diffuse": float32_values([0.7] * 3),
+            "specular": [0.0] * 3,
+            "attenuation": [0.0] * 3,
+        }
+    ]
+    return {"model": model, "scene_geoms": geoms, "scene_lights": lights}
+
+
+def validate_fixed_draw(family: Family, appearance: str, evidence: dict[str, Any]) -> None:
+    state = evidence["paired_stable"]
+    near = float(np.float32(FIXED["visual"]["znear"])) * state["extent"]
+    far = float(np.float32(FIXED["visual"]["zfar"][FAMILIES.index(family)])) * state["extent"]
+    if (evidence["near"], evidence["far"]) != (near, far):
+        raise ValueError("actual clipping differs from fixed source map/extent")
+    if state["scene_geometry"] != expected_draw_geometry(evidence["compiled"]):
+        raise ValueError("actual draw geometry differs from fixed compiled inventory")
+    if state["scene_cameras"] != expected_scene_cameras(
+        evidence["camera"], evidence["near"], evidence["far"]
+    ):
+        raise ValueError("actual draw camera/frustum differs from fixed camera")
+    expected = expected_material(family, appearance, evidence["compiled"])
+    if canonical_json_bytes(evidence["paired_material"]) != canonical_json_bytes(expected):
+        raise ValueError("closed actual material/light/texture differs from fixed plan")
 
 
 def validate_compiled(family: Family, compiled: dict[str, Any]) -> None:
