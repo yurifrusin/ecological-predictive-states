@@ -566,6 +566,7 @@ def run_matrix(
     """Pure control seam: source tests inject arbitrary fixtures; native entry binds its factory."""
     frames: dict[tuple[int, int], p.Frame] = {}
     reason: dict[str, Any] = {"status": "INCONCLUSIVE", "reason": "incomplete fixed matrix"}
+    operational_error: str | None = None
     try:
         for context, _ in enumerate(p.contexts()):
             if time.monotonic() >= deadline:
@@ -606,7 +607,9 @@ def run_matrix(
         if time.monotonic() >= deadline:
             raise TimeoutError("work watchdog exhausted before result")
     except Exception as error:
-        reason = {"status": "INCONCLUSIVE", "reason": str(error)[:1024]}
+        operational_error = str(error)[:1024]
+        if reason["status"] != "FAIL":
+            reason = {"status": "INCONCLUSIVE", "reason": operational_error}
     result = {
         **reason,
         "binding_root": sink.binding.root,
@@ -615,11 +618,21 @@ def run_matrix(
         "unattempted_slots": 16 - sink.counts["endpoint_attempt"],
         "counts": sink.counts.copy(),
         "cleanup_pending": True,
+        "apparatus_status": "FAIL" if reason["status"] == "FAIL" else "INCONCLUSIVE",
+        "scientific_result": reason.copy(),
+        "operational_status": "INCONCLUSIVE" if operational_error else "COMPLETE",
     }
+    if operational_error:
+        result.update(status="INCONCLUSIVE", operational_error=operational_error)
     try:
         sink.terminal(result)
     except Exception as error:
-        result = {**result, "status": "INCONCLUSIVE", "retention_error": str(error)[:1024]}
+        result = {
+            **result,
+            "status": "INCONCLUSIVE",
+            "operational_status": "INCONCLUSIVE",
+            "retention_error": str(error)[:1024],
+        }
     return result
 
 

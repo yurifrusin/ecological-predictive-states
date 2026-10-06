@@ -281,3 +281,15 @@ Host apparatus_status and operational_status are separate. An immutable early
 valid FAIL remains in apparatus_status and the original capture/comparison
 terminal even if cleanup/control makes aggregate status INCONCLUSIVE. Such an
 operational failure prevents overall PASS, without erasing negative evidence.
+
+
+The bounded correction keeps the original caps: compact state polling every 0.5 seconds
+uses only running/exit/OOM fields. Commands reserve 8 KiB of the existing aggregate
+output allowance for owned cleanup; cleanup inspection selects only identity, name,
+labels and mounts, and leaves 128 bytes for exact-ID removal output. Work overflow
+cannot consume that reserve. Driver scientific_result/apparatus_status preserve a
+valid negative independently of close/deadline/terminal operational faults. Host
+replay after the cleanup attempt can recover a valid negative from the unchanged
+retained prefix despite nonzero exit or missing terminal, without retrying a poisoned
+writer. Damaged negative evidence is not claimed valid; replay/retention errors stay
+visible and prevent overall PASS. These are guarded source corrections only.

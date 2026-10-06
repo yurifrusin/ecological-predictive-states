@@ -42,6 +42,11 @@ from epsbench.diagnostics.paired_appearance_runtime import (
 from epsbench.utils.canonical import canonical_json_bytes
 
 LABEL = "eps.paired-appearance.owner"
+POLL = "{{.State.Running}} {{.State.ExitCode}} {{.State.OOMKilled}}"
+CLEANUP = (
+    '{"Id":{{json .Id}},"Name":{{json .Name}},'
+    '"Config":{"Labels":{{json .Config.Labels}}},"Mounts":{{json .Mounts}}}'
+)
 
 
 class Commands:
@@ -49,12 +54,18 @@ class Commands:
 
     def __init__(self, docker: str, cap: int):
         self.docker, self.cap, self.used = docker, cap, 0
+        self.cleanup_reserve = min(8192, cap // 2)
 
-    def command(self, args: list[str], deadline: float) -> str:
+    def command(self, args: list[str], deadline: float, *, cleanup: bool = False) -> str:
         command_deadline = min(deadline, time.monotonic() + 15.0)
         remaining = command_deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("external command allowance exhausted")
+        limit = self.cap if cleanup else self.cap - self.cleanup_reserve
+        if cleanup and args[0] != "rm":
+            limit -= 128  # Exact-ID removal output remains admitted after reinspection.
+        if self.used >= limit:
+            raise ValueError("command output allowance exhausted before launch")
         process = subprocess.Popen(
             [self.docker, *args],
             stdout=subprocess.PIPE,
@@ -66,7 +77,7 @@ class Commands:
 
         def read(pipe: BinaryIO) -> None:
             while chunk := pipe.read(4096):
-                room = min(16384 - len(data), self.cap - self.used - len(data))
+                room = min(16384 - len(data), limit - self.used - len(data))
                 data.extend(chunk[: max(0, room)])
                 if len(chunk) > room:
                     overflow.set()
@@ -295,11 +306,21 @@ def host_run(
         inspect_confinement(info, binding, output, case, work_deadline_unix)
         commands.command(["start", identity], work_deadline)
         while time.monotonic() < work_deadline:
-            state = json.loads(
-                commands.command(
-                    ["inspect", "--format", "{{json .State}}", identity], work_deadline
-                )
-            )
+            fields = commands.command(
+                ["inspect", "--format", POLL, identity], work_deadline
+            ).split()
+            if (
+                len(fields) != 3
+                or fields[0] not in ("true", "false")
+                or fields[2] not in ("true", "false")
+                or re.fullmatch(r"-?[0-9]+", fields[1]) is None
+            ):
+                raise ValueError("closed compact container state")
+            state = {
+                "Running": fields[0] == "true",
+                "ExitCode": int(fields[1]),
+                "OOMKilled": fields[2] == "true",
+            }
             if state["Running"] is False:
                 completed = (
                     type(state["ExitCode"]) is int
@@ -308,7 +329,7 @@ def host_run(
                 )
                 result["exit_state"] = state
                 break
-            time.sleep(min(0.1, max(0, work_deadline - time.monotonic())))
+            time.sleep(min(0.5, max(0, work_deadline - time.monotonic())))
         else:
             raise TimeoutError("work watchdog expired")
         if case:
@@ -325,42 +346,6 @@ def host_run(
             elif case in ("interrupted", "overbudget"):
                 valid &= not completed and not (tiny / "overflow.bin").exists()
             result["status"] = "DUMMY_OBSERVED" if valid else "INCONCLUSIVE"
-        else:
-            retained = replay(output, binding)
-            terminal = output / "terminal.json"
-            if terminal.stat().st_size > 16384:
-                raise ValueError("terminal result cap")
-            report = p.strict_json(terminal.read_bytes())
-            if report["binding_root"] != binding.root or retained["status"] == "INCONCLUSIVE":
-                raise ValueError("invalid actual retained prefix")
-            result["retained_result"] = report
-            if report["counts"] != retained["counts"]:
-                raise ValueError("terminal callback counts differ from retained prefix")
-            if completed and report["status"] == "FAIL":
-                frames = retained["frames"]
-                failures = [e_ready(frames, c, i) for c, i in sorted(frames)]
-                if any(v["status"] == "FAIL" for v in failures):
-                    result["status"] = "FAIL"
-                    result["apparatus_status"] = "FAIL"
-                else:
-                    raise ValueError("terminal FAIL has no valid negative criterion")
-            elif (
-                completed
-                and report["status"] == "CAPTURE_COMPLETE"
-                and retained["status"] == "COMPLETE"
-            ):
-                frames = retained["frames"]
-                if (
-                    p.assess(
-                        {
-                            key: (frames[(i, 0)], frames[(i, 1)])
-                            for i, key in enumerate(p.contexts())
-                        }
-                    )["status"]
-                    == "PASS"
-                ):
-                    result["status"] = "PASS"
-                    result["apparatus_status"] = "PASS"
     except Exception as error:
         result["reason"] = str(error)[:1024]
         if case == "deadline" and isinstance(error, TimeoutError):
@@ -377,7 +362,9 @@ def host_run(
         cleanup_deadline = min(final_deadline - 5, time.monotonic() + 20)
         try:
             info = json.loads(
-                commands.command(["inspect", "--format", "{{json .}}", identity], cleanup_deadline)
+                commands.command(
+                    ["inspect", "--format", CLEANUP, identity], cleanup_deadline, cleanup=True
+                )
             )
             owned(info, binding, identity if re.fullmatch(r"[0-9a-f]{64}", identity) else None)
             actual_mounts = info.get("Mounts", [])
@@ -392,14 +379,76 @@ def host_run(
                 or actual_mounts[0].get("Destination") != "/output"
             ):
                 raise PermissionError("owned output differs; delete denied")
-            commands.command(["rm", "--force", info["Id"]], cleanup_deadline)
+            commands.command(["rm", "--force", info["Id"]], cleanup_deadline, cleanup=True)
             cleaned = True
         except Exception as error:
             result["cleanup_error"] = str(error)[:1024]
+        if not case:
+            # Recover only independently replayable relations, after owned termination.
+            # A missing/poisoned terminal writer is never retried.
+            try:
+                retained = replay(output, binding)
+                frames = retained["frames"]
+                negative = next(
+                    (
+                        v
+                        for c, i in sorted(frames)
+                        if (v := e_ready(frames, c, i))["status"] == "FAIL"
+                    ),
+                    None,
+                )
+                result["replay_status"] = retained["status"]
+                if negative is not None:
+                    result["apparatus_status"] = "FAIL"
+                    result["scientific_result"] = negative
+                if retained["status"] == "INCONCLUSIVE":
+                    result["replay_error"] = retained.get("reason", "invalid retained prefix")
+                terminal = output / "terminal.json"
+                safe_path(terminal)
+                if terminal.stat().st_size > 16384:
+                    raise ValueError("terminal result cap")
+                report = p.strict_json(terminal.read_bytes())
+                if report["binding_root"] != binding.root or report["counts"] != retained["counts"]:
+                    raise ValueError("terminal binding/counts differ")
+                result["retained_result"] = report
+                if (
+                    completed
+                    and retained["status"] != "INCONCLUSIVE"
+                    and report.get("operational_status", "COMPLETE") == "COMPLETE"
+                    and "reason" not in result
+                ):
+                    if negative is not None:
+                        result["status"] = "FAIL"
+                    elif (
+                        report["status"] == "CAPTURE_COMPLETE"
+                        and retained["status"] == "COMPLETE"
+                        and p.assess(
+                            {
+                                key: (frames[(i, 0)], frames[(i, 1)])
+                                for i, key in enumerate(p.contexts())
+                            }
+                        )["status"]
+                        == "PASS"
+                    ):
+                        result["status"] = "PASS"
+                        result["apparatus_status"] = "PASS"
+            except Exception as error:
+                result["retention_error"] = str(error)[:1024]
+                result["status"] = "INCONCLUSIVE"
         if not cleaned:
             result["status"] = "INCONCLUSIVE"
         result["cleaned"] = cleaned
-        result["operational_status"] = "COMPLETE" if cleaned and completed else "INCONCLUSIVE"
+        result["operational_status"] = (
+            "COMPLETE"
+            if cleaned
+            and completed
+            and "reason" not in result
+            and "retention_error" not in result
+            and "replay_error" not in result
+            and result.get("retained_result", {}).get("operational_status", "COMPLETE")
+            == "COMPLETE"
+            else "INCONCLUSIVE"
+        )
         result["elapsed_seconds"] = time.monotonic() - started
         result["overrun"] = result["elapsed_seconds"] > allowance
         if result["overrun"]:

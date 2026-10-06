@@ -439,9 +439,14 @@ def test_prestart_independent_confinement_denials(tmp_path: Path, mutation: str)
 
 
 @pytest.mark.parametrize("cleanup_failure,negative", ((False, False), (True, False), (True, True)))
+@pytest.mark.parametrize(
+    "capture_fault", (None, "close", "terminal", "control", "nonzero", "corrupt")
+)
 def test_owned_host_cleanup_and_provisional_result(
-    tmp_path: Path, cleanup_failure: bool, negative: bool
+    tmp_path: Path, cleanup_failure: bool, negative: bool, capture_fault: str | None
 ) -> None:
+    if capture_fault is not None and not negative:
+        pytest.skip("fault regression requires an established negative")
     b = binding()
     group = tmp_path / "group"
     opened: list[int] = []
@@ -454,7 +459,7 @@ def test_owned_host_cleanup_and_provisional_result(
             self.info: dict[str, Any] = {}
             self.calls: list[tuple[list[str], float]] = []
 
-        def command(self, args: list[str], deadline: float) -> str:
+        def command(self, args: list[str], deadline: float, *, cleanup: bool = False) -> str:
             self.calls.append((args, deadline))
             assert deadline > time.monotonic()
             if args[0] == "create":
@@ -475,17 +480,36 @@ def test_owned_host_cleanup_and_provisional_result(
                         return replace(frame, rgb=np.full_like(frame.rgb, 201))
                     return frame
 
+                class FaultCapture(FakeCapture):
+                    def close(self) -> None:
+                        super().close()
+                        if self.context == 1 and capture_fault == "close":
+                            raise OSError("close after negative")
+
+                if capture_fault == "terminal":
+
+                    def failed_terminal(report: dict[str, Any]) -> None:
+                        sink.poisoned = True
+                        raise OSError("terminal fault after negative")
+
+                    sink.terminal = failed_terminal  # type: ignore[method-assign, assignment]
                 e.run_matrix(
                     sink,
-                    lambda c, q: FakeCapture(c, q, opened, closed, change),
+                    lambda c, q: FaultCapture(c, q, opened, closed, change),
                     time.monotonic() + 60,
                 )
+                if capture_fault == "corrupt":
+                    (sink.root / "endpoints/e02/rgb.bin").write_bytes(b"damaged")
                 return ""
             if args[0] == "inspect":
-                if "{{json .State}}" in args:
-                    return canonical_json_bytes(
-                        {"Running": False, "ExitCode": 0, "OOMKilled": False}
-                    ).decode()
+                if HOST["POLL"] in args:
+                    if capture_fault == "control":
+                        raise TimeoutError("control after retained negative")
+                    return (
+                        "false 2 false"
+                        if capture_fault in ("nonzero", "close", "terminal")
+                        else "false 0 false"
+                    )
                 return canonical_json_bytes(self.info).decode()
             if args[0] == "rm":
                 assert args == ["rm", "--force", "d" * 64]
@@ -496,10 +520,31 @@ def test_owned_host_cleanup_and_provisional_result(
 
     commands = FakeCommands()
     result = HOST["host_run"](b, decision(b), group, commands)
-    assert result["retained_result"]["status"] == ("FAIL" if negative else "CAPTURE_COMPLETE")
-    assert result["apparatus_status"] == ("FAIL" if negative else "PASS")
-    assert result["operational_status"] == ("INCONCLUSIVE" if cleanup_failure else "COMPLETE")
-    assert result["status"] == ("INCONCLUSIVE" if cleanup_failure else "PASS")
+    if capture_fault == "corrupt":
+        assert result["apparatus_status"] == "INCONCLUSIVE"
+        assert result["replay_status"] == "INCONCLUSIVE"
+    else:
+        assert result["apparatus_status"] == ("FAIL" if negative else "PASS")
+    if negative and capture_fault != "corrupt":
+        assert result["scientific_result"] == {
+            "status": "FAIL",
+            "reason": "exact regeneration mismatch",
+        }
+    if capture_fault == "terminal":
+        assert "retention_error" in result
+    elif capture_fault != "corrupt":
+        assert result["retained_result"]["status"] == (
+            "INCONCLUSIVE"
+            if capture_fault == "close"
+            else "FAIL"
+            if negative
+            else "CAPTURE_COMPLETE"
+        )
+    operational_failure = cleanup_failure or capture_fault is not None
+    assert result["operational_status"] == ("INCONCLUSIVE" if operational_failure else "COMPLETE")
+    assert result["status"] == (
+        "INCONCLUSIVE" if operational_failure else "FAIL" if negative else "PASS"
+    )
     assert result["cleaned"] is not cleanup_failure
     assert opened == closed == list(range(2 if negative else 8))
     work_deadlines = {
@@ -609,3 +654,127 @@ def test_closed_component_names_and_metadata_root(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="metadata mapping"):
         sink.progress("rgb_state_complete", 0, b"1")
     assert sink.poisoned
+
+
+@pytest.mark.parametrize("fault", ("close", "deadline", "terminal"))
+def test_driver_negative_survives_later_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    sink = sink_at(tmp_path)
+    opened: list[int] = []
+    closed: list[int] = []
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    class FaultCapture(FakeCapture):
+        def close(self) -> None:
+            super().close()
+            if self.context == 1:
+                if fault == "close":
+                    raise OSError("late close failure")
+                if fault == "deadline":
+                    clock[0] = 61.0
+
+    def change(c: int, i: int, frame: p.Frame) -> p.Frame:
+        return replace(frame, rgb=np.full_like(frame.rgb, 201)) if (c, i) == (1, 0) else frame
+
+    attempts: list[dict[str, Any]] = []
+    if fault == "terminal":
+
+        def fail_terminal(report: dict[str, Any]) -> None:
+            attempts.append(report)
+            sink.poisoned = True
+            raise OSError("late terminal failure")
+
+        monkeypatch.setattr(sink, "terminal", fail_terminal)
+    result = e.run_matrix(sink, lambda c, q: FaultCapture(c, q, opened, closed, change), 60)
+    assert result["status"] == result["operational_status"] == "INCONCLUSIVE"
+    assert result["apparatus_status"] == "FAIL"
+    assert result["scientific_result"] == {
+        "status": "FAIL",
+        "reason": "exact regeneration mismatch",
+    }
+    assert result["counts"]["endpoint_attempt"] == 3
+    assert opened == closed == [0, 1]
+    retained = e.replay(sink.root, sink.binding, native=False)
+    assert e.ready(retained["frames"], 1, 0)["status"] == "FAIL"
+    if fault == "terminal":
+        assert sink.poisoned and len(attempts) == 1
+        assert not (sink.root / "terminal.json").exists()
+
+
+@pytest.mark.parametrize("overflow", (False, True))
+def test_real_command_accounting_reserves_owned_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overflow: bool
+) -> None:
+    import io
+
+    b = binding(r.DUMMY)
+    root = tmp_path / "group"
+    output = root / "control/deadline" / b.output_id
+    clock = [0.0]
+    monkeypatch.setattr(HOST["time"], "monotonic", lambda: clock[0])
+    monkeypatch.setattr(HOST["time"], "time", lambda: 1000.0 + clock[0])
+    monkeypatch.setattr(
+        HOST["time"], "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds)
+    )
+    info: dict[str, Any] = {}
+    calls: list[list[str]] = []
+
+    class Process:
+        def __init__(self, args: list[str], **kwargs: Any):
+            nonlocal info
+            args = args[1:]
+            calls.append(args)
+            if args[0] == "create":
+                info = container_info(b, output, 1035.0)
+                info["Config"]["Cmd"].extend(("--case", "deadline"))
+                data = str(info["Id"]).encode()
+            elif args[0] == "start":
+                tiny = output / "dummy-deadline"
+                tiny.mkdir()
+                (tiny / "rgb.bin").write_bytes(b"tiny-completed-rgb")
+                (tiny / "pair.bin").write_bytes(b"tiny-completed-id-depth")
+                data = b"x" * 9000 if overflow else b""
+            elif args[0] == "inspect":
+                if HOST["POLL"] in args:
+                    data = b"true 0 false\n"
+                elif HOST["CLEANUP"] in args:
+                    data = canonical_json_bytes(
+                        {
+                            "Id": info["Id"],
+                            "Name": info["Name"],
+                            "Config": {"Labels": info["Config"]["Labels"]},
+                            "Mounts": info["Mounts"],
+                        }
+                    )
+                else:
+                    data = canonical_json_bytes(info)
+            elif args[0] == "rm":
+                data = str(info["Id"]).encode()
+            else:
+                raise AssertionError(args)
+            self.stdout = io.BytesIO(data)
+            self.returncode = 0
+
+        def kill(self) -> None:
+            self.returncode = -1
+
+        def wait(self, timeout: float) -> int:
+            return self.returncode
+
+    monkeypatch.setattr(HOST["subprocess"], "Popen", Process)
+    commands = HOST["Commands"]("never-executed", 16384)
+    result = HOST["host_run"](b, decision(b), root, commands, "deadline")
+    assert result["cleaned"] is True
+    assert calls[-1] == ["rm", "--force", "d" * 64]
+    assert commands.used <= 16384
+    assert commands.cleanup_reserve == 8192
+    if overflow:
+        assert "overflow" in result["reason"]
+        assert result["status"] == "INCONCLUSIVE"
+    else:
+        assert clock[0] == 35.0
+        assert sum(HOST["POLL"] in v for v in calls) == 70
+        assert result["status"] == "DUMMY_OBSERVED"
+        assert result["reason"] == "work watchdog expired"
