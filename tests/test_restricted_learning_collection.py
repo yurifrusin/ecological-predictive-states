@@ -2,6 +2,7 @@
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -179,6 +180,34 @@ def test_failed_qualification_retains_orphans_no_resume(tmp_path: Path) -> None:
 def test_explicit_decision_shape() -> None:
     with pytest.raises(ValueError):
         Decision("human-readable-claim", "b" * 40, "c" * 40, "d" * 64)
+
+
+@pytest.mark.parametrize("after_seal", [False, True])
+def test_terminal_pending_matches_retained_phase(tmp_path: Path, after_seal: bool) -> None:
+    class PhaseBackend(FakeBackend):
+        def validate(self, lock: bytes, seeds: tuple[bytes, ...], root: Path) -> Any:
+            assert lock == LOCK
+            return SimpleNamespace(
+                decision_roster=("symbolic/decision",), forecast_roster=("symbolic/forecast",)
+            )
+
+        def inspect(self, root: Path) -> dict[str, Any]:
+            raise ValueError("symbolic post-SealA inspection failure")
+
+    attempt = tmp_path / "private"
+    backend = PhaseBackend()
+    _prepare(attempt, tmp_path, decision(), backend, symbolic_bytes)
+    backend.fail_qualification = not after_seal
+    with pytest.raises(ValueError, match="symbolic"):
+        _qualify(attempt, tmp_path, decision(digest(LOCK)), backend)
+    failure = _json((attempt / "dataset" / "failure.json").read_bytes())
+    assert failure["phase"] == ("FORECAST" if after_seal else "QUALIFICATION")
+    assert failure["pending"] == (["symbolic/forecast"] if after_seal else ["symbolic/decision"])
+    events = sorted((attempt / "dataset").glob("event-*.json"))
+    assert _json(events[-1].read_bytes())["kind"] == "FAILURE"
+    with pytest.raises(FileExistsError):
+        _qualify(attempt, tmp_path, decision(digest(LOCK)), backend)
+    assert backend.calls == 1
 
 
 def test_external_receipt_contract_static_without_producer_import(tmp_path: Path) -> None:

@@ -137,12 +137,21 @@ class Archive:
         max_bytes: int = 1024**3,
         seconds: float = 3600.0,
         clock: Callable[[], float] = time.monotonic,
+        failure_reserve: int = 32768,
     ) -> None:
-        if root.exists() or type(max_bytes) is not int or max_bytes < 65536 or seconds <= 0:
+        if (
+            root.exists()
+            or type(max_bytes) is not int
+            or max_bytes < 65536
+            or seconds <= 0
+            or type(failure_reserve) is not int
+            or not 32768 <= failure_reserve < max_bytes
+        ):
             raise ValueError("fresh bounded private archive required")
         reject_reparse(root)
         root.mkdir(parents=True)
         self.root, self.max_bytes, self.seconds, self.clock = root, max_bytes, seconds, clock
+        self.failure_reserve = failure_reserve
         self.start, self.used, self.failed = clock(), 0, False
         self.events: list[dict[str, Any]] = []
 
@@ -155,7 +164,7 @@ class Archive:
             self.check()
         if re.fullmatch(r"[a-zA-Z0-9_-]+[.](json|bin)", name) is None:
             raise ValueError("flat closed retained path required")
-        cap = self.max_bytes if failure else self.max_bytes - 32768
+        cap = self.max_bytes if failure else self.max_bytes - self.failure_reserve
         if type(data) is not bytes or len(data) > 4 * 1024 * 1024 or self.used + len(data) > cap:
             raise RuntimeError("payload/retained byte bound")
         path = self.root / name
@@ -739,6 +748,15 @@ class Lifecycle:
     def __init__(self, lock: MembershipLock | SyntheticLock, archive: Archive) -> None:
         if type(lock) not in (MembershipLock, SyntheticLock):
             raise ValueError("typed precollection membership required")
+        # Largest closed pending roster plus fixed failure fields and one event.
+        required_reserve = max(
+            32768,
+            len(canonical_json_bytes(list(lock.forecast_roster))) + 4096,
+            len(canonical_json_bytes(list(lock.decision_roster))) + 4096,
+        )
+        if archive.used + required_reserve >= archive.max_bytes:
+            raise ValueError("complete bounded terminal failure reserve required before work")
+        archive.failure_reserve = max(archive.failure_reserve, required_reserve)
         self.lock, self.archive = lock, archive
         self.started = False
         self.inputs: dict[str, InputEvidence] = {}

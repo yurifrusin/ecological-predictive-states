@@ -498,3 +498,20 @@ def test_er54_0002_phase_paths_and_terminal_failure(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError):
         failed.archive.event("REPORT", "late.json", b"{}")
     assert life.seal_b is not None
+
+
+def test_large_symbolic_pending_failure_reserve_at_payload_limit(tmp_path: Path) -> None:
+    # Symbolic strings test finite serialization bounds, never candidate membership.
+    pending = tuple("SYMBOLIC_SOURCE_ONLY/" + str(i) + "x" * 120 for i in range(13824))
+    reserve = len(canonical_json_bytes(list(pending))) + 4096
+    archive = Archive(tmp_path / "reserve", max_bytes=4 * 1024**2, failure_reserve=reserve)
+    archive.event("MEMBERSHIP_LOCK", "membership-lock.json", SyntheticLock().canonical_bytes())
+    available = archive.max_bytes - archive.failure_reserve - archive.used
+    archive.write("bounded-symbolic.bin", b"x" * available)
+    with pytest.raises(RuntimeError, match="bound"):
+        archive.write("over-limit.bin", b"x")
+    archive.fail(pending, RuntimeError("bounded symbolic failure"))
+    assert archive.used <= archive.max_bytes
+    assert archive.events[-1]["kind"] == "FAILURE"
+    tiny = Lifecycle(SyntheticLock(), Archive(tmp_path / "tiny", max_bytes=65536))
+    assert tiny.archive.failure_reserve == 32768

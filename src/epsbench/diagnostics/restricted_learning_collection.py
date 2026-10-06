@@ -362,7 +362,12 @@ def _qualify(
         if journal is not None:
             if not journal.failed and journal.events and hasattr(lock, "decision_roster"):
                 try:
-                    journal.fail(lock.decision_roster, error)
+                    pending = (
+                        lock.forecast_roster
+                        if any(event["kind"] == "SEAL_A" for event in journal.events)
+                        else lock.decision_roster
+                    )
+                    journal.fail(pending, error)
                 except Exception as preservation_error:
                     error.add_note(
                         "pending-coverage preservation error: " + type(preservation_error).__name__
