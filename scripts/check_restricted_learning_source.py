@@ -53,6 +53,7 @@ def loaded() -> None:
 
 
 def main() -> int:
+    global FORBIDDEN
     if sys.argv[1:]:
         raise ValueError("no selectors or collection allowed")
     loaded()
@@ -71,6 +72,17 @@ def main() -> int:
         else:
             raise RuntimeError("guard failed: " + name)
     import pytest
+
+    reference = "epsbench.diagnostics.occupancy_reference"
+    original = FORBIDDEN
+    FORBIDDEN = (*original, reference)
+    result = pytest.main(
+        ["--noconftest", "-o", "addopts=", "-q", "tests/test_restricted_exact_raster.py"]
+    )
+    loaded()
+    if result:
+        return int(result)
+    FORBIDDEN = original
 
     result = pytest.main(
         [

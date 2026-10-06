@@ -17,8 +17,9 @@ from typing import Any
 
 import numpy as np
 
-from epsbench.diagnostics.causal_history_fixture import Box, Camera, Scene
 from epsbench.diagnostics.occupancy_reference import Solid, audit, status
+from epsbench.diagnostics.restricted_exact_raster import VERSION as RASTER_VERSION
+from epsbench.diagnostics.restricted_exact_raster import Box, raster
 from epsbench.diagnostics.restricted_learning_contract import (
     LIMITS,
     REQUIRED,
@@ -61,6 +62,7 @@ SOURCE_FILES = (
     "src/epsbench/diagnostics/restricted_learning_scoring.py",
     "src/epsbench/diagnostics/restricted_learning_retention.py",
     "src/epsbench/diagnostics/restricted_learning_producer.py",
+    "src/epsbench/diagnostics/restricted_exact_raster.py",
     "src/epsbench/diagnostics/visible_forecast_contract.py",
     "src/epsbench/diagnostics/boundary_observation.py",
     "src/epsbench/diagnostics/occupancy_reference.py",
@@ -279,25 +281,25 @@ class DescriptorAdapter:
             (g.background_x + g.background_width, g.background_y + Q(1, 5), Q(3, 2)),
         )
 
-        def floats(p: tuple[Q, Q, Q]) -> tuple[float, float, float]:
-            return float(p[0]), float(p[1]), float(p[2])
-
-        scene = Scene(
-            Camera(32, 32, -3.0, 1.0, 0.0, 90.0),
-            Box(floats(fg.lower), floats(fg.upper)),
-            Box(floats(bg.lower), floats(bg.upper)),
+        produced = raster(
+            lateral,
+            (Box(fg.lower, fg.upper), Box(bg.lower, bg.upper)),
+            (Q(4), Q(7)),
+            self.archive.check,
         )
-        raw, points = scene.frame(float(lateral))
-        if not np.all(np.isfinite(points)):
-            raise ValueError("nonfinite privileged instrumentation")
-        del points
+        raw = np.array(produced.labels, dtype=np.int64)
         if raw.dtype != np.int64 or raw.shape != (32, 32) or np.any((raw < 0) | (raw > 3)):
             raise ValueError("bounded supported raw raster required")
-        result = audit((lateral, Q(-3), Q(1)), (fg, bg), (Q(4), Q(7)), 32, self.archive.check)
         raw_data = raw.astype("<i8").tobytes()
-        ref_data = np.array(result.labels, dtype="<i8").tobytes()
         index = len(self.archive.events)
         self.archive.event("RAW_PRIVATE", f"raw-{index}.bin", raw_data)
+        self.archive.event(
+            "AUDIT_PRIVATE",
+            f"audit-{index}.json",
+            exact_bytes({"version": RASTER_VERSION, "ties": produced.ties}),
+        )
+        result = audit((lateral, Q(-3), Q(1)), (fg, bg), (Q(4), Q(7)), 32, self.archive.check)
+        ref_data = np.array(result.labels, dtype="<i8").tobytes()
         self.archive.event(
             "REFERENCE_PRIVATE", f"reference-{index}.json", exact_bytes(asdict(result))
         )
@@ -316,8 +318,8 @@ class DescriptorAdapter:
             "boundaries": result.boundaries,
             "statuses": records,
         }
-        self.archive.event("AUDIT_PRIVATE", f"audit-{index}.json", exact_bytes(annotation))
-        if raw_data != ref_data or result.ties:
+        self.archive.event("AUDIT_PRIVATE", f"audit-{index + 1}.json", exact_bytes(annotation))
+        if raw_data != ref_data or result.ties or produced.ties:
             raise ValueError("unique independent reference disagreement; no replacement")
         masks = tuple((mapping[i], raw == i) for i in (1, 2, 3) if np.any(raw == i))
         return TokenFrame(0, (32, 32), masks), annotation
