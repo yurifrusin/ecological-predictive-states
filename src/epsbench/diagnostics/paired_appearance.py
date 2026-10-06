@@ -205,9 +205,43 @@ class DevelopmentVisualPlan:
     record: dict[str, Any]
 
 
+CANONICAL_ASSET_DIRECTORY = Path(__file__).parent / "source_assets" / "paired_appearance_v1"
+CANONICAL_ASSET_SHA256 = (
+    "04e290cfa9313a9980374915d67f1b3750a7791e18abccafb154427c10d77b93",
+    "8f6907953a943476f8dbbc83e015724f8ecd1be693eef8d6797967fab64cbc5e",
+    "f3966acf038d88a33142e13c9d81d7668cfc86070e8edaa33bdc8d6d874e1464",
+    "c04819b9158a6b7f0033ef963fd8e1410c3a04440606d8dda04becd9a2a65a5a",
+)
+
+
+def canonical_assets() -> dict[int, bytes]:
+    """Validate the complete fixed inventory before any visual plan is constructed."""
+    directory = CANONICAL_ASSET_DIRECTORY
+    names = {f"brick-slot-{slot}.png" for slot in range(4)}
+    if {path.name for path in directory.iterdir()} != names:
+        raise ValueError("canonical appearance asset inventory mismatch")
+    assets = {}
+    for slot, expected_hash in enumerate(CANONICAL_ASSET_SHA256):
+        path = directory / f"brick-slot-{slot}.png"
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("canonical appearance asset must be a regular source file")
+        raw = path.read_bytes()
+        if sha256_bytes(raw) != expected_hash:
+            raise ValueError("canonical appearance asset byte hash mismatch")
+        with Image.open(io.BytesIO(raw)) as image:
+            if image.format != "PNG" or image.mode != "RGB" or image.size != (128, 128):
+                raise ValueError("canonical appearance asset PNG/RGB contract mismatch")
+            pixels = np.asarray(image)
+            if pixels.dtype != np.uint8 or not np.array_equal(pixels, brick(slot)):
+                raise ValueError("canonical appearance asset pixel mismatch")
+        assets[slot] = raw
+    return assets
+
+
 def visual_plan(family: Family, appearance: str) -> DevelopmentVisualPlan:
     if family not in FAMILIES or appearance not in APPEARANCES:
         raise ValueError("fixed development appearance/family required")
+    fixed_assets = canonical_assets()
     colours, materials, assets, xml, asset_hashes = {}, {}, {}, [], {}
     assignment = slots(family)
     for i, (name, slot) in enumerate(zip(SURFACES[family], assignment, strict=True)):
@@ -220,10 +254,8 @@ def visual_plan(family: Family, appearance: str) -> DevelopmentVisualPlan:
             )
         else:
             array = brick(slot)
-            stream = io.BytesIO()
-            Image.fromarray(array).save(stream, format="PNG", compress_level=9, optimize=False)
             filename = f"dev-brick-{i}.png"
-            assets[filename] = stream.getvalue()
+            assets[filename] = fixed_assets[slot]
             asset_hashes[filename] = {
                 "file": sha256_bytes(assets[filename]),
                 "array": logical_array_hash(array),

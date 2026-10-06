@@ -712,3 +712,60 @@ def test_corrected_metadata_stays_inside_existing_caps(family: p.Family, appeara
         image = Image.open(io.BytesIO(raw))
         assert image.mode == "RGB" and image.size == (128, 128)
         assert "srgb" not in image.info and "icc_profile" not in image.info
+
+
+def test_canonical_asset_bytes_pixels_and_original_root() -> None:
+    assets = p.canonical_assets()
+    assert [len(assets[slot]) for slot in range(4)] == [339, 340, 342, 340]
+    expected_arrays = (
+        "9b5d0c25756b0ddfa6e17e169c03c19b1435099904c341d688b9fe81a0c4cc0c",
+        "87060a3a8a7ab010e55e570de38a8fe9469fc7734227e4ddba25d2130ab49782",
+        "742a9bd269849b84ce39d5337606fea47e9798e121ff926911ff3d8ddfc6798f",
+        "dbf364b0d4aa9370c7db1c913a9f96d2284e97303b4e91371fbb9d16b542a304",
+    )
+    from epsbench.utils.canonical import logical_array_hash
+
+    for slot, raw in assets.items():
+        with Image.open(io.BytesIO(raw)) as image:
+            pixels = np.asarray(image)
+            assert image.mode == "RGB" and pixels.dtype == np.uint8
+            assert logical_array_hash(pixels) == expected_arrays[slot]
+            assert np.array_equal(pixels, p.brick(slot))
+    records = [p.visual_plan(f, a).record for f in p.FAMILIES for a in p.APPEARANCES]
+    assert sha256_bytes(canonical_json_bytes(records)) == (
+        "8a049cc723851fd7b4c7253351ae042985bebcec3448e452ffd7b7099b46799e"
+    )
+
+
+@pytest.mark.parametrize("damage", ["missing", "corrupt", "extra", "pixels", "mode"])
+def test_canonical_asset_denial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str
+) -> None:
+    assets = p.canonical_assets()
+    for slot, raw in assets.items():
+        (tmp_path / f"brick-slot-{slot}.png").write_bytes(raw)
+    monkeypatch.setattr(p, "CANONICAL_ASSET_DIRECTORY", tmp_path)
+    victim = tmp_path / "brick-slot-3.png"
+    if damage == "missing":
+        victim.unlink()
+    elif damage == "extra":
+        (tmp_path / "extra.png").write_bytes(b"unexpected")
+    elif damage == "corrupt":
+        victim.write_bytes(b"not a PNG")
+    else:
+        pixels = p.brick(3).copy()
+        if damage == "pixels":
+            pixels[0, 0, 0] ^= 1
+            image = Image.fromarray(pixels)
+        else:
+            image = Image.fromarray(pixels).convert("RGBA")
+        stream = io.BytesIO()
+        image.save(stream, format="PNG")
+        raw = stream.getvalue()
+        victim.write_bytes(raw)
+        # Bypass only the byte gate to exercise the independent decoded contract.
+        hashes = (*p.CANONICAL_ASSET_SHA256[:3], sha256_bytes(raw))
+        monkeypatch.setattr(p, "CANONICAL_ASSET_SHA256", hashes)
+    # The solid plan must also deny an incomplete inventory before construction.
+    with pytest.raises(ValueError, match="canonical appearance asset"):
+        p.visual_plan("single_occluder", p.APPEARANCES[0])
