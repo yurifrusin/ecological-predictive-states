@@ -113,3 +113,27 @@ explicitly; if context cannot fit or writing fails, capture stops with a retenti
 claiming a native predicate. The final report exception class alone is not uniquely the initiating
 cause: adjacent owned-model restoration or capture-close failures can supersede it. A surviving
 structured sampler failure record is the primary sampler context; absence is not restoration success.
+
+
+The prospective `storage_contract=base_rgb_linear_six_glint_v1` config token changes only
+configuration/preparation admission. Scientific schema, seeds, membership, assets, order and
+criteria remain unchanged; pinned older contracts and closed attempts are not replayed.
+The source-selected upload requires actual base internal format GL_RGB (6407), independently
+of RGB8. Each of four owned textures adds exactly `storage=[border,red_bits,green_bits,
+blue_bits,alpha_bits,compressed]`, queried at level0: border0, positive RGB component sizes,
+alpha0, compression0. Measured resolution has no eight-bit equivalence or minimum threshold.
+All four rows share one signature, unchanged across every snapshot, endpoint and arm.
+A fixed four-entry `compiled_texture_storage` record is taken from actual model nchannel and
+colorspace arrays and requires [3,1] per texture (three channels, linear), bounded to256 bytes.
+The sampler colorspace label alone cannot establish this compiled declaration.
+
+Integer observations enforce signed32 GLint and unsigned32 GLuint object names without Boolean,
+float or out-of-width coercion. Negative binding observations remain negative and are rejected.
+Failure rows retain representable contradictions and null unavailable slots, with the existing
+context-first, named-omission retention policy and unchanged caps; omissions cannot admit success.
+Valid snapshots conservatively fit2048 bytes; seven snapshots plus256 wrapper bytes fit14592
+within16384. Six signed32 invalid scalars fit73 row bytes. Even adding16384 failure bytes to
+1023720 endpoint reservations gives1040104<1048576; actual remaining capacity still governs.
+The scientific49152-byte and frame65536-byte checks remain enforced. Mip contents, level
+completeness/precision, reduction/interpolation arithmetic and absolute native UV/transfer remain
+unmeasured/UNRESOLVED. This source contract neither qualifies them nor authorizes a third attempt.

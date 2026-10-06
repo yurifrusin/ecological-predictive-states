@@ -12,7 +12,7 @@ WORKDIR /source
 RUN uv python install 3.11.15 && uv sync --locked --python 3.11.15 && .venv/bin/python -c 'import platform,importlib.metadata as m; assert platform.python_version()=="3.11.15"; assert all(m.version(k)==v for k,v in {"mujoco":"3.12.0","numpy":"2.4.6","PyOpenGL":"3.1.10","glfw":"2.10.2"}.items())'
 ENV PATH="/source/.venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 MESA_SHADER_CACHE_DISABLE=true GIT_OPTIONAL_LOCKS=0
 RUN SOURCE_HEAD="$SOURCE_HEAD" SOURCE_TREE="$SOURCE_TREE" python scripts/renderer_discriminator_execution.py --prepare && rm /preparation/source.bundle
-ARG CONFIG_FILE=a3a72ef5210582ef67091b2905d17d2c9de9db0c110d1d912f967d91838aabc4
+ARG CONFIG_FILE=a9f511ce7194f4f3704d1c4703280ca4093da25d0b13ed120ec444f38b0ddd56
 ARG ASSET_ROOT
 ARG MEMBERSHIP_ROOT
 ARG PROTECTION_ROOT

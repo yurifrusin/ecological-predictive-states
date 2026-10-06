@@ -50,6 +50,7 @@ SOURCE_URL: Literal["https://github.com/yurifrusin/ecological-predictive-states.
 ENV = "EPS_RENDERER_DISCRIMINATOR_BINDING"
 FIXED = {
     "schema": SCHEMA,
+    "storage_contract": "base_rgb_linear_six_glint_v1",
     "root": ROOT,
     "purpose": "exposed_development_diagnostic_only",
     "appearances": list(APPEARANCES),
@@ -446,7 +447,58 @@ class Sampler(Protocol):
     def set_parameters(self, index: int, values: tuple[int, int, int, int]) -> None: ...
 
 
-def validate_sampler(state: dict[str, Any], setting: str) -> None:
+GLINT_MIN, GLINT_MAX, GLUINT_MAX = -(2**31), 2**31 - 1, 2**32 - 1
+STORAGE_FIELDS = ("border", "red_bits", "green_bits", "blue_bits", "alpha_bits", "compressed")
+
+
+def api_integer(value: Any, field: str, *, unsigned: bool = False) -> int:
+    """Materialize API scalars without coercing Boolean, float or out-of-width facts."""
+    low, high = (0, GLUINT_MAX) if unsigned else (GLINT_MIN, GLINT_MAX)
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
+        raise SamplerFault("strict API integer required", field)
+    if not low <= value <= high:
+        raise SamplerFault("API integer width exceeded", field)
+    return int(value)
+
+
+def compiled_texture_storage(model: Any) -> list[list[int]]:
+    """One fixed record from the actual compiled model, never a colorspace label."""
+    if api_integer(model.ntex, "compiled_texture_storage.ntex") != 4:
+        raise SamplerFault("four compiled textures required", "compiled_texture_storage.ntex")
+    result = [
+        [
+            api_integer(model.tex_nchannel[i], f"compiled_texture_storage[{i}].channels"),
+            api_integer(model.tex_colorspace[i], f"compiled_texture_storage[{i}].colorspace"),
+        ]
+        for i in range(4)
+    ]
+    validate_compiled_texture_storage(result)
+    return result
+
+
+def validate_compiled_texture_storage(value: Any) -> None:
+    if (
+        type(value) is not list
+        or len(value) != 4
+        or any(
+            type(row) is not list
+            or len(row) != 2
+            or any(type(v) is not int for v in row)
+            or row != [3, 1]
+            for row in value
+        )
+        or len(canonical_json_bytes(value)) > 256
+    ):
+        raise ValueError("actual compiled three-channel linear texture declaration required")
+
+
+def storage_signature(state: dict[str, Any]) -> list[int]:
+    return list(state["textures"][0]["storage"])
+
+
+def validate_sampler(
+    state: dict[str, Any], setting: str, reference: dict[str, Any] | None = None
+) -> None:
     if set(state) != {
         "active_unit",
         "active_binding",
@@ -458,13 +510,14 @@ def validate_sampler(state: dict[str, Any], setting: str) -> None:
     }:
         raise SamplerFault("closed sampler fields", "state.fields")
     if any(
-        type(state[k]) is not int or state[k] < 0
+        type(state[k]) is not int or not 0 <= state[k] <= GLINT_MAX
         for k in ("active_unit", "active_binding", "unit0_binding")
     ):
         raise SamplerFault("actual texture bindings unavailable", "bindings")
     if (
         state["sampler_binding"] != 0
         or type(state["sampler_binding"]) is not int
+        or type(state["texture_env_mode"]) is not int
         or state["texture_env_mode"] != 8448
         or state["texture_matrix"] != np.eye(4, dtype=np.float32).reshape(-1).tolist()
     ):
@@ -489,9 +542,14 @@ def validate_sampler(state: dict[str, Any], setting: str) -> None:
             "internal_format",
             "wrap_s",
             "wrap_t",
+            "compare_mode",
             *PARAMS,
         ):
-            if type(tex.get(key)) is not int:
+            if type(tex.get(key)) is not int or not (
+                0 <= tex[key] <= GLUINT_MAX
+                if key == "object"
+                else GLINT_MIN <= tex[key] <= GLINT_MAX
+            ):
                 raise SamplerFault(
                     "strict actual sampler integer fields", "textures.integer_fields"
                 )
@@ -506,6 +564,7 @@ def validate_sampler(state: dict[str, Any], setting: str) -> None:
                 "height",
                 "internal_format",
                 "colorspace",
+                "storage",
                 "wrap_s",
                 "wrap_t",
                 "pixels",
@@ -529,7 +588,7 @@ def validate_sampler(state: dict[str, Any], setting: str) -> None:
                 tex["wrap_t"],
                 tex["pixels"],
             )
-            != (3553, 128, 128, 32849, "linear", 10497, 10497, CONTRAST_V1.asset_pixel_hashes[0])
+            != (3553, 128, 128, 6407, "linear", 10497, 10497, CONTRAST_V1.asset_pixel_hashes[0])
             or (
                 tex["min_lod"],
                 tex["max_lod"],
@@ -543,6 +602,21 @@ def validate_sampler(state: dict[str, Any], setting: str) -> None:
             raise SamplerFault(
                 "actual owned texture setting/content mismatch", "textures.setting_content"
             )
+
+        row = tex["storage"]
+        if (
+            type(row) is not list
+            or len(row) != 6
+            or any(type(v) is not int or not GLINT_MIN <= v <= GLINT_MAX for v in row)
+            or row[0] != 0
+            or any(v <= 0 for v in row[1:4])
+            or row[4:] != [0, 0]
+        ):
+            raise SamplerFault("actual base storage differs", f"textures[{index}].storage")
+        if row != textures[0]["storage"]:
+            raise SamplerFault("cross-texture base storage drift", f"textures[{index}].storage")
+    if reference is not None and storage_signature(state) != storage_signature(reference):
+        raise SamplerFault("base storage signature drift", "textures.storage_invariance")
 
 
 class SamplerFault(ValueError):
@@ -622,12 +696,22 @@ def sampler_observation(state: dict[str, Any], *, texture: bool = False) -> dict
     result: dict[str, Any] = {}
     for key in scalar_fields:
         value = state.get(key)
-        if type(value) is int and -(2**63) <= value < 2**63:
+        if type(value) is int and (
+            0 <= value <= GLUINT_MAX if key == "object" else GLINT_MIN <= value <= GLINT_MAX
+        ):
             result[key] = value
         elif type(value) is float and math.isfinite(value):
             result[key] = value
         elif type(value) is str and len(value) <= 64:
             result[key] = value
+    storage = state.get("storage")
+    if texture and type(storage) is list:
+        result["storage"] = [
+            storage[i]
+            if i < len(storage) and type(storage[i]) is int and GLINT_MIN <= storage[i] <= GLINT_MAX
+            else None
+            for i in range(6)
+        ]
     matrix = state.get("texture_matrix")
     if not texture and type(matrix) is list:
         result["texture_matrix"] = [
@@ -723,7 +807,7 @@ def sampler_override(sampler: Sampler, setting: str, record: dict[str, Any]) -> 
         stage, field = "selected_query", "state"
         record["selected"] = sampler.query()
         stage = "selected_validation"
-        validate_sampler(record["selected"], setting)
+        validate_sampler(record["selected"], setting, baseline)
         stage, field = "capture_body", "state"
         yield
     except BaseException as exc:
@@ -753,7 +837,7 @@ def sampler_override(sampler: Sampler, setting: str, record: dict[str, Any]) -> 
                 operations.append(retain_sampler_fault(record, exc, "restored_query", "state"))
             else:
                 try:
-                    validate_sampler(record["restored"], "default")
+                    validate_sampler(record["restored"], "default", record.get("original"))
                 except BaseException as exc:
                     validation.append(sampler_fault(exc, "restored_validation", "state"))
             try:
@@ -796,15 +880,17 @@ class NativeSampler:
         con = renderer._mjr_context
         if int(con.ntexture) != 4 or tuple(int(v) for v in con.textureType[:4]) != (0,) * 4:
             raise ValueError("exact owned 2D texture inventory")
-        self.objects = tuple(int(v) for v in con.texture[:4])
+        self.objects = tuple(
+            api_integer(v, "textures.object", unsigned=True) for v in con.texture[:4]
+        )
         if len(set(self.objects)) != 4 or any(v <= 0 for v in self.objects):
             raise ValueError("owned texture objects unavailable")
 
     def bindings(self) -> tuple[int, int, int]:
         self.renderer._gl_context.make_current()
         gl = self.gl
-        active = int(gl.glGetIntegerv(gl.GL_ACTIVE_TEXTURE))
-        binding = int(gl.glGetIntegerv(gl.GL_TEXTURE_BINDING_2D))
+        active = api_integer(gl.glGetIntegerv(gl.GL_ACTIVE_TEXTURE), "active_unit")
+        binding = api_integer(gl.glGetIntegerv(gl.GL_TEXTURE_BINDING_2D), "active_binding")
         facts: dict[str, Any] = {"active_unit": active, "active_binding": binding}
         initiating = None
         faults: list[dict[str, Any]] = []
@@ -812,7 +898,7 @@ class NativeSampler:
         try:
             gl.glActiveTexture(gl.GL_TEXTURE0)
             field = "unit0_binding"
-            facts["unit0_binding"] = int(gl.glGetIntegerv(gl.GL_TEXTURE_BINDING_2D))
+            facts["unit0_binding"] = api_integer(gl.glGetIntegerv(gl.GL_TEXTURE_BINDING_2D), field)
         except BaseException as exc:
             initiating = exc
         finally:
@@ -889,10 +975,10 @@ class NativeSampler:
         try:
             gl.glActiveTexture(gl.GL_TEXTURE0)
             field = "sampler_binding"
-            result["sampler_binding"] = int(gl.glGetIntegerv(gl.GL_SAMPLER_BINDING))
+            result["sampler_binding"] = api_integer(gl.glGetIntegerv(gl.GL_SAMPLER_BINDING), field)
             field = "texture_env_mode"
-            result["texture_env_mode"] = int(
-                gl.glGetTexEnviv(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE)
+            result["texture_env_mode"] = api_integer(
+                gl.glGetTexEnviv(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE), field
             )
             field = "texture_matrix"
             result["texture_matrix"] = (
@@ -902,14 +988,19 @@ class NativeSampler:
             )
             # A separate sampler object would supersede the texture parameters.
             field = "sampler_binding"
-            if int(gl.glGetIntegerv(gl.GL_SAMPLER_BINDING)) != 0:
+            if api_integer(gl.glGetIntegerv(gl.GL_SAMPLER_BINDING), field) != 0:
                 raise ValueError("external sampler object denied")
             for index, obj in enumerate(self.objects):
                 field = f"textures[{index}].object"
                 if not gl.glIsTexture(obj):
                     raise ValueError("owned texture disappeared")
                 gl.glBindTexture(gl.GL_TEXTURE_2D, obj)
-                texture = {"index": index, "target": 3553, "object": obj, "colorspace": "linear"}
+                texture: dict[str, Any] = {
+                    "index": index,
+                    "target": 3553,
+                    "object": obj,
+                    "colorspace": "linear",
+                }
                 result["textures"].append(texture)
                 for key, name in zip(
                     (*PARAMS, "wrap_s", "wrap_t"),
@@ -924,7 +1015,9 @@ class NativeSampler:
                     strict=True,
                 ):
                     field = f"textures[{index}].{key}"
-                    texture[key] = int(gl.glGetTexParameteriv(gl.GL_TEXTURE_2D, name))
+                    texture[key] = api_integer(
+                        gl.glGetTexParameteriv(gl.GL_TEXTURE_2D, name), field
+                    )
                 for key, name in (
                     ("min_lod", gl.GL_TEXTURE_MIN_LOD),
                     ("max_lod", gl.GL_TEXTURE_MAX_LOD),
@@ -934,8 +1027,8 @@ class NativeSampler:
                     field = f"textures[{index}].{key}"
                     texture[key] = float(gl.glGetTexParameterfv(gl.GL_TEXTURE_2D, name))
                 field = f"textures[{index}].compare_mode"
-                texture["compare_mode"] = int(
-                    gl.glGetTexParameteriv(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_COMPARE_MODE)
+                texture["compare_mode"] = api_integer(
+                    gl.glGetTexParameteriv(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_COMPARE_MODE), field
                 )
                 for key, name in (
                     ("width", gl.GL_TEXTURE_WIDTH),
@@ -943,14 +1036,31 @@ class NativeSampler:
                     ("internal_format", gl.GL_TEXTURE_INTERNAL_FORMAT),
                 ):
                     field = f"textures[{index}].{key}"
-                    texture[key] = int(gl.glGetTexLevelParameteriv(gl.GL_TEXTURE_2D, 0, name))
+                    texture[key] = api_integer(
+                        gl.glGetTexLevelParameteriv(gl.GL_TEXTURE_2D, 0, name), field
+                    )
+                texture["storage"] = [None] * 6
+                for slot, name in enumerate(
+                    (
+                        gl.GL_TEXTURE_BORDER,
+                        gl.GL_TEXTURE_RED_SIZE,
+                        gl.GL_TEXTURE_GREEN_SIZE,
+                        gl.GL_TEXTURE_BLUE_SIZE,
+                        gl.GL_TEXTURE_ALPHA_SIZE,
+                        gl.GL_TEXTURE_COMPRESSED,
+                    )
+                ):
+                    field = f"textures[{index}].storage.{STORAGE_FIELDS[slot]}"
+                    texture["storage"][slot] = api_integer(
+                        gl.glGetTexLevelParameteriv(gl.GL_TEXTURE_2D, 0, name), field
+                    )
                 field = f"textures[{index}].dimensions"
                 if (texture["width"], texture["height"]) != (128, 128):
                     raise ValueError("owned base-level dimensions differ")
                 # Width384 bytes is divisible by every supported pack alignment. No pack mutation.
                 field = f"textures[{index}].pack_state"
                 if any(
-                    int(gl.glGetIntegerv(name)) != value
+                    api_integer(gl.glGetIntegerv(name), field) != value
                     for name, value in (
                         (gl.GL_PACK_ROW_LENGTH, 0),
                         (gl.GL_PACK_SKIP_ROWS, 0),
@@ -960,7 +1070,7 @@ class NativeSampler:
                 ):
                     raise ValueError("texture read requires qualified pack state")
                 field = f"textures[{index}].pack_alignment"
-                if int(gl.glGetIntegerv(gl.GL_PACK_ALIGNMENT)) not in (1, 2, 4, 8):
+                if api_integer(gl.glGetIntegerv(gl.GL_PACK_ALIGNMENT), field) not in (1, 2, 4, 8):
                     raise ValueError("unsupported texture read alignment")
                 field = f"textures[{index}].pixels"
                 pixels = np.empty((128, 128, 3), dtype=np.uint8)
@@ -1060,6 +1170,7 @@ def validate_endpoint(endpoint: Endpoint, binding: Binding) -> None:
         "config_sha256",
         "scene_xml_sha256",
         "compiled",
+        "compiled_texture_storage",
         "camera",
         "mapping",
         "scene_map",
@@ -1094,6 +1205,7 @@ def validate_endpoint(endpoint: Endpoint, binding: Binding) -> None:
         raise ValueError("fixed owned model baseline/restoration differs")
     p.validate_registration(e)
     p.validate_compiled("corridor", e["compiled"])
+    validate_compiled_texture_storage(e["compiled_texture_storage"])
     camera = {
         "world_position": [0.0, 1.2, 1.25],
         "rotation_row_major": [1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0],
@@ -1150,7 +1262,11 @@ def validate_endpoint(endpoint: Endpoint, binding: Binding) -> None:
         "pair_after",
         "restored",
     ):
-        validate_sampler(sampler[key], "default" if key in ("original", "restored") else setting)
+        validate_sampler(
+            sampler[key],
+            "default" if key in ("original", "restored") else setting,
+            sampler["original"],
+        )
         current = [tex["object"] for tex in sampler[key]["textures"]]
         if objects is not None and objects != current:
             raise ValueError("owned texture identity drift")
@@ -1353,7 +1469,16 @@ def validate_relations(endpoints: list[Endpoint]) -> None:
             raise ValueError("cross-arm paired ID/depth/mask/lattice differs")
         if any(
             first.evidence[k] != endpoint.evidence[k]
-            for k in ("compiled", "camera", "runtime", "mapping", "scene_map", "near", "far")
+            for k in (
+                "compiled",
+                "compiled_texture_storage",
+                "camera",
+                "runtime",
+                "mapping",
+                "scene_map",
+                "near",
+                "far",
+            )
         ):
             raise ValueError("cross-arm provenance/geometry differs")
         if any(
@@ -1361,6 +1486,10 @@ def validate_relations(endpoints: list[Endpoint]) -> None:
             for k in (*p.REGISTRATION_KEYS, "scene_flags")
         ):
             raise ValueError("cross-arm registered state differs")
+        if storage_signature(first.evidence["sampler"]["original"]) != storage_signature(
+            endpoint.evidence["sampler"]["original"]
+        ):
+            raise ValueError("cross-endpoint/arm base storage differs")
     for offset in range(0, len(endpoints) - 1, 2):
         a, b = endpoints[offset : offset + 2]
         if a.evidence != b.evidence or any(
@@ -2058,6 +2187,7 @@ class NativeCapture:
         self.material_state = _material_state
         xml, assets = scene_xml()
         self.model = mujoco.MjModel.from_xml_string(xml, assets)
+        self.compiled_texture_storage = compiled_texture_storage(self.model)
         self.data = mujoco.MjData(self.model)
         self.camera_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_CAMERA, "monocular_camera"
@@ -2125,12 +2255,12 @@ class NativeCapture:
             setting = "nearest" if identity.arm.endswith("nearest") else "default"
             with sampler_override(self.sampler, setting, sampler):
                 sampler["rgb_before"] = self.sampler.query()
-                validate_sampler(sampler["rgb_before"], setting)
+                validate_sampler(sampler["rgb_before"], setting, sampler["original"])
                 self._emit("rgb_attempt", None)
                 rgb = np.asarray(self.renderer.render(), dtype=np.uint8).copy()
                 self._emit("rgb_read_complete", rgb)
                 sampler["rgb_after"] = self.sampler.query()
-                validate_sampler(sampler["rgb_after"], setting)
+                validate_sampler(sampler["rgb_after"], setting, sampler["original"])
                 rgb_state = stable_state(observe_canonical_paired_state(self.renderer))
                 material = self.material_state(self.model, self.renderer)
                 self._emit(
@@ -2138,10 +2268,10 @@ class NativeCapture:
                     canonical_json_bytes({"stable": rgb_state, "material": material}),
                 )
                 sampler["pair_before"] = self.sampler.query()
-                validate_sampler(sampler["pair_before"], setting)
+                validate_sampler(sampler["pair_before"], setting, sampler["original"])
                 pair = self.paired.capture()
                 sampler["pair_after"] = self.sampler.query()
-                validate_sampler(sampler["pair_after"], setting)
+                validate_sampler(sampler["pair_after"], setting, sampler["original"])
                 paired_material = self.material_state(self.model, self.renderer)
             self._emit("sampler_complete", canonical_json_bytes(sampler))
             opaque = np.zeros((120, 160), dtype=np.int32)
@@ -2155,6 +2285,7 @@ class NativeCapture:
                 "config_sha256": self.binding.preparation.config_file,
                 "scene_xml_sha256": self.binding.preparation.scene_root,
                 "compiled": self.compiled,
+                "compiled_texture_storage": self.compiled_texture_storage,
                 "camera": {
                     "world_position": self.data.cam_xpos[self.camera_id].tolist(),
                     "rotation_row_major": self.data.cam_xmat[self.camera_id].tolist(),

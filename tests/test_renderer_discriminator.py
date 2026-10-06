@@ -58,7 +58,8 @@ def sampler_state(setting: str = "default") -> dict[str, Any]:
                 "object": 2001 + i,
                 "width": 128,
                 "height": 128,
-                "internal_format": 32849,
+                "internal_format": 6407,
+                "storage": [0, 8, 8, 8, 0, 0],
                 "colorspace": "linear",
                 "wrap_s": 10497,
                 "wrap_t": 10497,
@@ -117,6 +118,7 @@ def endpoint(ordinal: int, b: d.Binding, *, control_fault: bool = False) -> d.En
         config_sha256=b.preparation.config_file,
         scene_xml_sha256=b.preparation.scene_root,
     )
+    e["compiled_texture_storage"] = [[3, 1] for _ in range(4)]
     e["compiled"]["camera_world_position"] = [0.0, 1.2, 1.25]
     e["mapping"] = [list(v) for v in d.remapping((0, 1, 2, 3))]
     e["rgb_material"] = d.expected_material(identity, e["compiled"])
@@ -618,14 +620,14 @@ def test_replay_read_array_and_terminal_reference_admission(tmp_path: Path, muta
 @pytest.mark.parametrize("restore_fault", [False, True])
 def test_initial_validation_facts_and_simultaneous_restoration_fault(restore_fault: bool) -> None:
     sampler = Sampler(("restore", 1) if restore_fault else None)
-    sampler.state["textures"][0]["internal_format"] = 6407
+    sampler.state["textures"][0]["internal_format"] = 32849
     record: dict[str, Any] = {}
     with pytest.raises(d.SamplerFault) as raised:
         with d.sampler_override(sampler, "nearest", record):
             pytest.fail("invalid baseline must stop before capture")
     assert raised.value.field == "textures.setting_content"
-    assert record["original"]["textures"][0]["internal_format"] == 6407
-    assert record["restored"]["textures"][0]["internal_format"] == 6407
+    assert record["original"]["textures"][0]["internal_format"] == 32849
+    assert record["restored"]["textures"][0]["internal_format"] == 32849
     assert record["initiating_error"]["stage"] == "baseline_validation"
     assert record["restored_validation_errors"][0]["stage"] == "restored_validation"
     assert bool(record["restoration_operation_errors"]) is restore_fault
@@ -964,3 +966,321 @@ def test_actual_native_bindings_keeps_unit0_query_fault_and_active_cleanup(
     assert record["restoration_operation_errors"][0]["status"] == "UNAVAILABLE"
     assert sampler.gl.activations == 2
     assert len(d.sampler_failure_bytes(record)) <= 16384
+
+
+@pytest.mark.parametrize("value", [True, False, 1.0, "1", 2**31, -(2**31) - 1, np.bool_(True)])
+def test_api_integer_rejects_coercion_and_width(value: Any) -> None:
+    with pytest.raises(d.SamplerFault):
+        d.api_integer(value, "synthetic.query")
+    state = sampler_state()
+    state["textures"][0]["storage"][1] = value
+    with pytest.raises(d.SamplerFault):
+        d.validate_sampler(state, "default")
+    assert d.sampler_observation(state)["textures"][0]["storage"][1] is None
+
+
+def test_api_widths_and_common_positive_precision_without_eight_bit_requirement() -> None:
+    assert d.api_integer(np.int32(-1), "query") == -1
+    assert d.api_integer(np.uint32(2**32 - 1), "object", unsigned=True) == 2**32 - 1
+    for value in (-1, True, 2**32):
+        with pytest.raises(d.SamplerFault):
+            d.api_integer(value, "object", unsigned=True)
+    state = sampler_state()
+    for i, tex in enumerate(state["textures"]):
+        tex["object"] = d.GLUINT_MAX - i
+        tex["storage"] = [0, d.GLINT_MAX, d.GLINT_MAX, d.GLINT_MAX, 0, 0]
+    d.validate_sampler(state, "default")
+    state["active_binding"] = -1
+    with pytest.raises(d.SamplerFault):
+        d.validate_sampler(state, "default")
+    assert d.sampler_observation(state)["active_binding"] == -1
+    state["active_binding"] = d.GLINT_MAX + 1
+    with pytest.raises(d.SamplerFault):
+        d.validate_sampler(state, "default")
+    state["textures"][0]["object"] = d.GLUINT_MAX + 1
+    with pytest.raises(d.SamplerFault):
+        d.validate_sampler(state, "default")
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        [1, 8, 8, 8, 0, 0],
+        [-1, 8, 8, 8, 0, 0],
+        [0, 0, 8, 8, 0, 0],
+        [0, 8, -1, 8, 0, 0],
+        [0, 8, 8, 8, 1, 0],
+        [0, 8, 8, 8, 0, 1],
+        [0, 8, 8, 8, 0, -1],
+        [0, 8, 8, 8, 0, None],
+        [0, 8, 8, 8, 0],
+        [0, 8, 8, 8, 0, 0, 0],
+    ],
+)
+def test_storage_categorical_faults_retain_representable_observations(row: list[Any]) -> None:
+    state = sampler_state()
+    state["textures"][0]["storage"] = row
+    with pytest.raises(d.SamplerFault):
+        d.validate_sampler(state, "default")
+    projected = d.sampler_observation(state)["textures"][0]["storage"]
+    assert projected == (row + [None] * 6)[:6]
+    record = {
+        "original": state,
+        "initiating_error": {
+            "stage": "baseline_validation",
+            "field": "textures[0].storage",
+            "exception": "SamplerFault",
+        },
+    }
+    retained = p.strict_json(d.sampler_failure_bytes(record))
+    assert retained["observations"] == "UNVALIDATED"
+    assert retained["original"]["textures"][0]["storage"] == projected
+
+
+@pytest.mark.parametrize(
+    "stage",
+    ["original", "selected", "rgb_before", "rgb_after", "pair_before", "pair_after", "restored"],
+)
+def test_storage_signature_covers_every_stage(stage: str) -> None:
+    b = binding()
+    frame = endpoint(0, b)
+    evidence = copy.deepcopy(frame.evidence)
+    for tex in evidence["sampler"][stage]["textures"]:
+        tex["storage"][1] = 12
+    with pytest.raises(d.SamplerFault, match="signature drift"):
+        d.validate_endpoint(replace(frame, evidence=evidence), b)
+
+
+def test_storage_signature_covers_textures_and_every_endpoint_arm() -> None:
+    state = sampler_state()
+    state["textures"][3]["storage"][2] = 12
+    with pytest.raises(d.SamplerFault, match="cross-texture"):
+        d.validate_sampler(state, "default")
+    b = binding()
+    frames = [endpoint(i, b) for i in range(16)]
+    for ordinal in range(1, 16):
+        changed = copy.deepcopy(frames[ordinal].evidence)
+        for stage in (
+            "original",
+            "selected",
+            "rgb_before",
+            "rgb_after",
+            "pair_before",
+            "pair_after",
+            "restored",
+        ):
+            for tex in changed["sampler"][stage]["textures"]:
+                tex["storage"][2] = 12
+        candidate = replace(frames[ordinal], evidence=changed)
+        d.validate_endpoint(candidate, b)
+        with pytest.raises(ValueError, match="cross-endpoint/arm base storage"):
+            d.validate_relations([*frames[:ordinal], candidate])
+
+
+def test_actual_compiled_model_declaration_is_required() -> None:
+    from types import SimpleNamespace
+
+    model = SimpleNamespace(
+        ntex=np.int32(4), tex_nchannel=np.array([3] * 4), tex_colorspace=np.array([1] * 4)
+    )
+    assert d.compiled_texture_storage(model) == [[3, 1]] * 4
+    for field, value in (
+        ("tex_nchannel", [4] * 4),
+        ("tex_colorspace", [0] * 4),
+        ("tex_colorspace", [True] * 4),
+        ("ntex", 3),
+    ):
+        bad = copy.deepcopy(model)
+        setattr(bad, field, value)
+        with pytest.raises(ValueError):
+            d.compiled_texture_storage(bad)
+    b = binding()
+    frame = endpoint(0, b)
+    for compiled_value in ([[3, True]] * 4, [[3, 0]] * 4, [[3, 1]] * 3, "linear"):
+        evidence = copy.deepcopy(frame.evidence)
+        evidence["compiled_texture_storage"] = compiled_value
+        with pytest.raises(ValueError):
+            d.validate_endpoint(replace(frame, evidence=evidence), b)
+
+
+class StorageQueryFake(d.NativeSampler):
+    def __init__(self, fault_slot: int | None = None, value: Any = None, raises: bool = False):
+        self.fault_slot, self.value, self.raises = fault_slot, value, raises
+        self.calls: list[tuple[Any, int, Any]] = []
+        self.objects = (2001, 2002, 2003, 2004)
+        self.restores = 0
+        fake_gl: Any = self
+        self.gl = fake_gl
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("GL_"):
+            return name
+        raise AttributeError(name)
+
+    def bindings(self) -> tuple[int, int, int]:
+        return 33984, 2004, 2004
+
+    def restore_bindings(self, saved: tuple[int, int, int]) -> None:
+        self.restores += 1
+
+    def glActiveTexture(self, value: Any) -> None:
+        pass
+
+    def glBindTexture(self, *args: Any) -> None:
+        pass
+
+    def glIsTexture(self, obj: int) -> bool:
+        return True
+
+    def glGetIntegerv(self, name: Any) -> int:
+        return 4 if name == "GL_PACK_ALIGNMENT" else 0
+
+    def glGetTexEnviv(self, *args: Any) -> int:
+        return 8448
+
+    def glGetFloatv(self, name: Any) -> Any:
+        return np.eye(4, dtype=np.float32)
+
+    def glGetTexParameteriv(self, target: Any, name: Any) -> int:
+        return {
+            "GL_TEXTURE_MIN_FILTER": 9987,
+            "GL_TEXTURE_MAG_FILTER": 9729,
+            "GL_TEXTURE_BASE_LEVEL": 0,
+            "GL_TEXTURE_MAX_LEVEL": 1000,
+            "GL_TEXTURE_WRAP_S": 10497,
+            "GL_TEXTURE_WRAP_T": 10497,
+            "GL_TEXTURE_COMPARE_MODE": 0,
+        }[name]
+
+    def glGetTexParameterfv(self, target: Any, name: Any) -> float:
+        return {
+            "GL_TEXTURE_MIN_LOD": -1000.0,
+            "GL_TEXTURE_MAX_LOD": 1000.0,
+            "GL_TEXTURE_LOD_BIAS": 0.0,
+            34046: 1.0,
+        }[name]
+
+    def glGetTexLevelParameteriv(self, target: Any, level: int, name: Any) -> Any:
+        self.calls.append((target, level, name))
+        names = (
+            "GL_TEXTURE_BORDER",
+            "GL_TEXTURE_RED_SIZE",
+            "GL_TEXTURE_GREEN_SIZE",
+            "GL_TEXTURE_BLUE_SIZE",
+            "GL_TEXTURE_ALPHA_SIZE",
+            "GL_TEXTURE_COMPRESSED",
+        )
+        if name in names:
+            slot = names.index(name)
+            if slot == self.fault_slot:
+                if self.raises:
+                    raise RuntimeError("synthetic unsupported query")
+                return self.value
+            return [0, 8, 8, 8, 0, 0][slot]
+        return {
+            "GL_TEXTURE_WIDTH": 128,
+            "GL_TEXTURE_HEIGHT": 128,
+            "GL_TEXTURE_INTERNAL_FORMAT": 6407,
+        }[name]
+
+    def glGetTexImage(self, target: Any, level: int, format: Any, kind: Any, output: Any) -> None:
+        from PIL import Image
+
+        with Image.open(REPOSITORY / d.FIXED["asset_file"]) as image:
+            output[:] = np.asarray(image)
+
+
+def test_exact_six_base_level_queries_on_four_owned_textures() -> None:
+    fake = StorageQueryFake()
+    state = fake.query()
+    d.validate_sampler(state, "default")
+    assert fake.restores == 1
+    assert len(fake.calls) == 4 * 9
+    assert all(target == "GL_TEXTURE_2D" and level == 0 for target, level, _ in fake.calls)
+    assert [name for _, _, name in fake.calls[3:9]] == [
+        "GL_TEXTURE_BORDER",
+        "GL_TEXTURE_RED_SIZE",
+        "GL_TEXTURE_GREEN_SIZE",
+        "GL_TEXTURE_BLUE_SIZE",
+        "GL_TEXTURE_ALPHA_SIZE",
+        "GL_TEXTURE_COMPRESSED",
+    ]
+    assert all(tex["storage"] == [0, 8, 8, 8, 0, 0] for tex in state["textures"])
+
+
+@pytest.mark.parametrize("slot", range(6))
+@pytest.mark.parametrize(
+    "value,raises", [(None, True), (True, False), (2**31, False), (1.5, False)]
+)
+def test_storage_query_faults_keep_fixed_partial_row_and_causal_field(
+    slot: int, value: Any, raises: bool
+) -> None:
+    fake = StorageQueryFake(slot, value, raises)
+    with pytest.raises(d.SamplerQueryFault) as raised:
+        fake.query()
+    exc = raised.value
+    assert exc.field == f"textures[0].storage.{d.STORAGE_FIELDS[slot]}"
+    assert fake.restores == 1
+    assert exc.facts["textures"][0]["storage"] == [0, 8, 8, 8, 0, 0][:slot] + [None] * (6 - slot)
+    retained = p.strict_json(
+        d.sampler_failure_bytes(
+            {
+                "initiating_error": d.sampler_fault(exc, "baseline_query", "state"),
+                "baseline_query_partial_query": exc.facts,
+            }
+        )
+    )
+    assert retained["initiating_error"]["field"] == exc.field
+    assert retained["observations"] == "UNVALIDATED"
+
+
+@pytest.mark.parametrize("slot,value", [(0, -1), (1, -1), (4, 1), (5, 1)])
+def test_query_preserves_representable_contradictions(slot: int, value: int) -> None:
+    state = StorageQueryFake(slot, value).query()
+    assert state["textures"][0]["storage"][slot] == value
+    with pytest.raises(d.SamplerFault):
+        d.validate_sampler(state, "default")
+    assert d.sampler_observation(state)["textures"][0]["storage"][slot] == value
+
+
+def test_complete_storage_byte_bounds_and_existing_endpoint_reservation() -> None:
+    state = sampler_state()
+    state["active_binding"] = state["unit0_binding"] = d.GLINT_MAX
+    for i, tex in enumerate(state["textures"]):
+        tex["object"] = d.GLUINT_MAX - i
+        tex["storage"] = [0, d.GLINT_MAX, d.GLINT_MAX, d.GLINT_MAX, 0, 0]
+        assert len(canonical_json_bytes(tex)) <= 432
+    d.validate_sampler(state, "default")
+    assert len(canonical_json_bytes(state)) <= 2048
+    record: dict[str, Any] = {
+        key: copy.deepcopy(state)
+        for key in (
+            "original",
+            "selected",
+            "rgb_before",
+            "rgb_after",
+            "pair_before",
+            "pair_after",
+            "restored",
+        )
+    }
+    record["restoration"] = "RESTORED"
+    assert len(canonical_json_bytes(record)) <= 14592 < 16384
+    assert len(canonical_json_bytes([[3, 1]] * 4)) <= 256
+    assert len(canonical_json_bytes([d.GLINT_MIN] * 6)) == 73
+    assert 479720 + 134400 + 4 * 65536 + 2 * 65536 + 16384 == 1023720
+    assert 1023720 + 16384 == 1040104 < p.MIB
+    # Existing context-first retention covers worst-width invalid rows without wider caps.
+    for snapshot in record.values():
+        if type(snapshot) is dict:
+            for tex in snapshot["textures"]:
+                tex["storage"] = [d.GLINT_MIN] * 6
+    record["initiating_error"] = {
+        "stage": "baseline_validation",
+        "field": "textures[0].storage",
+        "exception": "SamplerFault",
+    }
+    assert len(d.sampler_failure_bytes(record)) <= 16384
+    tiny = p.strict_json(d.sampler_failure_bytes(record, 512))
+    assert tiny["initiating_error"] == record["initiating_error"]
+    assert set(tiny["omitted_observations"]) == set(record) - {"restoration", "initiating_error"}
