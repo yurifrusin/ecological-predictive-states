@@ -560,12 +560,18 @@ INSPECT_HOST_FIELDS = {
 def fake_projection(template: str, full: dict[str, Any]) -> dict[str, Any]:
     """Evaluate the requested Go-template subset against full fake daemon objects.
 
-    Missing source fields raise, like a failed inspect command; no unrelated small fixture
-    is substituted for the actual requested projection. Range retains every mount entry.
+    Fixtures use daemon JSON names; convert the two aliases to typed input fields first.
+    Missing typed source fields raise; this models no raw-JSON fallback or omitempty defaults.
+    Range retains every mount entry. Real CLI compatibility needs separate actual evidence.
     """
+    typed = copy.deepcopy(full)
+    if "Id" in typed:
+        typed["ID"] = typed.pop("Id")
+    if "HostConfig" in typed and "NanoCpus" in typed["HostConfig"]:
+        typed["HostConfig"]["NanoCPUs"] = typed["HostConfig"].pop("NanoCpus")
 
     def lookup(path: str, item: dict[str, Any] | None = None) -> Any:
-        value = full if path.startswith(".") else item
+        value = typed if path.startswith(".") else item
         for key in path.removeprefix("$m.").removeprefix(".").split("."):
             assert value is not None
             value = value[key]
@@ -666,6 +672,32 @@ def leaf_paths(value: dict[str, Any], prefix: tuple[Any, ...] = ()) -> list[tupl
         else:
             paths.append(path)
     return paths
+
+
+def test_typed_selectors_preserve_json_keys_and_explicit_writable_mount(tmp_path: Path) -> None:
+    b, _, _, _, full = compact_fixture(tmp_path)
+    image = {"Id": b.image, "Config": {"Labels": E["image_labels"](b), "Env": []}}
+    for key, fixture in (("IMAGE_INSPECT", image), ("CONTAINER_INSPECT", full), ("CLEANUP", full)):
+        template = E[key]
+        assert "{{json .ID}}" in template and "{{json .Id}}" not in template
+        projected = fake_projection(template, fixture)
+        assert projected["Id"] == fixture["Id"] and "ID" not in projected
+        with pytest.raises(KeyError, match="Id"):
+            fake_projection(template.replace("json .ID}", "json .Id}"), fixture)
+    container = E["CONTAINER_INSPECT"]
+    assert "{{json .HostConfig.NanoCPUs}}" in container
+    assert "{{json .HostConfig.NanoCpus}}" not in container
+    projected = fake_projection(container, full)
+    assert projected["HostConfig"]["NanoCpus"] == 2_000_000_000
+    assert "NanoCPUs" not in projected["HostConfig"]
+    assert projected["HostConfig"]["Mounts"][0]["ReadOnly"] is False
+    with pytest.raises(KeyError, match="NanoCpus"):
+        fake_projection(container.replace(".HostConfig.NanoCPUs}", ".HostConfig.NanoCpus}"), full)
+    # The fake evaluator must not manufacture a writable fact from an omitted field.
+    omitted = copy.deepcopy(full)
+    del omitted["HostConfig"]["Mounts"][0]["ReadOnly"]
+    with pytest.raises(KeyError, match="ReadOnly"):
+        fake_projection(container, omitted)
 
 
 def test_all_projected_required_fields_missing_or_mutated_deny(tmp_path: Path) -> None:
@@ -858,6 +890,14 @@ def test_real_reader_cumulative_lifecycle_and_reserved_cleanup(
 def test_compact_ci_route_preserves_historical_jobs() -> None:
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     branch = "codex/renderer-discriminator-compact-inspection-20261006"
+    assert ci.count(f"github.head_ref == '{branch}' ||") == 5
+    assert f"github.head_ref != '{branch}'" in ci
+    assert "python scripts/check_renderer_execution_source.py" in ci
+
+
+def test_typed_selector_ci_route_stays_source_only() -> None:
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    branch = "codex/renderer-typed-selectors-20261006"
     assert ci.count(f"github.head_ref == '{branch}' ||") == 5
     assert f"github.head_ref != '{branch}'" in ci
     assert "python scripts/check_renderer_execution_source.py" in ci

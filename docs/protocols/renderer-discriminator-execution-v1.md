@@ -40,6 +40,17 @@ compact projections of every consumed admission/confinement field, preserving co
 environment entries, all evaluated resource facts and both mount representations. Missing/malformed
 required fields, duplicate environment entries and mixed authority remain denied. Unconsumed
 daemon layer/driver/default metadata is excluded. Polling and exact-owned cleanup stay compact.
+Projection inputs use Docker's typed Go fields ID and HostConfig.NanoCPUs, while emitted
+JSON keys remain Id and NanoCpus for the unchanged validators. This keeps the typed projection
+path, including explicit writable ReadOnly=false, without defaulting omitted raw-JSON facts.
+Source tests distinguish typed selectors from JSON output names and retain strict field, environment,
+mount and cumulative-byte checks. A separately authorized single never-started confined metadata
+observation on the existing exact image compared original and alias-only templates: the original
+container projection failed and the candidate succeeded; image and cleanup projections succeeded
+with both spellings. Raw created/Running=false/zero StartedAt and owned mount checks preceded
+exact-ID non-forced removal. This qualifies that limited CLI projection path, not body execution,
+dummy/native readiness, historical failure causality or hard resource limits. Private raw evidence
+stays outside the source PR; no historical attempt or omitted case is reopened.
 The dummy command cap remains16KiB, with8KiB reserved for cleanup; discarded overflow bytes still
 count. Required authority/environment content can itself exhaust work capacity and then fails closed;
 source checks establish reachability for representative bounded decisions, not every allowed size. Cleanup reinspects exact ID/name/token/
