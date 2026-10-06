@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from epsbench.diagnostics import causal_history_lifecycle as life
-from epsbench.diagnostics.a1_retention import MIB, recover
+from epsbench.diagnostics.a1_retention import MIB, Budget, recover
 from epsbench.diagnostics.causal_history_audit import MaskScore
 from epsbench.diagnostics.causal_history_execution import (
     BUDGET,
@@ -396,7 +396,9 @@ def test_stale_prefix_fixed_order_changed_roots_and_purposes(tmp_path: Path) -> 
 def test_proof_limits_and_static_paired_call_order() -> None:
     bound = maximum_bytes()
     assert bound["staging"] == MAX_MATERIALIZED == 240 * MIB
-    assert bound["total"] < 1024 * MIB and bound["archive_including_terminal"] < BUDGET.archive
+    assert bound["archive_including_terminal"] == BUDGET.archive == 767 * MIB
+    assert bound["total"] == (240 + 767 + 1 + 1) * MIB == 1058013184
+    assert 1024 * MIB - bound["total"] == 15 * MIB
     assert bound["reserved_seconds"] == 2700 and MAX_FILES == 2048
     # Native guard forbids importing this module. Static review binds call order.
     tree = ast.parse((SOURCE / "src/epsbench/sim/canonical_paired.py").read_text())
@@ -411,6 +413,72 @@ def test_proof_limits_and_static_paired_call_order() -> None:
     ]
     assert calls.count("_render") == 1 and calls.count("_read") == 1
     assert calls.count("_observe") == 4
+
+
+def test_small_chunks_repeated_reservations_and_resume(tmp_path: Path) -> None:
+    path = tmp_path / "archive"
+    budget = Budget(staging=256, shared=0, archive=32 * 1024, terminal_reserve=1024)
+    sink = FiniteArchive(path, BINDING.root, budget)
+    for index in range(2):
+        name = f"control/small-{index}.bin"
+        data = bytes([index]) * 128
+        sink.start(name)
+        for _ in data:
+            sink.reserve_staging(1)
+            sink.chunk(data[:1])
+        sink.commit_transfer(len(data), digest(data))
+        assert b"".join(sink.read_chunks(name)) == data
+        root = sink.history()
+        sink.close()
+        state = recover(path, BINDING.root, budget, root)
+        assert state.staging_reserved == (index + 1) * len(data)
+        assert not state.incomplete and not state.suffix_bytes
+        sink = FiniteArchive(path, BINDING.root, budget, expected_history=root)
+        assert sink.categories == {"control": state.staging_reserved}
+        assert b"".join(sink.read_chunks(name)) == data
+    try:
+        sink.start("control/exhausted.bin")
+        before = path.read_bytes()
+        with pytest.raises(ValueError, match="staging admission denied before write"):
+            sink.reserve_staging(1)
+        assert path.read_bytes() == before and sink.staging_reserved == budget.staging
+        sink.failure("materialization capacity exhausted")
+    finally:
+        sink.close()
+
+
+@pytest.mark.parametrize("record", ("chunk", "stage"))
+def test_framing_capacity_denies_before_write_retains_terminal(tmp_path: Path, record: str) -> None:
+    path = tmp_path / "archive"
+    budget = Budget(staging=512, shared=0, archive=4096, terminal_reserve=1024)
+    sink = FiniteArchive(path, BINDING.root, budget)
+    try:
+        sink.start("control/framing.bin")
+        if record == "chunk":
+            sink.reserve_staging(budget.staging)
+        for _ in range(budget.staging):
+            before = path.read_bytes()
+            try:
+                if record == "chunk":
+                    sink.chunk(b"x")
+                else:
+                    sink.reserve_staging(1)
+            except ValueError as error:
+                assert str(error) == "archive admission denied before write"
+                assert path.read_bytes() == before
+                break
+        else:
+            pytest.fail("small transfer records did not exhaust the archive cap")
+        assert path.stat().st_size <= budget.archive - budget.terminal_reserve
+        sink.failure("framing capacity exhausted")
+        root = sink.history()
+    finally:
+        sink.close()
+    assert len(before) < path.stat().st_size <= budget.archive
+    state = recover(path, BINDING.root, budget, root)
+    assert state.incomplete == ("control/framing.bin",) and not state.suffix_bytes
+    with pytest.raises(ValueError, match="INCOMPLETE_UNCOMMITTED"):
+        FiniteArchive(path, BINDING.root, budget, expected_history=root)
 
 
 @pytest.mark.parametrize("failure", (None, "timeout", "overflow", "cleanup", "prefix"))

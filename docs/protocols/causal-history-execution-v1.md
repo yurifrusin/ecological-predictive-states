@@ -93,14 +93,17 @@ most 36 bool masks (691200 bytes), metadata at most 16 KiB per output, total 2 M
 the seal is at most 256 KiB, private results at most 1 MiB, inspection RGB exactly
 691200 bytes. All other outputs share the enforced category/count ceilings.
 
-At most ceil(240 MiB/64 KiB)+2048=5888 chunks cost at most 1024 framing bytes each;
-each file costs at most 2048 control/framing bytes. Base64 rounding costs at most
-two extra raw-equivalent bytes per artifact. Thus archive content/framing plus 8 MiB
-terminal reserve is at most 354162008 bytes. With 251658240 cumulative materialization,
-1048576 shared and 1048576 host receipts (64 KiB terminal included), the proof totals
-607917400 bytes, below 1 GiB. Live capacities remain 255+1+767+1 MiB=1 GiB. No deletion,
-new container or namespace refunds any bytes or time. Category exhaustion is a terminal
-retained failure, even if typical artifacts would be smaller.
+The full 767 MiB archive cap (804257792 bytes, including the 8 MiB terminal reserve)
+covers all accepted content, base64, framing and control records, including arbitrary
+small CHUNKs and repeated positive STAGE reservations. RetainedArchive checks the
+framed byte size before every append, including after resume; ordinary records cannot
+consume the terminal reserve. No transfer-record count is assumed. With 251658240
+cumulative materialization, 1048576 shared and 1048576 host receipts (64 KiB terminal
+included), the bound is 240+767+1+1=1009 MiB=1058013184 bytes, 15 MiB below 1 GiB.
+Framing exhaustion may reject output before the raw allowance is consumed. Live
+capacities remain 255+1+767+1 MiB=1 GiB. No deletion, new container or namespace refunds
+any bytes or time. Capacity exhaustion is a terminal retained failure, even if typical
+artifacts would be smaller.
 
 Verified artifact reads exhaust bounded hash-checked streams into computational buffers
 without restoring dataset files. Scientific control/journal materialization is durably

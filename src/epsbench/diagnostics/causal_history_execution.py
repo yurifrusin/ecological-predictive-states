@@ -70,15 +70,12 @@ ZERO = "0" * 64
 def maximum_bytes() -> dict[str, int]:
     """Bound every accepted write, not an estimate of typical native artifacts.
 
-    Each artifact costs at most ceil(length/CHUNK) chunks; rounding adds at most
-    MAX_FILES extra chunks. Frame+JSON overhead is bounded by 1KiB per chunk and
-    2KiB per file (paths<=1024 and metadata<=MAX_RECORD). Control/journal charges
-    are part of materialization, including empty copy-charge records.
+    The full prewrite archive cap includes arbitrary accepted CHUNK/STAGE framing,
+    base64 and terminal records; no transfer-record count is assumed. Control and
+    journal charges share cumulative materialization, including empty copy charges.
     """
     staging = 144 * MIB + MAX_CONTROL_BYTES + MAX_PARTIAL_BYTES
-    chunks = (staging + CHUNK - 1) // CHUNK + MAX_FILES
-    framed = 4 * ((staging + 2 * MAX_FILES + 2) // 3) + chunks * 1024 + MAX_FILES * 2048
-    archive = framed + BUDGET.terminal_reserve
+    archive = BUDGET.archive
     total = staging + archive + BUDGET.shared + HOST_LIMIT
     if staging > BUDGET.staging or archive > BUDGET.archive or total > 1024 * MIB:
         raise ValueError("complete output proof fails")
