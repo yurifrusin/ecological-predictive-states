@@ -666,7 +666,7 @@ def test_draw_fault_is_not_masked_by_restoration_operation_failure() -> None:
             raise fault
     assert raised.value is fault
     assert record["initiating_error"]["stage"] == "capture_body"
-    assert record["restoration_operation_errors"][0]["stage"] == "restore_parameters"
+    assert record["restoration_operation_errors"][0]["stage"] == "restore_parameters[0]"
     assert record["restored_validation_errors"]
     assert sampler.calls["set"] == 8 and sampler.calls["restore"] == 1
     data = canonical_json_bytes(record)
@@ -842,4 +842,125 @@ def test_query_cleanup_only_fault_does_not_claim_last_queried_field() -> None:
         "exception": "OSError",
     }
     assert record["restoration"] == "RESTORED"
+    assert len(d.sampler_failure_bytes(record)) <= 16384
+
+
+@pytest.mark.parametrize("cleanup_fault", [False, True])
+def test_actual_native_setter_keeps_parameter_fault_and_local_cleanup(cleanup_fault: bool) -> None:
+    class FakeGL:
+        GL_TEXTURE0 = 33984
+        GL_TEXTURE_2D = 3553
+        GL_TEXTURE_MIN_FILTER = 10241
+        GL_TEXTURE_MAG_FILTER = 10240
+        GL_TEXTURE_BASE_LEVEL = 33084
+        GL_TEXTURE_MAX_LEVEL = 33085
+
+        def glActiveTexture(self, value: int) -> None:
+            pass
+
+        def glBindTexture(self, target: int, obj: int) -> None:
+            pass
+
+        def glTexParameteri(self, target: int, name: int, value: int) -> None:
+            raise RuntimeError("synthetic setter initiating fault")
+
+    class ActualSetter(Sampler):
+        set_parameters = d.NativeSampler.set_parameters
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.gl: Any = FakeGL()
+            self.objects = (2001, 2002, 2003, 2004)
+
+        def restore_bindings(self, saved: tuple[int, int, int]) -> None:
+            super().restore_bindings(saved)
+            if cleanup_fault:
+                raise OSError("synthetic setter local cleanup fault")
+
+    sampler = ActualSetter()
+    record: dict[str, Any] = {}
+    with pytest.raises(d.SamplerOperationFault) as raised:
+        with d.sampler_override(sampler, "nearest", record):
+            pytest.fail("setter fault must stop capture")
+    assert isinstance(raised.value.initiating, RuntimeError)
+    assert record["initiating_error"] == {
+        "stage": "override_operation",
+        "field": "textures[0].min",
+        "exception": "RuntimeError",
+    }
+    assert record["override_operation_partial_operation"]["index"] == 0
+    cleanup = record["override_operation_operation_restoration_errors"]
+    assert bool(cleanup) is cleanup_fault
+    if cleanup_fault:
+        assert cleanup[0]["stage"] == "parameters_restore_bindings"
+        assert cleanup[0]["exception"] == "OSError"
+    # All four restoration parameter operations are attempted and retain their local failures.
+    assert len(record["restoration_operation_errors"]) == 4 + int(cleanup_fault)
+    assert record["restore_parameters[0]_operation_restoration_errors"] == cleanup
+    assert record["restoration"] == "FAILED_CLOSED"
+    assert len(d.sampler_failure_bytes(record)) <= 16384
+
+
+@pytest.mark.parametrize("cleanup_fault", [False, True])
+def test_actual_native_bindings_keeps_unit0_query_fault_and_active_cleanup(
+    cleanup_fault: bool,
+) -> None:
+    class FakeGL:
+        GL_TEXTURE0 = 33984
+        GL_ACTIVE_TEXTURE = 34016
+        GL_TEXTURE_BINDING_2D = 32873
+
+        def __init__(self) -> None:
+            self.gets = 0
+            self.activations = 0
+
+        def glGetIntegerv(self, name: int) -> int:
+            self.gets += 1
+            if self.gets == 3:
+                raise RuntimeError("synthetic unit0 binding query fault")
+            return 33984 if self.gets == 1 else 2004
+
+        def glActiveTexture(self, value: int) -> None:
+            self.activations += 1
+            if cleanup_fault and self.activations == 2:
+                raise OSError("synthetic active-unit cleanup fault")
+
+    class Context:
+        def make_current(self) -> None:
+            pass
+
+    class Renderer:
+        _gl_context = Context()
+
+    class ActualBindings(Sampler):
+        bindings = d.NativeSampler.bindings
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.gl: Any = FakeGL()
+            self.renderer: Any = Renderer()
+
+    sampler = ActualBindings()
+    record: dict[str, Any] = {}
+    with pytest.raises(d.SamplerOperationFault) as raised:
+        with d.sampler_override(sampler, "nearest", record):
+            pytest.fail("binding query fault must stop capture")
+    assert isinstance(raised.value.initiating, RuntimeError)
+    assert record["initiating_error"] == {
+        "stage": "baseline_query",
+        "field": "unit0_binding",
+        "exception": "RuntimeError",
+    }
+    assert record["baseline_query_partial_operation"] == {
+        "active_unit": 33984,
+        "active_binding": 2004,
+    }
+    cleanup = record["baseline_query_operation_restoration_errors"]
+    assert bool(cleanup) is cleanup_fault
+    if cleanup_fault:
+        assert cleanup[0]["stage"] == "bindings_restore_active_unit"
+        assert cleanup[0]["exception"] == "OSError"
+    assert record["restoration"] == "FAILED_CLOSED"
+    assert record["restoration_operation_errors"][0]["status"] == "UNAVAILABLE"
+    assert sampler.gl.activations == 2
     assert len(d.sampler_failure_bytes(record)) <= 16384

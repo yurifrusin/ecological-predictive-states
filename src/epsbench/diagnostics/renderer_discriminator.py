@@ -553,7 +553,7 @@ class SamplerFault(ValueError):
         self.field = field
 
 
-class SamplerQueryFault(SamplerFault):
+class SamplerOperationFault(SamplerFault):
     def __init__(
         self,
         field: str,
@@ -562,14 +562,29 @@ class SamplerQueryFault(SamplerFault):
         restoration: list[dict[str, Any]],
         validation: list[dict[str, Any]],
     ):
-        super().__init__("sampler query failed closed", field)
+        super().__init__("sampler operation failed closed", field)
         self.facts = facts
         self.initiating = initiating
         self.restoration = restoration
         self.validation = validation
 
 
+class SamplerQueryFault(SamplerOperationFault):
+    """Query facts additionally include queried sampler and texture fields."""
+
+
 def sampler_fault(exc: BaseException, stage: str, field: str) -> dict[str, Any]:
+    if isinstance(exc, SamplerOperationFault):
+        cause = exc.initiating
+        local = exc.restoration or exc.validation
+        return {
+            "stage": stage,
+            "field": exc.field[:96] if cause is not None else local[0]["field"],
+            "exception": type(cause).__name__[:64] if cause is not None else local[0]["exception"],
+            "local_restoration_errors": exc.restoration,
+            "local_restored_validation_errors": exc.validation,
+            "partial_operation": sampler_observation(exc.facts),
+        }
     return {
         "stage": stage,
         "field": (exc.field if isinstance(exc, SamplerFault) else field)[:96],
@@ -633,14 +648,15 @@ def retain_sampler_fault(
     stage: str,
     field: str,
 ) -> dict[str, Any]:
-    if isinstance(exc, SamplerQueryFault):
-        record[stage + "_partial_query"] = sampler_observation(exc.facts)
-        record[stage + "_query_restoration_errors"] = exc.restoration
-        record[stage + "_query_restored_validation_errors"] = exc.validation
+    if isinstance(exc, SamplerOperationFault):
+        operation = "query" if isinstance(exc, SamplerQueryFault) else "operation"
+        record[stage + "_partial_" + operation] = sampler_observation(exc.facts)
+        record[stage + "_" + operation + "_restoration_errors"] = exc.restoration
+        record[stage + "_" + operation + "_restored_validation_errors"] = exc.validation
         if exc.initiating is not None:
             return sampler_fault(exc.initiating, stage, exc.field)
         cleanup = (exc.restoration or exc.validation)[0]
-        return {**cleanup, "stage": stage, "query_stage": cleanup["stage"]}
+        return {**cleanup, "stage": stage, operation + "_stage": cleanup["stage"]}
     return sampler_fault(exc, stage, field)
 
 
@@ -651,7 +667,9 @@ class SamplerRetentionFault(ValueError):
 def sampler_failure_bytes(record: dict[str, Any], budget: int = 16384) -> bytes:
     """Keep causal context first, then observations within unchanged remaining caps."""
     budget = min(budget, 16384)
+    operation_snapshots = tuple(key for key in record if key.endswith("_partial_operation"))
     snapshots = (
+        *operation_snapshots,
         "baseline_query_partial_query",
         "original",
         "restored_query_partial_query",
@@ -719,7 +737,11 @@ def sampler_override(sampler: Sampler, setting: str, record: dict[str, Any]) -> 
             try:
                 sampler.set_parameters(index, values)
             except BaseException as exc:
-                operations.append(sampler_fault(exc, "restore_parameters", f"textures[{index}]"))
+                operations.append(
+                    retain_sampler_fault(
+                        record, exc, f"restore_parameters[{index}]", f"textures[{index}]"
+                    )
+                )
         if saved is not None:
             try:
                 sampler.restore_bindings(saved)
@@ -783,12 +805,24 @@ class NativeSampler:
         gl = self.gl
         active = int(gl.glGetIntegerv(gl.GL_ACTIVE_TEXTURE))
         binding = int(gl.glGetIntegerv(gl.GL_TEXTURE_BINDING_2D))
+        facts: dict[str, Any] = {"active_unit": active, "active_binding": binding}
+        initiating = None
+        faults: list[dict[str, Any]] = []
+        field = "unit0_activation"
         try:
             gl.glActiveTexture(gl.GL_TEXTURE0)
-            zero = int(gl.glGetIntegerv(gl.GL_TEXTURE_BINDING_2D))
+            field = "unit0_binding"
+            facts["unit0_binding"] = int(gl.glGetIntegerv(gl.GL_TEXTURE_BINDING_2D))
+        except BaseException as exc:
+            initiating = exc
         finally:
-            gl.glActiveTexture(active)
-        return active, binding, zero
+            try:
+                gl.glActiveTexture(active)
+            except BaseException as exc:
+                faults.append(sampler_fault(exc, "bindings_restore_active_unit", "active_unit"))
+        if initiating is not None or faults:
+            raise SamplerOperationFault(field, facts, initiating, faults, []) from initiating
+        return active, binding, int(facts["unit0_binding"])
 
     def restore_bindings(self, saved: tuple[int, int, int]) -> None:
         gl = self.gl
@@ -802,10 +836,22 @@ class NativeSampler:
             raise ValueError("owned texture index required")
         saved = self.bindings()
         gl = self.gl
+        facts: dict[str, Any] = {
+            "active_unit": saved[0],
+            "active_binding": saved[1],
+            "unit0_binding": saved[2],
+            "index": index,
+            "object": self.objects[index],
+        }
+        initiating = None
+        faults: list[dict[str, Any]] = []
+        field = "unit0_activation"
         try:
             gl.glActiveTexture(gl.GL_TEXTURE0)
+            field = f"textures[{index}].binding"
             gl.glBindTexture(gl.GL_TEXTURE_2D, self.objects[index])
-            for name, value in zip(
+            for key, name, value in zip(
+                PARAMS,
                 (
                     gl.GL_TEXTURE_MIN_FILTER,
                     gl.GL_TEXTURE_MAG_FILTER,
@@ -815,9 +861,17 @@ class NativeSampler:
                 values,
                 strict=True,
             ):
+                field = f"textures[{index}].{key}"
                 gl.glTexParameteri(gl.GL_TEXTURE_2D, name, value)
+        except BaseException as exc:
+            initiating = exc
         finally:
-            self.restore_bindings(saved)
+            try:
+                self.restore_bindings(saved)
+            except BaseException as exc:
+                faults.append(sampler_fault(exc, "parameters_restore_bindings", "bindings"))
+        if initiating is not None or faults:
+            raise SamplerOperationFault(field, facts, initiating, faults, []) from initiating
 
     def query(self) -> dict[str, Any]:
         saved = self.bindings()
