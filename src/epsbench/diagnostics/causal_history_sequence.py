@@ -530,6 +530,15 @@ class SequenceEvidence(Record):
 
 
 @dataclass(frozen=True)
+class Progress:
+    """Synchronous privileged operational notification, never a scientific envelope."""
+
+    stage: str
+    index: int
+    value: Any = None
+
+
+@dataclass(frozen=True)
 class RetainedFrame:
     optical: OpticalFrame
     rgb: Array
@@ -555,10 +564,16 @@ def encode_sequence(
     sequence: SequenceEvidence,
     frames: tuple[RetainedFrame, ...],
     flows: tuple[RetainedFlow, ...],
+    partial: bool = False,
 ) -> tuple[bytes, dict[str, bytes]]:
     """Bound sizes before copying/serializing; returns only deterministic artifact bytes."""
+    if type(partial) is not bool:
+        raise ValueError("typed partial evidence mode required")
     _, pair, _ = candidate(canonical(config), member)
-    if len(frames) != len(pair["poses"]) or len(flows) != len(frames) - 1:
+    if partial:
+        if len(frames) > len(pair["poses"]) or len(flows) > max(0, len(frames) - 1):
+            raise ValueError("partial evidence must be an ordered fixed-member prefix")
+    elif len(frames) != len(pair["poses"]) or len(flows) != len(frames) - 1:
         raise ValueError("exact sequence count required before encoding")
     artifacts: dict[str, bytes] = {}
     specs: dict[str, Artifact] = {}
@@ -738,6 +753,10 @@ def encode_sequence(
             ),
         )
         flow_refs.append(flow_record.model_copy(update={"identity": _identity(flow_record, specs)}))
+    if partial:
+        # The same reviewed encoder validates/recomputes evidence and final names.
+        # No partial scientific envelope can authorize projection or target release.
+        return b"", artifacts
     env = Envelope(
         version=VERSION,
         member=member,

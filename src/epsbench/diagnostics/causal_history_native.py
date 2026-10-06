@@ -7,13 +7,13 @@ held for a later independently reviewed source/image-bound execution controller.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Protocol
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 import numpy as np
 
-from epsbench.diagnostics.causal_history_core import Array, CompletedFlow, OpticalFrame
+from epsbench.diagnostics.causal_history_core import Array, CompletedFlow, OpticalFrame, owned
 from epsbench.diagnostics.causal_history_sequence import (
     HEIGHT,
     WIDTH,
@@ -25,6 +25,9 @@ from epsbench.diagnostics.causal_history_sequence import (
     canonical,
     commands,
     digest,
+)
+from epsbench.diagnostics.causal_history_sequence import (
+    Progress as Progress,
 )
 from epsbench.diagnostics.causal_history_sequence import (
     admit_flow as admit_flow,
@@ -185,19 +188,48 @@ class ProducedSequence:
     operational: tuple[dict[str, Any], ...]
 
 
+ProgressHook = Callable[[Progress], None]
+
+
 def produce_sequence(
-    payload: bytes, member: str, *, factory: Callable[[str], Backend]
+    payload: bytes,
+    member: str,
+    *,
+    factory: Callable[[str], Backend],
+    progress: ProgressHook | None = None,
 ) -> ProducedSequence:
     """Explicit backend injection; no default native route is enabled here."""
     config, pair, ordinal = candidate(payload, member)
     xml = build_sequence_xml(payload, member)
+    stage, current_index = "compile", 0
     backend = factory(xml)  # Exactly one compilation/resource owner for one sequence.
+    callback_failed = False
+    callback = progress
+
+    def notify(event: Progress) -> None:
+        nonlocal callback_failed
+        assert callback is not None
+        try:
+            callback(event)
+        except BaseException:
+            callback_failed = True
+            raise
+
+    progress = None if callback is None else notify
     try:
         mapping = opaque_mapping(pair["seeds"][ordinal], backend.raw_ids)
         by_raw = {raw: (label, token) for raw, label, token in mapping}
+        sequence = SequenceEvidence(
+            mapping=mapping, compiled=backend.compiled, xml_sha256=digest(xml.encode())
+        )
+        if progress is not None:
+            progress(Progress("sequence", 0, sequence.model_copy(deep=True)))
         captures = []
         frames = []
         for i, position in enumerate(pair["poses"]):
+            stage, current_index = "capture", i
+            if progress is not None:
+                progress(Progress("capture_attempt", i))
             captured = backend.capture(
                 position
             )  # One RGB + one paired draw, never a counterfactual draw.
@@ -243,8 +275,26 @@ def produce_sequence(
                 )
             )
             captures.append(captured)
+            if progress is not None:
+                progress(
+                    Progress("frame_operations", i, canonical(_jsonable(captured.operational)))
+                )
+                frame = frames[-1]
+                progress(
+                    Progress(
+                        "frame",
+                        i,
+                        replace(
+                            frame,
+                            rgb=owned(frame.rgb),
+                            arrays=tuple(owned(a) for a in frame.arrays),
+                            evidence=frame.evidence.model_copy(deep=True),
+                        ),
+                    )
+                )
         flows = []
         for i, command in enumerate(commands(config, member)):
+            stage, current_index = "transport", i
             transport, samples = backend.transport(captures[i], captures[i + 1])
             forward, backward = transport.forward, transport.backward
             evidence, source_mismatch, target_mismatch = admit_flow(
@@ -273,14 +323,20 @@ def produce_sequence(
                 target_mismatch,
             )
             flows.append(RetainedFlow(optical, evidence, arrays))
+            if progress is not None:
+                progress(
+                    Progress("flow", i, replace(flows[-1], arrays=tuple(owned(a) for a in arrays)))
+                )
         return ProducedSequence(
-            SequenceEvidence(
-                mapping=mapping, compiled=backend.compiled, xml_sha256=digest(xml.encode())
-            ),
+            sequence,
             tuple(frames),
             tuple(flows),
             tuple(c.operational for c in captures),
         )
+    except BaseException as error:
+        if progress is not None and not callback_failed:
+            progress(Progress("failure", current_index, (stage, type(error).__name__)))
+        raise
     finally:
         backend.close()
 
@@ -301,7 +357,9 @@ def _jsonable(value: Any) -> Any:
 class NativeBackend:
     """Lazy source implementation only; invocation is held pending execution review."""
 
-    def __init__(self, xml: str):
+    def __init__(
+        self, xml: str, *, progress: ProgressHook | None = None, compile_only: bool = False
+    ):
         import mujoco
 
         from epsbench.annotations.boundary_events import verify_attachment_contract
@@ -309,6 +367,8 @@ class NativeBackend:
         from epsbench.sim.compiled import extract_compiled_scene_contract
 
         self.mujoco = mujoco
+        self.progress = progress
+        self.capture_index = 0
         self.model = mujoco.MjModel.from_xml_string(xml)
         self.data = mujoco.MjData(self.model)
         self.camera_id = mujoco.mj_name2id(
@@ -344,12 +404,24 @@ class NativeBackend:
             or self.model.vis.quality.offsamples != 0
         ):
             raise ValueError("compiled fixed statistics differ")
-        self.renderer = mujoco.Renderer(self.model, height=HEIGHT, width=WIDTH)
+        self.renderer = (
+            None if compile_only else mujoco.Renderer(self.model, height=HEIGHT, width=WIDTH)
+        )
+        self.paired = None
+        if compile_only:
+            return
         try:
-            self.paired = CanonicalPairedRenderer(self.renderer)
+            self.paired = CanonicalPairedRenderer(
+                self.renderer, progress_observer=self._paired_progress if progress else None
+            )
         except BaseException:
-            self.renderer.close()
+            if self.renderer is not None:
+                self.renderer.close()
             raise
+
+    def _paired_progress(self, stage: str, value: Any) -> None:
+        if self.progress is not None:
+            self.progress(Progress("paired_" + stage, self.capture_index, value))
 
     def capture(self, position: float) -> Capture:
         from epsbench.annotations.boundary_events import (
@@ -361,13 +433,20 @@ class NativeBackend:
             counterfactual_surface_assignments,
         )
 
+        if self.renderer is None or self.paired is None:
+            raise ValueError("compile-only backend cannot capture")
+
         self.model.cam_pos[self.camera_id, 0] = position
         self.mujoco.mj_forward(self.model, self.data)
         self.renderer.update_scene(self.data, camera=self.camera_id)
         self.renderer.scene.flags[self.mujoco.mjtRndFlag.mjRND_SHADOW] = False
         self.renderer.scene.flags[self.mujoco.mjtRndFlag.mjRND_FOG] = False
         self.renderer.scene.flags[self.mujoco.mjtRndFlag.mjRND_HAZE] = False
+        if self.progress is not None:
+            self.progress(Progress("rgb_attempt", self.capture_index))
         rgb = np.asarray(self.renderer.render(), dtype=np.uint8).copy()
+        if self.progress is not None:
+            self.progress(Progress("rgb_read", self.capture_index, owned(rgb)))
         # The same scene/camera remains installed; paired owns its one draw/read.
         paired = self.paired.capture()
         expected_near = float(self.model.vis.map.znear * self.model.stat.extent)
@@ -403,7 +482,7 @@ class NativeBackend:
             raw_boundaries=tuple(asdict(v) for v in boundaries),
             attachment=_jsonable(asdict(self.attachment)),
         )
-        return Capture(
+        result = Capture(
             rgb,
             paired.raw_geom_segmentation,
             camera,
@@ -418,6 +497,8 @@ class NativeBackend:
             evidence.raw_boundaries,
             dict(paired.operational_state),
         )
+        self.capture_index += 1
+        return result
 
     def transport(self, before: Capture, after: Capture) -> tuple[Any, Array]:
         from epsbench.annotations.optical_transport import (
@@ -445,4 +526,5 @@ class NativeBackend:
         return transport, samples
 
     def close(self) -> None:
-        self.renderer.close()
+        if self.renderer is not None:
+            self.renderer.close()
