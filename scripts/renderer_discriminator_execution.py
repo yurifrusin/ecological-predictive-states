@@ -35,10 +35,77 @@ BINDING_LABEL = "eps.renderer-discriminator.binding"
 IMAGE_PREFIX = "eps.renderer-discriminator."
 HOST_ACTUAL, HOST_DUMMY, RECEIPT_CAP = 768 * 1024, 256 * 1024, 16384
 POLL = "{{.State.Running}} {{.State.ExitCode}} {{.State.OOMKilled}}"
+# These projections are local to this adapter; complete labels/environment remain visible.
+IMAGE_INSPECT = (
+    '{"Id":{{json .Id}},"Config":{"Labels":{{json .Config.Labels}},"Env":{{json .Config.Env}}}}'
+)
+MOUNT_INSPECT = (
+    "[{{range $i, $m := .Mounts}}{{if $i}},{{end}}"
+    '{"Type":{{json $m.Type}},"Source":{{json $m.Source}},'
+    '"Destination":{{json $m.Destination}},"RW":{{json $m.RW}}}{{end}}]'
+)
+HOST_FIELDS = (
+    "Binds",
+    "Privileged",
+    "ReadonlyRootfs",
+    "NetworkMode",
+    "CapDrop",
+    "CapAdd",
+    "SecurityOpt",
+    "Memory",
+    "MemorySwap",
+    "NanoCpus",
+    "CpusetCpus",
+    "PidsLimit",
+    "ShmSize",
+    "Tmpfs",
+)
+CONTAINER_INSPECT = (
+    '{"Id":{{json .Id}},"Name":{{json .Name}},"Image":{{json .Image}},'
+    '"Config":{"Labels":{{json .Config.Labels}},"Env":{{json .Config.Env}},'
+    '"Cmd":{{json .Config.Cmd}},"Entrypoint":{{json .Config.Entrypoint}}},'
+    '"Mounts":'
+    + MOUNT_INSPECT
+    + ',"HostConfig":{'
+    + ",".join('"' + key + '":{{json .HostConfig.' + key + "}}" for key in HOST_FIELDS)
+    + ',"LogConfig":{"Type":{{json .HostConfig.LogConfig.Type}}},'
+    '"RestartPolicy":{"Name":{{json .HostConfig.RestartPolicy.Name}}},'
+    '"Mounts":[{{range $i, $m := .HostConfig.Mounts}}{{if $i}},{{end}}'
+    '{"Type":{{json $m.Type}},"Source":{{json $m.Source}},'
+    '"Target":{{json $m.Target}},"ReadOnly":{{json $m.ReadOnly}}}{{end}}]}}'
+)
 CLEANUP = (
     '{"Id":{{json .Id}},"Name":{{json .Name}},'
-    '"Config":{"Labels":{{json .Config.Labels}}},"Mounts":{{json .Mounts}}}'
+    '"Config":{"Labels":{{json .Config.Labels}}},"Mounts":' + MOUNT_INSPECT + "}"
 )
+
+
+def required_fields(info: Any, keys: tuple[str, ...]) -> None:
+    if type(info) is not dict or any(key not in info for key in keys):
+        raise PermissionError("missing/malformed inspection fields")
+
+
+def inspected_environment(config: dict[str, Any]) -> dict[str, str]:
+    required_fields(config, ("Env",))
+    entries = config["Env"]
+    if type(entries) is not list or any(type(v) is not str or "=" not in v for v in entries):
+        raise PermissionError("malformed inspection environment")
+    values = dict(v.split("=", 1) for v in entries)
+    if len(values) != len(entries):
+        raise PermissionError("duplicate inspection environment")
+    no_mixed(values)
+    return values
+
+
+def inspection_labels(info: dict[str, Any]) -> dict[str, Any]:
+    required_fields(info, ("Config",))
+    required_fields(info["Config"], ("Labels",))
+    labels = info["Config"]["Labels"]
+    if type(labels) is not dict or any(
+        type(k) is not str or type(v) is not str for k, v in labels.items()
+    ):
+        raise PermissionError("malformed inspection labels")
+    return cast(dict[str, Any], labels)
 
 
 class Commands:
@@ -181,14 +248,13 @@ def environment(binding: d.Binding, decision: d.Decision, wall: float) -> dict[s
 
 
 def image_admission(info: dict[str, Any], binding: d.Binding) -> None:
-    if info.get("Id") != binding.image or any(
-        info.get("Config", {}).get("Labels", {}).get(k) != v
-        for k, v in image_labels(binding).items()
+    required_fields(info, ("Id", "Config"))
+    labels = inspection_labels(info)
+    if info["Id"] != binding.image or any(
+        labels.get(k) != v for k, v in image_labels(binding).items()
     ):
         raise PermissionError("immutable image/source labels differ before create")
-    env = info.get("Config", {}).get("Env", [])
-    values = dict(v.split("=", 1) for v in env)
-    no_mixed(values)
+    values = inspected_environment(info["Config"])
     if any(k.startswith(PREFIX) for k in values):
         raise PermissionError("prepared image cannot embed launch authority")
 
@@ -232,6 +298,8 @@ def create_arguments(
 
 
 def owned(info: dict[str, Any], binding: d.Binding, identity: str | None = None) -> None:
+    required_fields(info, ("Id", "Name", "Config"))
+    inspection_labels(info)
     if (
         type(info.get("Id")) is not str
         or re.fullmatch(r"[0-9a-f]{64}", info["Id"]) is None
@@ -253,7 +321,12 @@ def mount_sources(output: Path) -> set[str]:
 
 
 def sole_mount(info: dict[str, Any], output: Path) -> None:
-    mounts = info.get("Mounts", [])
+    required_fields(info, ("Mounts",))
+    mounts = info["Mounts"]
+    if type(mounts) is not list:
+        raise PermissionError("malformed output mounts")
+    for mount in mounts:
+        required_fields(mount, ("Type", "Source", "Destination", "RW"))
     if (
         len(mounts) != 1
         or mounts[0].get("Type") != "bind"
@@ -274,14 +347,29 @@ def inspect_confinement(
 ) -> None:
     owned(info, binding)
     sole_mount(info, output)
+    required_fields(info, ("HostConfig", "Image"))
     h = info["HostConfig"]
-    definitions = h.get("Mounts", [])
+    required_fields(h, (*HOST_FIELDS, "Mounts", "LogConfig", "RestartPolicy"))
+    required_fields(h["LogConfig"], ("Type",))
+    required_fields(h["RestartPolicy"], ("Name",))
+    required_fields(info["Config"], ("Cmd", "Entrypoint"))
+    definitions = h["Mounts"]
+    if type(definitions) is not list:
+        raise PermissionError("malformed bind definitions")
+    for mount in definitions:
+        required_fields(mount, ("Type", "Source", "Target", "ReadOnly"))
+    if type(h["SecurityOpt"]) is not list or any(type(v) is not str for v in h["SecurityOpt"]):
+        raise PermissionError("malformed security options")
+    for value in (h["Binds"], h["CapAdd"], info["Config"]["Entrypoint"]):
+        if value is not None and (
+            type(value) is not list or any(type(v) is not str for v in value)
+        ):
+            raise PermissionError("malformed optional inspection arrays")
     command = ["python", "scripts/renderer_discriminator_execution.py", "--inside"]
     if case:
         command.extend(("--case", case))
     env_list = info["Config"].get("Env", [])
-    env = dict(v.split("=", 1) for v in env_list)
-    no_mixed(env)
+    env = inspected_environment(info["Config"])
     expected = environment(binding, decision, wall)
     if len(env) != len(env_list) or {k for k in env if k.startswith(PREFIX)} != {
         k for k in expected if k.startswith(PREFIX)
@@ -293,7 +381,7 @@ def inspect_confinement(
         or definitions[0].get("Type") != "bind"
         or definitions[0].get("Source") != str(output)
         or definitions[0].get("Target") != "/output"
-        or definitions[0].get("ReadOnly", False) is not False
+        or definitions[0].get("ReadOnly") is not False
         or any(
             type(h.get(k)) is not int
             for k in ("Memory", "MemorySwap", "NanoCpus", "PidsLimit", "ShmSize")
@@ -614,7 +702,7 @@ def host_run(
         output.mkdir()  # The sole mount is empty; host never writes the native consumed anchor.
         image = json.loads(
             commands.command(
-                ["image", "inspect", "--format", "{{json .}}", binding.image], work_deadline
+                ["image", "inspect", "--format", IMAGE_INSPECT, binding.image], work_deadline
             )
         )
         image_admission(image, binding)
@@ -626,7 +714,7 @@ def host_run(
             raise ValueError("lost/malformed create identity; exact-name cleanup required")
         identity = created_id
         info = json.loads(
-            commands.command(["inspect", "--format", "{{json .}}", identity], work_deadline)
+            commands.command(["inspect", "--format", CONTAINER_INSPECT, identity], work_deadline)
         )
         owned(info, binding, identity)
         inspect_confinement(info, binding, decision, output, case, wall)
