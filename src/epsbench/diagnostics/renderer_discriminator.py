@@ -456,26 +456,28 @@ def validate_sampler(state: dict[str, Any], setting: str) -> None:
         "texture_env_mode",
         "textures",
     }:
-        raise ValueError("closed sampler fields")
+        raise SamplerFault("closed sampler fields", "state.fields")
     if any(
         type(state[k]) is not int or state[k] < 0
         for k in ("active_unit", "active_binding", "unit0_binding")
     ):
-        raise ValueError("actual texture bindings unavailable")
+        raise SamplerFault("actual texture bindings unavailable", "bindings")
     if (
         state["sampler_binding"] != 0
         or type(state["sampler_binding"]) is not int
         or state["texture_env_mode"] != 8448
         or state["texture_matrix"] != np.eye(4, dtype=np.float32).reshape(-1).tolist()
     ):
-        raise ValueError("actual unit0 sampler/environment/matrix differs")
+        raise SamplerFault(
+            "actual unit0 sampler/environment/matrix differs", "unit0.sampler_environment_matrix"
+        )
     textures = state["textures"]
     if (
         type(textures) is not list
         or len(textures) != 4
         or len({v["object"] for v in textures}) != 4
     ):
-        raise ValueError("complete owned texture inventory")
+        raise SamplerFault("complete owned texture inventory", "textures.inventory")
     expected = FIXED["sampling"][setting]
     for tex in textures:
         for key in (
@@ -490,7 +492,9 @@ def validate_sampler(state: dict[str, Any], setting: str) -> None:
             *PARAMS,
         ):
             if type(tex.get(key)) is not int:
-                raise ValueError("strict actual sampler integer fields")
+                raise SamplerFault(
+                    "strict actual sampler integer fields", "textures.integer_fields"
+                )
     for index, tex in enumerate(textures):
         if (
             set(tex)
@@ -536,45 +540,227 @@ def validate_sampler(state: dict[str, Any], setting: str) -> None:
             != (-1000.0, 1000.0, 0.0, 0, 1.0)
             or [tex[k] for k in PARAMS] != expected
         ):
-            raise ValueError("actual owned texture setting/content mismatch")
+            raise SamplerFault(
+                "actual owned texture setting/content mismatch", "textures.setting_content"
+            )
+
+
+class SamplerFault(ValueError):
+    """Closed diagnostic context; no exception messages or tracebacks are retained."""
+
+    def __init__(self, message: str, field: str):
+        super().__init__(message)
+        self.field = field
+
+
+class SamplerQueryFault(SamplerFault):
+    def __init__(
+        self,
+        field: str,
+        facts: dict[str, Any],
+        initiating: BaseException | None,
+        restoration: list[dict[str, Any]],
+        validation: list[dict[str, Any]],
+    ):
+        super().__init__("sampler query failed closed", field)
+        self.facts = facts
+        self.initiating = initiating
+        self.restoration = restoration
+        self.validation = validation
+
+
+def sampler_fault(exc: BaseException, stage: str, field: str) -> dict[str, Any]:
+    return {
+        "stage": stage,
+        "field": (exc.field if isinstance(exc, SamplerFault) else field)[:96],
+        "exception": type(exc).__name__[:64],
+    }
+
+
+def sampler_observation(state: dict[str, Any], *, texture: bool = False) -> dict[str, Any]:
+    """Bound unvalidated observations to the closed query vocabulary and fixed inventory."""
+    if type(state) is not dict:
+        return {}
+    scalar_fields = {
+        "active_unit",
+        "active_binding",
+        "unit0_binding",
+        "sampler_binding",
+        "texture_env_mode",
+        "index",
+        "target",
+        "object",
+        "colorspace",
+        "pixels",
+        "width",
+        "height",
+        "internal_format",
+        "wrap_s",
+        "wrap_t",
+        "min_lod",
+        "max_lod",
+        "lod_bias",
+        "compare_mode",
+        "anisotropy",
+        *PARAMS,
+    }
+    result: dict[str, Any] = {}
+    for key in scalar_fields:
+        value = state.get(key)
+        if type(value) is int and -(2**63) <= value < 2**63:
+            result[key] = value
+        elif type(value) is float and math.isfinite(value):
+            result[key] = value
+        elif type(value) is str and len(value) <= 64:
+            result[key] = value
+    matrix = state.get("texture_matrix")
+    if not texture and type(matrix) is list:
+        result["texture_matrix"] = [
+            v if type(v) in (int, float) and abs(v) < 2**63 and math.isfinite(v) else None
+            for v in matrix[:16]
+        ]
+    textures = state.get("textures")
+    if not texture and type(textures) is list:
+        result["textures"] = [
+            sampler_observation(v, texture=True) for v in textures[:4] if type(v) is dict
+        ]
+    return result
+
+
+def retain_sampler_fault(
+    record: dict[str, Any],
+    exc: BaseException,
+    stage: str,
+    field: str,
+) -> dict[str, Any]:
+    if isinstance(exc, SamplerQueryFault):
+        record[stage + "_partial_query"] = sampler_observation(exc.facts)
+        record[stage + "_query_restoration_errors"] = exc.restoration
+        record[stage + "_query_restored_validation_errors"] = exc.validation
+        if exc.initiating is not None:
+            return sampler_fault(exc.initiating, stage, exc.field)
+        cleanup = (exc.restoration or exc.validation)[0]
+        return {**cleanup, "stage": stage, "query_stage": cleanup["stage"]}
+    return sampler_fault(exc, stage, field)
+
+
+class SamplerRetentionFault(ValueError):
+    """Retention failed; this exception does not identify a sampler predicate."""
+
+
+def sampler_failure_bytes(record: dict[str, Any], budget: int = 16384) -> bytes:
+    """Keep causal context first, then observations within unchanged remaining caps."""
+    budget = min(budget, 16384)
+    snapshots = (
+        "baseline_query_partial_query",
+        "original",
+        "restored_query_partial_query",
+        "restored",
+        "selected_query_partial_query",
+        "capture_body_partial_query",
+        "selected",
+        "rgb_before",
+        "rgb_after",
+        "pair_before",
+        "pair_after",
+    )
+    retained = {key: value for key, value in record.items() if key not in snapshots}
+    retained["observations"] = "UNVALIDATED"
+    retained["omitted_observations"] = [key for key in snapshots if key in record]
+    if len(canonical_json_bytes(retained)) > budget:
+        raise SamplerRetentionFault("sampler failure context exceeds remaining retention capacity")
+    for key in snapshots:
+        if key not in record:
+            continue
+        candidate = dict(retained)
+        candidate[key] = sampler_observation(record[key])
+        candidate["omitted_observations"] = [
+            name for name in retained["omitted_observations"] if name != key
+        ]
+        if len(canonical_json_bytes(candidate)) <= budget:
+            retained = candidate
+    return canonical_json_bytes(retained)
 
 
 @contextmanager
 def sampler_override(sampler: Sampler, setting: str, record: dict[str, Any]) -> Iterator[None]:
-    """Restore every owned override and both unit bindings even after query/set/draw faults."""
+    """Restore owned state and retain distinct bounded failure observations."""
     if setting not in ("default", "nearest"):
         raise ValueError("closed sampling factor")
-    saved = sampler.bindings()
     originals: list[tuple[int, int, int, int]] = []
+    saved = None
+    initiating = None
+    stage, field = "baseline_query", "bindings"
     try:
+        saved = sampler.bindings()
         baseline = sampler.query()
-        validate_sampler(baseline, "default")
         record["original"] = baseline
+        stage = "baseline_validation"
+        validate_sampler(baseline, "default")
         originals = [tuple(tex[k] for k in PARAMS) for tex in baseline["textures"]]
+        stage = "override_operation"
         for index in range(4):
+            field = f"textures[{index}].parameters"
             sampler.set_parameters(index, tuple(FIXED["sampling"][setting]))
+        stage, field = "selected_query", "state"
         record["selected"] = sampler.query()
+        stage = "selected_validation"
         validate_sampler(record["selected"], setting)
+        stage, field = "capture_body", "state"
         yield
+    except BaseException as exc:
+        initiating = exc
+        record["initiating_error"] = retain_sampler_fault(record, exc, stage, field)
+        raise
     finally:
-        faults = []
+        operations: list[dict[str, Any]] = []
+        validation: list[dict[str, Any]] = []
         for index, values in enumerate(originals):
             try:
                 sampler.set_parameters(index, values)
             except BaseException as exc:
-                faults.append(type(exc).__name__)
-        try:
-            sampler.restore_bindings(saved)
-            restored = sampler.query()
-            validate_sampler(restored, "default")
-            if sampler.bindings() != saved:
-                raise ValueError("texture binding restoration mismatch")
-            record["restored"] = restored
-        except BaseException as exc:
-            faults.append(type(exc).__name__)
-        record["restoration"] = "RESTORED" if not faults else "FAILED_CLOSED"
-        if faults:
-            raise ValueError("sampler restoration failure: " + ",".join(faults))
+                operations.append(sampler_fault(exc, "restore_parameters", f"textures[{index}]"))
+        if saved is not None:
+            try:
+                sampler.restore_bindings(saved)
+            except BaseException as exc:
+                operations.append(sampler_fault(exc, "restore_bindings", "bindings"))
+            try:
+                record["restored"] = sampler.query()
+            except BaseException as exc:
+                operations.append(retain_sampler_fault(record, exc, "restored_query", "state"))
+            else:
+                try:
+                    validate_sampler(record["restored"], "default")
+                except BaseException as exc:
+                    validation.append(sampler_fault(exc, "restored_validation", "state"))
+            try:
+                if sampler.bindings() != saved:
+                    raise SamplerFault("texture binding restoration mismatch", "bindings")
+            except BaseException as exc:
+                validation.append(sampler_fault(exc, "restored_bindings_validation", "bindings"))
+        else:
+            operations.append(
+                {"stage": "restore_bindings", "field": "bindings", "status": "UNAVAILABLE"}
+            )
+        record["restoration"] = "RESTORED" if not operations and not validation else "FAILED_CLOSED"
+        if initiating is not None or operations or validation:
+            record["restoration_operation_errors"] = operations
+            record["restored_validation_errors"] = validation
+            record["observations"] = "UNVALIDATED"
+            for key in (
+                "original",
+                "selected",
+                "restored",
+                "rgb_before",
+                "rgb_after",
+                "pair_before",
+                "pair_after",
+            ):
+                if key in record:
+                    record[key] = sampler_observation(record[key])
+        if (operations or validation) and initiating is None:
+            raise ValueError("sampler restoration failure")
 
 
 class NativeSampler:
@@ -642,25 +828,35 @@ class NativeSampler:
             "unit0_binding": saved[2],
             "textures": [],
         }
+        field = "active_unit"
+        initiating = None
+        faults: list[dict[str, Any]] = []
+        validation: list[dict[str, Any]] = []
         try:
             gl.glActiveTexture(gl.GL_TEXTURE0)
+            field = "sampler_binding"
             result["sampler_binding"] = int(gl.glGetIntegerv(gl.GL_SAMPLER_BINDING))
+            field = "texture_env_mode"
             result["texture_env_mode"] = int(
                 gl.glGetTexEnviv(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE)
             )
+            field = "texture_matrix"
             result["texture_matrix"] = (
                 np.asarray(gl.glGetFloatv(gl.GL_TEXTURE_MATRIX), dtype=np.float32)
                 .reshape(-1)
                 .tolist()
             )
             # A separate sampler object would supersede the texture parameters.
+            field = "sampler_binding"
             if int(gl.glGetIntegerv(gl.GL_SAMPLER_BINDING)) != 0:
                 raise ValueError("external sampler object denied")
             for index, obj in enumerate(self.objects):
+                field = f"textures[{index}].object"
                 if not gl.glIsTexture(obj):
                     raise ValueError("owned texture disappeared")
                 gl.glBindTexture(gl.GL_TEXTURE_2D, obj)
                 texture = {"index": index, "target": 3553, "object": obj, "colorspace": "linear"}
+                result["textures"].append(texture)
                 for key, name in zip(
                     (*PARAMS, "wrap_s", "wrap_t"),
                     (
@@ -673,6 +869,7 @@ class NativeSampler:
                     ),
                     strict=True,
                 ):
+                    field = f"textures[{index}].{key}"
                     texture[key] = int(gl.glGetTexParameteriv(gl.GL_TEXTURE_2D, name))
                 for key, name in (
                     ("min_lod", gl.GL_TEXTURE_MIN_LOD),
@@ -680,7 +877,9 @@ class NativeSampler:
                     ("lod_bias", gl.GL_TEXTURE_LOD_BIAS),
                     ("anisotropy", 34046),
                 ):
+                    field = f"textures[{index}].{key}"
                     texture[key] = float(gl.glGetTexParameterfv(gl.GL_TEXTURE_2D, name))
+                field = f"textures[{index}].compare_mode"
                 texture["compare_mode"] = int(
                     gl.glGetTexParameteriv(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_COMPARE_MODE)
                 )
@@ -689,10 +888,13 @@ class NativeSampler:
                     ("height", gl.GL_TEXTURE_HEIGHT),
                     ("internal_format", gl.GL_TEXTURE_INTERNAL_FORMAT),
                 ):
+                    field = f"textures[{index}].{key}"
                     texture[key] = int(gl.glGetTexLevelParameteriv(gl.GL_TEXTURE_2D, 0, name))
+                field = f"textures[{index}].dimensions"
                 if (texture["width"], texture["height"]) != (128, 128):
                     raise ValueError("owned base-level dimensions differ")
                 # Width384 bytes is divisible by every supported pack alignment. No pack mutation.
+                field = f"textures[{index}].pack_state"
                 if any(
                     int(gl.glGetIntegerv(name)) != value
                     for name, value in (
@@ -703,16 +905,29 @@ class NativeSampler:
                     )
                 ):
                     raise ValueError("texture read requires qualified pack state")
+                field = f"textures[{index}].pack_alignment"
                 if int(gl.glGetIntegerv(gl.GL_PACK_ALIGNMENT)) not in (1, 2, 4, 8):
                     raise ValueError("unsupported texture read alignment")
+                field = f"textures[{index}].pixels"
                 pixels = np.empty((128, 128, 3), dtype=np.uint8)
                 gl.glGetTexImage(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, pixels)
                 texture["pixels"] = logical_array_hash(pixels)
-                result["textures"].append(texture)
+        except BaseException as exc:
+            initiating = exc
         finally:
-            self.restore_bindings(saved)
-        if self.bindings() != saved:
-            raise ValueError("sampler query binding drift")
+            try:
+                self.restore_bindings(saved)
+            except BaseException as exc:
+                faults.append(sampler_fault(exc, "query_restore_bindings", "bindings"))
+        try:
+            if self.bindings() != saved:
+                raise SamplerFault("sampler query binding drift", "bindings")
+        except BaseException as exc:
+            validation.append(sampler_fault(exc, "query_restored_bindings_validation", "bindings"))
+        if initiating is not None or faults or validation:
+            raise SamplerQueryFault(
+                field, sampler_observation(result), initiating, faults, validation
+            ) from initiating
         return result
 
 
@@ -1949,9 +2164,13 @@ class NativeCapture:
         except BaseException:
             self.failed = True
             if sampler and not self.sink.failed:
-                self.sink.put(
-                    f"endpoints/e{ordinal:02d}/sampler_failure.json", canonical_json_bytes(sampler)
-                )
+                try:
+                    failure_bytes = sampler_failure_bytes(sampler, p.MIB - self.sink.used[ordinal])
+                    self.sink.put(f"endpoints/e{ordinal:02d}/sampler_failure.json", failure_bytes)
+                except BaseException as retention:
+                    raise SamplerRetentionFault(
+                        "sampler failure evidence could not be retained"
+                    ) from retention
             raise
         finally:
             self.model.geom_matid[:] = original_matid

@@ -100,3 +100,16 @@ restoration faults, negative/control persistence, serialization/replay/inspectio
 old appearance compatibility. Native tests and historical frozen suites are not run. Independent
 engineering/scientific review must name the final exact PR/head. No source success advances
 Gate0B, reverses Slice6 FAILED_CLOSED, authorizes Gate0D/ML, freezes a benchmark or tests EPS efficacy.
+
+Prospective failure evidence retains bounded returned/partial sampler observations before
+validation, with stage/field context and separate initiating, restoration-operation and
+restored-validation faults. Failure observations are explicitly UNVALIDATED; they cannot establish
+accepted settings or native readiness. Unavailable restoration evidence fails closed. Messages,
+tracebacks, pixels and environment data are not added; the sampler-failure component remains
+16384 bytes and retention failure stops capture. No historical native cause is reconstructed.
+Failure envelopes prioritize causal context and initial/restored observations within both the
+16384-byte component cap and remaining endpoint capacity. Omitted observations are named
+explicitly; if context cannot fit or writing fails, capture stops with a retention fault, without
+claiming a native predicate. The final report exception class alone is not uniquely the initiating
+cause: adjacent owned-model restoration or capture-close failures can supersede it. A surviving
+structured sampler failure record is the primary sampler context; absence is not restoration success.
