@@ -972,6 +972,8 @@ def ideal_rays() -> dict[str, p.Array]:
                         if distance <= 0:
                             continue
                         local = (origin + distance * ray - centre) / half
+                        # This coordinate was solved algebraically, not estimated by reconstruction.
+                        local[axis] = sign
                         if np.all(np.abs(local) <= 1):
                             hits.append((distance, index, axis, sign, local))
             if not hits:
@@ -1071,6 +1073,50 @@ def suitability(solid: Endpoint, brick: Endpoint) -> dict[str, Any]:
     }
 
 
+def validate_relations(endpoints: list[Endpoint]) -> None:
+    """Only acquisition validity; never suitability, direct controls or ideal residuals."""
+    if not endpoints or tuple(e.identity for e in endpoints) != MEMBERS[: len(endpoints)]:
+        raise ValueError("ordered prefix membership required")
+    invariant_names = tuple(n for n in SPECS if n != "rgb")
+    first = endpoints[0]
+    for endpoint in endpoints[1:]:
+        if any(not np.array_equal(first.arrays[n], endpoint.arrays[n]) for n in invariant_names):
+            raise ValueError("cross-arm paired ID/depth/mask/lattice differs")
+        if any(
+            first.evidence[k] != endpoint.evidence[k]
+            for k in ("compiled", "camera", "runtime", "mapping", "scene_map", "near", "far")
+        ):
+            raise ValueError("cross-arm provenance/geometry differs")
+        if any(
+            first.evidence["paired_stable"][k] != endpoint.evidence["paired_stable"][k]
+            for k in (*p.REGISTRATION_KEYS, "scene_flags")
+        ):
+            raise ValueError("cross-arm registered state differs")
+    for offset in range(0, len(endpoints) - 1, 2):
+        a, b = endpoints[offset : offset + 2]
+        if a.evidence != b.evidence or any(
+            not np.array_equal(a.arrays[n], b.arrays[n]) for n in SPECS
+        ):
+            raise ValueError("exact repeated-capture relation differs")
+
+
+def interpret_suitability(passes: list[str]) -> str:
+    if passes != [arm for arm in ARMS if arm in passes]:
+        raise ValueError("ordered unique observed passing arms required")
+    if not passes:
+        return "no tested arm meets all fixed texture criteria"
+    observed = "fixed texture criteria met by: " + ", ".join(passes)
+    if passes == ["unit_nearest"]:
+        return (
+            observed
+            + "; joint dependence under this fixed criterion; no physical interaction proof"
+        )
+    return (
+        observed + "; observed suitability does not isolate causes or grant readiness; "
+        "absolute transfer remains unresolved"
+    )
+
+
 def assess(endpoints: list[Endpoint], binding: Binding) -> dict[str, Any]:
     result: dict[str, Any] = {
         "status": "INCONCLUSIVE",
@@ -1083,29 +1129,7 @@ def assess(endpoints: list[Endpoint], binding: Binding) -> dict[str, Any]:
             raise ValueError("complete ordered membership required")
         for endpoint in endpoints:
             validate_endpoint(endpoint, binding)
-        invariant_names = tuple(n for n in SPECS if n != "rgb")
-        first = endpoints[0]
-        for endpoint in endpoints[1:]:
-            if any(
-                not np.array_equal(first.arrays[n], endpoint.arrays[n]) for n in invariant_names
-            ):
-                raise ValueError("cross-arm paired ID/depth/mask/lattice differs")
-            if any(
-                first.evidence[k] != endpoint.evidence[k]
-                for k in ("compiled", "camera", "runtime", "mapping", "scene_map", "near", "far")
-            ):
-                raise ValueError("cross-arm provenance/geometry differs")
-            if any(
-                first.evidence["paired_stable"][k] != endpoint.evidence["paired_stable"][k]
-                for k in (*p.REGISTRATION_KEYS, "scene_flags")
-            ):
-                raise ValueError("cross-arm registered state differs")
-        for offset in range(0, 16, 2):
-            a, b = endpoints[offset : offset + 2]
-            if a.evidence != b.evidence or any(
-                not np.array_equal(a.arrays[n], b.arrays[n]) for n in SPECS
-            ):
-                raise ValueError("exact repeated-capture relation differs")
+        validate_relations(endpoints)
         arms = {
             arm: suitability(endpoints[i * 4], endpoints[i * 4 + 2]) for i, arm in enumerate(ARMS)
         }
@@ -1205,18 +1229,7 @@ def assess(endpoints: list[Endpoint], binding: Binding) -> dict[str, Any]:
                     )
         supported = all(v["status"] == "CONTROL_SUPPORTED" for v in controls)
         passes = [arm for arm in ARMS if arms[arm]["status"] == "PASS"]
-        interpretation = "no tested arm meets all fixed texture criteria"
-        if passes == ["unit_nearest"]:
-            interpretation = (
-                "joint dependence under this fixed criterion; no physical interaction proof"
-            )
-        elif "unit_default" in passes:
-            interpretation = (
-                "controlled-light/default cell meets fixed criteria; "
-                "absolute transfer remains unresolved"
-            )
-        elif "unit_nearest" in passes:
-            interpretation = "nearest/unit cell meets fixed criteria; nearest grants no readiness"
+        interpretation = interpret_suitability(passes)
         result.update(
             status="DIAGNOSTIC_COMPLETE",
             arms=arms,
@@ -1266,6 +1279,100 @@ STAGES = (
 )
 
 
+METADATA_STAGES = (
+    "rgb_state_complete",
+    "paired_draw_input",
+    "paired_draw_output",
+    "paired_read_input",
+    "paired_read_output",
+    "sampler_complete",
+)
+COMPONENT_CAPS = {
+    **{
+        name + ".bin": int(np.prod(shape)) * np.dtype(dtype).itemsize
+        for name, (dtype, shape) in SPECS.items()
+    },
+    "read_id.bin": 57600,
+    "read_depth.bin": 76800,
+    **{
+        stage + ".json": 16384 if stage == "sampler_complete" else 65536
+        for stage in METADATA_STAGES
+    },
+    "sampler_failure.json": 16384,
+    "frame.json": 65536,
+}
+
+
+def component_cap(name: str) -> int:
+    if type(name) is not str:
+        raise ValueError("closed physical namespace")
+    shared = {"consumed.json": 16384, "report.json": p.MIB, "terminal.json": 16384}
+    if name in shared:
+        return shared[name]
+    if re.fullmatch(r"events/[0-9]{4}\.json", name):
+        if int(name[7:11]) < 16 * len(STAGES):
+            return 4096
+    match = re.fullmatch(r"endpoints/e([0-9]{2})/([a-z_]+\.(?:bin|json))", name)
+    if match and int(match[1]) < 16 and match[2] in COMPONENT_CAPS:
+        return COMPONENT_CAPS[match[2]]
+    raise ValueError("closed physical namespace/ordinal")
+
+
+def stage_paths(stage: str, ordinal: int) -> list[str]:
+    prefix = f"endpoints/e{ordinal:02d}/"
+    if stage in METADATA_STAGES:
+        return [prefix + stage + ".json"]
+    if stage == "rgb_read_complete":
+        return [prefix + "rgb.bin"]
+    if stage == "paired_read_complete":
+        return [prefix + "read_id.bin", prefix + "read_depth.bin"]
+    if stage == "endpoint_complete":
+        return [*(prefix + n + ".bin" for n in SPECS if n != "rgb"), prefix + "frame.json"]
+    return []
+
+
+def validate_ref(ref: Any, expected_path: str) -> None:
+    if (
+        type(ref) is not dict
+        or set(ref) != {"path", "bytes", "sha256"}
+        or type(ref["path"]) is not str
+        or ref["path"] != expected_path
+        or type(ref["bytes"]) is not int
+        or not 0 <= ref["bytes"] <= component_cap(expected_path)
+        or type(ref["sha256"]) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", ref["sha256"]) is None
+    ):
+        raise ValueError("closed typed component reference")
+
+
+def physical_inventory(root: Path) -> dict[str, int]:
+    files: dict[str, int] = {}
+    endpoints, shared = [0] * 16, 0
+    for path in root.rglob("*"):
+        safe_path(path)
+        name = path.relative_to(root).as_posix()
+        if path.is_dir():
+            if (
+                name not in ("events", "endpoints")
+                and re.fullmatch(r"endpoints/e(?:0[0-9]|1[0-5])", name) is None
+            ):
+                raise ValueError("closed physical directory namespace")
+            continue
+        if not path.is_file():
+            raise ValueError("non-file physical evidence")
+        size = path.stat().st_size
+        if size > component_cap(name):
+            raise ValueError("physical component cap")
+        files[name] = size
+        if name.startswith("endpoints/"):
+            endpoints[int(name.split("/")[1][1:])] += size
+        else:
+            shared += size
+    if any(n > p.MIB for n in endpoints) or shared > 2 * p.MIB or sum(files.values()) > 18 * p.MIB:
+        raise ValueError("physical endpoint/shared/original cap")
+    return files
+
+
 class Sink:
     """Immediate exclusive component retention in one consumed, bounded owned namespace."""
 
@@ -1305,15 +1412,8 @@ class Sink:
         if self.failed:
             raise OSError("poisoned sink; no writes")
         try:
-            allowed = {"consumed.json", "report.json", "terminal.json"}
-            if type(payload) is not bytes or (
-                name not in allowed
-                and re.fullmatch(
-                    r"events/[0-9]{4}\.json|endpoints/e[0-9]{2}/[a-z_]+\.(bin|json)", name
-                )
-                is None
-            ):
-                raise ValueError("closed retention namespace")
+            if type(payload) is not bytes or len(payload) > component_cap(name):
+                raise ValueError("component cap")
             if name.startswith("endpoints/"):
                 ordinal = int(name.split("/")[1][1:])
                 if ordinal not in range(16) or self.used[ordinal] + len(payload) > p.MIB:
@@ -1432,13 +1532,7 @@ class Sink:
 def replay(root: Path, binding: Binding) -> list[Endpoint]:
     """Strict prefix replay and immediate producer reconstruction; never resumes a run."""
     safe_path(root)
-    total = 0
-    for path in root.rglob("*"):
-        safe_path(path)
-        if path.is_file():
-            total += path.stat().st_size
-    if total > 18 * p.MIB:
-        raise ValueError("original retained cap")
+    physical = physical_inventory(root)
     consumed_raw = (root / "consumed.json").read_bytes()
     if len(consumed_raw) > 16384:
         raise ValueError("consumed cap")
@@ -1457,47 +1551,33 @@ def replay(root: Path, binding: Binding) -> list[Endpoint]:
         if path.name != f"{sequence:04d}.json" or path.stat().st_size > 4096:
             raise ValueError("bounded contiguous event log")
         event = p.strict_json(path.read_bytes())
-        if set(event) != {"sequence", "ordinal", "stage", "binding_root", "refs"} or (
-            event["sequence"],
-            event["ordinal"],
-            event["stage"],
-            event["binding_root"],
-        ) != (sequence, ordinal, STAGES[stage], binding.root):
-            raise ValueError("ordered replay events")
-        prefix = f"endpoints/e{ordinal:02d}/"
+        if (
+            type(event) is not dict
+            or set(event) != {"sequence", "ordinal", "stage", "binding_root", "refs"}
+            or type(event["sequence"]) is not int
+            or type(event["ordinal"]) is not int
+            or type(event["stage"]) is not str
+            or event["stage"] not in STAGES
+            or type(event["binding_root"]) is not str
+            or type(event["refs"]) is not list
+            or ordinal >= 16
+            or (event["sequence"], event["ordinal"], event["stage"], event["binding_root"])
+            != (sequence, ordinal, STAGES[stage], binding.root)
+        ):
+            raise ValueError("ordered typed replay events")
         current_stage = event["stage"]
-        expected_paths = (
-            [prefix + current_stage + ".json"]
-            if current_stage
-            in (
-                "rgb_state_complete",
-                "paired_draw_input",
-                "paired_draw_output",
-                "paired_read_input",
-                "paired_read_output",
-                "sampler_complete",
-            )
-            else [prefix + "rgb.bin"]
-            if current_stage == "rgb_read_complete"
-            else [prefix + "read_id.bin", prefix + "read_depth.bin"]
-            if current_stage == "paired_read_complete"
-            else [*(prefix + n + ".bin" for n in SPECS if n != "rgb"), prefix + "frame.json"]
-            if current_stage == "endpoint_complete"
-            else []
-        )
-        if [ref.get("path") for ref in event["refs"]] != expected_paths:
+        expected_paths = stage_paths(current_stage, ordinal)
+        if len(event["refs"]) != len(expected_paths):
             raise ValueError("closed event component inventory")
+        for ref, expected_path in zip(event["refs"], expected_paths, strict=True):
+            validate_ref(ref, expected_path)
+            if expected_path.endswith(".bin") and ref["bytes"] != component_cap(expected_path):
+                raise ValueError("completed binary read length")
         payloads = {}
         for ref in event["refs"]:
             name = ref["path"]
-            if (
-                set(ref) != {"path", "bytes", "sha256"}
-                or type(ref["bytes"]) is not int
-                or not 0 <= ref["bytes"] <= p.MIB
-                or re.fullmatch(rf"endpoints/e{ordinal:02d}/[a-z_]+\.(bin|json)", name) is None
-                or name in seen
-            ):
-                raise ValueError("closed immediate component ref")
+            if name in seen:
+                raise ValueError("duplicate immediate component ref")
             file = root / name
             safe_path(file)
             if file.stat().st_size != ref["bytes"]:
@@ -1520,6 +1600,7 @@ def replay(root: Path, binding: Binding) -> list[Endpoint]:
             for name, (dtype, shape) in SPECS.items():
                 ref = meta["arrays"][name]
                 expected_path = f"endpoints/e{ordinal:02d}/{name}.bin"
+                validate_ref(ref, expected_path)
                 if (
                     ref["path"] != expected_path
                     or ref["bytes"] != np.prod(shape) * np.dtype(dtype).itemsize
@@ -1593,14 +1674,35 @@ def replay(root: Path, binding: Binding) -> list[Endpoint]:
             stage = 0
         else:
             stage += 1
-    # Orphaned bytes from a failed callback are charged, never counted as completion.
-    for index in range(16):
-        folder = root / f"endpoints/e{index:02d}"
+    # Only current callback components may be orphaned; all physical bytes were charged above.
+    orphans = set(physical) - seen - {"report.json", "terminal.json"}
+    allowed_orphans = set(stage_paths(STAGES[stage], ordinal)) if ordinal < 16 else set()
+    if ordinal < 16:
+        allowed_orphans.add(f"endpoints/e{ordinal:02d}/sampler_failure.json")
+    if not orphans <= allowed_orphans:
+        raise ValueError("unsupported orphan evidence")
+    if "terminal.json" in physical:
+        terminal = p.strict_json((root / "terminal.json").read_bytes())
+        counts = {s for s in STAGES if s.endswith("attempt") or s.endswith("complete")}
         if (
-            folder.exists()
-            and sum(f.stat().st_size for f in folder.iterdir() if f.is_file()) > p.MIB
+            type(terminal) is not dict
+            or set(terminal) != {"status", "binding_root", "completed", "counts", "report"}
+            or terminal["status"] not in ("INCONCLUSIVE", "DIAGNOSTIC_COMPLETE")
+            or terminal["binding_root"] != binding.root
+            or type(terminal["completed"]) is not int
+            or not 0 <= terminal["completed"] <= len(completed)
+            or type(terminal["counts"]) is not dict
+            or set(terminal["counts"]) != counts
+            or any(type(v) is not int or not 0 <= v <= 16 for v in terminal["counts"].values())
         ):
-            raise ValueError("retained endpoint byte cap")
+            raise ValueError("closed typed terminal receipt")
+        validate_ref(terminal["report"], "report.json")
+        report = (root / "report.json").read_bytes()
+        if (
+            len(report) != terminal["report"]["bytes"]
+            or sha256_bytes(report) != terminal["report"]["sha256"]
+        ):
+            raise ValueError("terminal report corruption")
     return completed
 
 
@@ -1866,6 +1968,7 @@ def _drive(capture: Any, sink: Sink) -> dict[str, Any]:
             endpoint = capture.capture(ordinal)
             validate_endpoint(endpoint, sink.binding)
             endpoints.append(endpoint)
+            validate_relations(endpoints)
     except BaseException as exc:
         failure = type(exc).__name__
     finally:

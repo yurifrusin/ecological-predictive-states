@@ -46,7 +46,11 @@ object on unit0 is denied. Queries restore relevant bindings; overrides restore 
 and active/unit bindings on success and failure. Model material/light overrides are independently
 compared against source-fixed pre/post baselines. Unsupported state, mismatch, restoration fault,
 provenance/retention corruption or runtime/budget failure stops once and preserves the completed
-prefix and available immediate reads. A suitability FAIL never truncates valid later arms.
+prefix and available immediate reads. Each completed endpoint checks every newly decidable repeat
+and cross-arm validity relation before another capture. A suitability FAIL never truncates valid
+later arms. Replay independently accounts all physical components against the closed namespace and
+component/endpoint/shared/original caps. Exact integer receipt identities and closed references are
+required; charged current-callback partial/orphan bytes remain preserved without counting completion.
 
 Every arm retains the original changed fraction>=0.2, normalizedMAD>=0.025, each surface>=100
 interior pixels, luminance mean[0.05,0.95], std>=0.025, neighbour difference>=0.05 for>=0.02 of pairs.
@@ -57,7 +61,8 @@ with separate per-arm PASS/FAIL, not overall apparatus PASS. Missing/invalid evi
 INCONCLUSIVE. Exact solid RGB equality across sampling at fixed illumination is a direct control:
 a mismatch yields CONTROL_NOT_SUPPORTED, preserves valid data and limits sampling-only inference.
 Per-surface fixed-factor score differences are empirical observations, not isolated shader causes.
-Only-combined suitability means joint dependence under this criterion, not physical interaction
+Interpretation lists every observed passing arm; an empty passing set alone means no tested arm
+meets the criteria. Only-combined suitability means joint dependence under this criterion, not physical interaction
 proof. Nearest can alias and grants no benchmark readiness. No brightness/frequency/threshold sweep
 or automatic retry is permitted.
 
@@ -67,7 +72,8 @@ u=(x+1)/2,v=(1-z)/2 on signed y faces. Normals are signed axes. The [classic ren
 scales boxes by halfsizes and uses explicit builtin UVs/repeat even when retained texcoord=0.
 Ideal incoming light is(0,-0.25,1)/sqrt(1.0625); original ideal gains are walls0.1,
 floor0.1+0.7/sqrt(1.0625),end0.1+0.175/sqrt(1.0625), unit1. These are independently source-derived
-mathematical predictions. All19200 pixel-centre rays are predeclared, with eligible/tie/rejected and
+mathematical predictions. The intersected face coordinate is algebraically fixed when testing
+box-face bounds; no numerical margin is introduced. All19200 pixel-centre rays are predeclared, with eligible/tie/rejected and
 per-face/whole-mask counts; nearest/base0 uses floor(128*u),floor(128*v) modulo128. Full residual
 summaries are reproducible from retained arrays rather than a duplicate dense prediction tree.
 
