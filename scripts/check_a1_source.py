@@ -60,6 +60,7 @@ def main() -> int:
             "tests/test_causal_history_fixture.py",
             "tests/test_causal_history_core.py",
             "tests/test_causal_history_sequence.py",
+            "tests/test_causal_history_execution.py",
             "-q",
         ]
     )
@@ -78,6 +79,9 @@ def main() -> int:
     )
 
     from epsbench.diagnostics.a1_action_contrast import CaptureHeldError
+    from epsbench.diagnostics.causal_history_execution import maximum_bytes
+
+    print(json.dumps({"causal_maximum_bytes": maximum_bytes()}, sort_keys=True))
 
     sys.argv = ["a1_action_contrast.py", "capture"]
     try:

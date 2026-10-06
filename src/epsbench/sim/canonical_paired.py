@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import importlib.metadata
+import json
 import os
 import platform
 import threading
@@ -429,6 +430,7 @@ class CanonicalPairedRenderer:
         native_render: Callable[[Any, Any, Any], object] | None = None,
         native_read_pixels: Callable[[Any, Any, Any, Any], object] | None = None,
         restore_buffer: Callable[[Any, Any], object] | None = None,
+        progress_observer: Callable[[str, Any], None] | None = None,
     ) -> None:
         if state_observer is None:
             require_supported_runtime(os.environ.get("MUJOCO_GL", ""))
@@ -439,6 +441,16 @@ class CanonicalPairedRenderer:
         self._restore_buffer = restore_buffer or mujoco.mjr_setBuffer
         self._thread = threading.get_ident()
         self._active = False
+        self._progress = progress_observer
+
+    def _snapshot(self, stage: str, value: Mapping[str, object]) -> None:
+        if self._progress is not None:
+            payload = json.dumps(
+                value, sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode()
+            if len(payload) > 256 * 1024:
+                raise CanonicalPairedCaptureError("paired progress snapshot bound")
+            self._progress(stage, payload)
 
     def capture(self) -> CanonicalPairedResult:
         if self._active or threading.get_ident() != self._thread:
@@ -462,9 +474,15 @@ class CanonicalPairedRenderer:
             scene.flags[int(mujoco.mjtRndFlag.mjRND_IDCOLOR)] = True
             scene.flags[int(mujoco.mjtRndFlag.mjRND_DEPTH)] = False
             before = copy.deepcopy(dict(self._observe(renderer)))
+            self._snapshot("draw_input", before)
             validate_state(before, renderer, after_draw=False)
+            if self._progress is not None:
+                self._progress("draw_attempt", None)
             self._render(renderer._rect, scene, renderer._mjr_context)
+            if self._progress is not None:
+                self._progress("draw_complete", None)
             after = copy.deepcopy(dict(self._observe(renderer)))
+            self._snapshot("draw_output", after)
             validate_state(after, renderer, after_draw=True)
             if {k: v for k, v in before.items() if k not in _DRAW_INSTALLED_KEYS} != {
                 k: v for k, v in after.items() if k not in _DRAW_INSTALLED_KEYS
@@ -473,10 +491,18 @@ class CanonicalPairedRenderer:
                     "scene/camera/attachment inputs drifted across draw"
                 )
             read_before = copy.deepcopy(dict(self._observe(renderer)))
+            self._snapshot("read_input", read_before)
             if read_before != after:
                 raise CanonicalPairedCaptureError("producer state drifted before readback")
+            if self._progress is not None:
+                self._progress("read_attempt", None)
             self._read(native_id, native_depth, renderer._rect, renderer._mjr_context)
+            if self._progress is not None:
+                # Immutable owned native-orientation bytes, prior to validation/decode.
+                # Never infer available arrays when the native call itself raises.
+                self._progress("read_complete", (native_id.tobytes(), native_depth.tobytes()))
             read_after = copy.deepcopy(dict(self._observe(renderer)))
+            self._snapshot("read_output", read_after)
             validate_state(read_after, renderer, after_draw=True)
             if read_after != read_before or _scene_map(renderer) != mapping:
                 raise CanonicalPairedCaptureError("producer state drifted across readback")
@@ -512,6 +538,7 @@ def require_supported_runtime(backend: str) -> None:
 
     python_version = platform.python_version()
     from epsbench.diagnostics.a1_docker_runtime import docker_candidate
+    from epsbench.diagnostics.causal_history_runtime import causal_candidate
 
     if (
         platform.system() != "Linux"
@@ -521,7 +548,10 @@ def require_supported_runtime(backend: str) -> None:
         or np.__version__ != SUPPORTED_RUNTIME["numpy"]
         or os.environ.get("PYOPENGL_PLATFORM") != "osmesa"
         or not (
-            os.environ.get("WSL_INTEROP") or os.environ.get("WSL_DISTRO_NAME") or docker_candidate()
+            os.environ.get("WSL_INTEROP")
+            or os.environ.get("WSL_DISTRO_NAME")
+            or docker_candidate()
+            or causal_candidate()
         )
         or any(
             importlib.metadata.version(name) != SUPPORTED_RUNTIME[name]
