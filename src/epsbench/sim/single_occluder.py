@@ -20,6 +20,7 @@ from epsbench.appearance import AppearanceRenderPlan, configured_appearance_rend
 from epsbench.config import SingleOccluderConfig
 from epsbench.sim.canonical_paired import CanonicalPairedRenderer, CanonicalPairedResult
 from epsbench.sim.compiled import CompiledSceneContract, extract_compiled_scene_contract
+from epsbench.sim.visual_plan import VisualRenderPlan
 
 RGBArray = npt.NDArray[np.uint8]
 DepthArray = npt.NDArray[np.float32]
@@ -74,11 +75,11 @@ class RenderedTransition:
 
 
 def build_scene_xml(
-    config: SingleOccluderConfig, appearance: AppearanceRenderPlan | None = None
+    config: SingleOccluderConfig, appearance: VisualRenderPlan | None = None
 ) -> str:
     """Generate the compact scene rather than loading an external model asset."""
 
-    appearance = _appearance(config, appearance)
+    appearance = appearance if appearance is not None else _appearance(config, None)
     camera = config.camera
     support_colour = appearance.rgba_by_surface["support_surface"]
     background_colour = appearance.rgba_by_surface["background_surface"]
