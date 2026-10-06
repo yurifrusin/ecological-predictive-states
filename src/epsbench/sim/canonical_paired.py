@@ -540,6 +540,7 @@ def require_supported_runtime(backend: str) -> None:
     from epsbench.diagnostics.a1_docker_runtime import docker_candidate
     from epsbench.diagnostics.causal_history_runtime import causal_candidate
     from epsbench.diagnostics.paired_appearance_runtime import paired_appearance_candidate
+    from epsbench.diagnostics.renderer_discriminator import candidate_runtime
 
     if (
         platform.system() != "Linux"
@@ -554,6 +555,7 @@ def require_supported_runtime(backend: str) -> None:
             or docker_candidate()
             or causal_candidate()
             or paired_appearance_candidate()
+            or candidate_runtime()
         )
         or any(
             importlib.metadata.version(name) != SUPPORTED_RUNTIME[name]
