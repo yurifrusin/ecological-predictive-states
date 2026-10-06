@@ -21,6 +21,7 @@ from epsbench.config import CorridorConfig
 from epsbench.schema import CorridorSampledGeometry
 from epsbench.sim.canonical_paired import CanonicalPairedRenderer, CanonicalPairedResult
 from epsbench.sim.compiled import CompiledSceneContract, extract_compiled_scene_contract
+from epsbench.sim.visual_plan import VisualRenderPlan
 from epsbench.utils.seeding import derive_seed
 
 RGBArray = npt.NDArray[np.uint8]
@@ -112,11 +113,11 @@ def sample_corridor_geometry(
 def build_corridor_scene_xml(
     config: CorridorConfig,
     geometry: CorridorSampledGeometry,
-    appearance: AppearanceRenderPlan | None = None,
+    appearance: VisualRenderPlan | None = None,
 ) -> str:
     """Build a parametric open-top corridor whose walls cover the camera optical field."""
 
-    appearance = _appearance(config, appearance)
+    appearance = appearance if appearance is not None else _appearance(config, None)
     half_width = geometry.width / 2.0
     half_length = geometry.length / 2.0
     half_height = geometry.wall_height / 2.0
