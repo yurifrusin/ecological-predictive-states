@@ -35,7 +35,14 @@ cooperative checks; overruns and unconfirmed cleanup remain INCONCLUSIVE, not a 
 
 Create preserves read-only root, no network, capabilities or escalation, no logging/restart,
 2GiB/no extra swap,2CPU/two threads,64PIDs,8MiBtmp/1MiBshm and the sole writable owned output mount.
-Pre-start inspection verifies the actual facts and image. Cleanup reinspects exact ID/name/token/
+Pre-start inspection verifies the actual facts and image. Image and pre-start commands request
+compact projections of every consumed admission/confinement field, preserving complete labels and
+environment entries, all evaluated resource facts and both mount representations. Missing/malformed
+required fields, duplicate environment entries and mixed authority remain denied. Unconsumed
+daemon layer/driver/default metadata is excluded. Polling and exact-owned cleanup stay compact.
+The dummy command cap remains16KiB, with8KiB reserved for cleanup; discarded overflow bytes still
+count. Required authority/environment content can itself exhaust work capacity and then fails closed;
+source checks establish reachability for representative bounded decisions, not every allowed size. Cleanup reinspects exact ID/name/token/
 binding and sole mount before forced removal; it never cleans unrelated containers. Lost create
 replies use the same exact owned name for reinspection, never a search or wildcard.
 

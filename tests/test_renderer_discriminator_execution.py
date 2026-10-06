@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import io
+import json
+import re
 import runpy
 import time
 from pathlib import Path
@@ -531,3 +533,331 @@ def test_core_deadline_extension_cannot_exceed_existing_ceiling(
     monkeypatch.setattr(time, "monotonic", lambda: sink.started + 301.0)
     result = d._drive(capture, sink, sink.started + 1000.0)
     assert not capture.visited and capture.closed and result["status"] == "INCONCLUSIVE"
+
+
+# Independent expected validator payload: this deliberately does not reuse HOST_FIELDS.
+INSPECT_HOST_FIELDS = {
+    "Binds",
+    "Privileged",
+    "ReadonlyRootfs",
+    "NetworkMode",
+    "CapDrop",
+    "CapAdd",
+    "SecurityOpt",
+    "Memory",
+    "MemorySwap",
+    "NanoCpus",
+    "CpusetCpus",
+    "PidsLimit",
+    "ShmSize",
+    "Tmpfs",
+    "LogConfig",
+    "RestartPolicy",
+    "Mounts",
+}
+
+
+def fake_projection(template: str, full: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate the requested Go-template subset against full fake daemon objects.
+
+    Missing source fields raise, like a failed inspect command; no unrelated small fixture
+    is substituted for the actual requested projection. Range retains every mount entry.
+    """
+
+    def lookup(path: str, item: dict[str, Any] | None = None) -> Any:
+        value = full if path.startswith(".") else item
+        for key in path.removeprefix("$m.").removeprefix(".").split("."):
+            assert value is not None
+            value = value[key]
+        return value
+
+    def scalar(text: str, item: dict[str, Any] | None = None) -> str:
+        return re.sub(
+            r"\{\{json ([.$\w]+)\}\}",
+            lambda match: json.dumps(lookup(match[1], item), separators=(",", ":")),
+            text,
+        )
+
+    def array(match: re.Match[str]) -> str:
+        entries = lookup(match[1])
+        assert type(entries) is list
+        return ",".join(scalar(match[2], entry) for entry in entries)
+
+    text = re.sub(
+        r"\{\{range \$i, \$m := ([.\w]+)\}\}\{\{if \$i\}\},\{\{end\}\}(.*?)\{\{end\}\}",
+        array,
+        template,
+    )
+    assert "{{" not in scalar(text)
+    return json.loads(scalar(text))  # type: ignore[no-any-return]
+
+
+def compact_fixture(tmp_path: Path) -> tuple[d.Binding, d.Decision, Path, float, dict[str, Any]]:
+    b = binding()
+    dec = decision(b).model_copy(
+        update={
+            "authorization": "Synthetic source-only authority. " + "a" * 224,
+        }
+    )
+    output = tmp_path / b.output_id
+    wall = time.time() + 35.0
+    full = info_for(b, dec, output, wall)
+    full["Config"]["Cmd"].extend(("--case", "normal"))
+    return b, dec, output, wall, full
+
+
+def test_projection_requests_every_consumed_field_and_excludes_daemon_metadata(
+    tmp_path: Path,
+) -> None:
+    b, dec, output, wall, full = compact_fixture(tmp_path)
+    full["GraphDriver"] = {"Data": {"LowerDir": "x" * 100000}}
+    full["Config"]["UnconsumedDefaults"] = "x" * 100000
+    full["HostConfig"]["UnconsumedDefaults"] = "x" * 100000
+    full["HostConfig"]["LogConfig"]["Config"] = {"ignored": "x" * 100000}
+    full["Mounts"][0]["Propagation"] = "x" * 100000
+    full["HostConfig"]["Mounts"][0]["BindOptions"] = {"ignored": "x" * 100000}
+    projected = fake_projection(E["CONTAINER_INSPECT"], full)
+    assert set(projected) == {"Id", "Name", "Image", "Config", "HostConfig", "Mounts"}
+    assert set(projected["Config"]) == {"Labels", "Env", "Cmd", "Entrypoint"}
+    assert projected["Config"]["Labels"] == full["Config"]["Labels"]
+    assert projected["Config"]["Env"] == full["Config"]["Env"]
+    assert set(projected["HostConfig"]) == INSPECT_HOST_FIELDS
+    assert projected["HostConfig"]["LogConfig"] == {"Type": "none"}
+    assert projected["HostConfig"]["RestartPolicy"] == {"Name": "no"}
+    assert set(projected["HostConfig"]["Mounts"][0]) == {"Type", "Source", "Target", "ReadOnly"}
+    assert set(projected["Mounts"][0]) == {"Type", "Source", "Destination", "RW"}
+    # Same admission result before/after projection; large unused fields cannot occupy the reader.
+    E["inspect_confinement"](full, b, dec, output, "normal", wall)
+    E["inspect_confinement"](projected, b, dec, output, "normal", wall)
+    image = {"Id": b.image, "Config": full["Config"], "RootFS": {"Layers": ["x" * 100000]}}
+    image["Config"] = {**image["Config"], "Env": ["PATH=/usr/local/bin:/usr/bin"]}
+    small_image = fake_projection(E["IMAGE_INSPECT"], image)
+    assert small_image == {
+        "Id": b.image,
+        "Config": {
+            "Labels": full["Config"]["Labels"],
+            "Env": ["PATH=/usr/local/bin:/usr/bin"],
+        },
+    }
+    E["image_admission"](small_image, b)
+    cleanup = fake_projection(E["CLEANUP"], full)
+    assert set(cleanup) == {"Id", "Name", "Config", "Mounts"}
+    assert cleanup["Config"] == {"Labels": full["Config"]["Labels"]}
+    E["owned"](cleanup, b, full["Id"])
+    E["sole_mount"](cleanup, output)
+    assert len(canonical_json_bytes(projected)) < 6000
+
+
+def leaf_paths(value: dict[str, Any], prefix: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+    paths: list[tuple[Any, ...]] = []
+    for key, child in value.items():
+        path = (*prefix, key)
+        if (
+            key in ("Labels", "Env", "Tmpfs")
+            or not isinstance(child, (dict, list))
+            or child is None
+        ):
+            paths.append(path)
+        elif isinstance(child, dict):
+            paths.extend(leaf_paths(child, path))
+        elif child and isinstance(child[0], dict):
+            for index, item in enumerate(child):
+                paths.extend(leaf_paths(item, (*path, index)))
+        else:
+            paths.append(path)
+    return paths
+
+
+def test_all_projected_required_fields_missing_or_mutated_deny(tmp_path: Path) -> None:
+    b, dec, output, wall, full = compact_fixture(tmp_path)
+    compact = fake_projection(E["CONTAINER_INSPECT"], full)
+    for path in leaf_paths(compact):
+        for missing in (True, False):
+            changed = copy.deepcopy(compact)
+            parent = changed
+            for key in path[:-1]:
+                parent = parent[key]
+            if missing:
+                del parent[path[-1]]
+            else:
+                parent[path[-1]] = ["unexpected"]
+            with pytest.raises((PermissionError, TypeError, ValueError, KeyError)):
+                E["inspect_confinement"](changed, b, dec, output, "normal", wall)
+    for section, key in (
+        ("HostConfig", "Binds"),
+        ("HostConfig", "CapAdd"),
+        ("Config", "Entrypoint"),
+    ):
+        malformed: Any
+        for malformed in (False, "", {}, [1]):
+            changed = copy.deepcopy(compact)
+            changed[section][key] = malformed
+            with pytest.raises(PermissionError):
+                E["inspect_confinement"](changed, b, dec, output, "normal", wall)
+    changed = copy.deepcopy(compact)
+    changed["HostConfig"]["SecurityOpt"].append(1)
+    with pytest.raises(PermissionError):
+        E["inspect_confinement"](changed, b, dec, output, "normal", wall)
+    for field in ("Id", "Config", "HostConfig", "Image", "Mounts"):
+        changed = copy.deepcopy(compact)
+        del changed[field]
+        with pytest.raises(PermissionError):
+            E["inspect_confinement"](changed, b, dec, output, "normal", wall)
+    for env in (None, ["no-equals"], [1], ["PATH=x", "PATH=x"], ["EPS_A1_TOKEN=x"]):
+        with pytest.raises(PermissionError):
+            E["image_admission"](
+                {
+                    "Id": b.image,
+                    "Config": {
+                        "Labels": E["image_labels"](b),
+                        "Env": env,
+                    },
+                },
+                b,
+            )
+    for path in (("Id",), ("Config", "Labels"), ("Config", "Env")):
+        image: dict[str, Any] = {
+            "Id": b.image,
+            "Config": {"Labels": E["image_labels"](b), "Env": []},
+        }
+        parent = image if len(path) == 1 else image[path[0]]
+        del parent[path[-1]]
+        with pytest.raises(PermissionError):
+            E["image_admission"](image, b)
+
+
+@pytest.mark.parametrize("polls,overflow", [(1, False), (70, False), (1, True)])
+def test_real_reader_cumulative_lifecycle_and_reserved_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, polls: int, overflow: bool
+) -> None:
+    b = binding()
+    dec = decision(b).model_copy(
+        update={
+            "authorization": "Synthetic source-only authority. " + "a" * 224,
+        }
+    )
+    root = tmp_path / "reader-group"
+    clock = [time.monotonic()]
+    monkeypatch.setattr(E["time"], "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        E["time"], "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds)
+    )
+    monkeypatch.setitem(G, "verify_source", lambda *a: ("a" * 40, "b" * 40))
+    calls: list[list[str]] = []
+    charges: list[int] = []
+    observed: list[int] = []
+    full: dict[str, Any] = {}
+    remaining = [polls]
+
+    class Process:
+        returncode = 0
+
+        def __init__(self, payload: bytes):
+            index = len(observed)
+            observed.append(0)
+
+            class Pipe(io.BytesIO):
+                def read(self, size: int | None = -1) -> bytes:
+                    chunk = super().read(size)
+                    observed[index] += len(chunk)
+                    return chunk
+
+            self.stdout = Pipe(payload)
+
+        def kill(self) -> None:
+            pass
+
+        def wait(self, timeout: float) -> None:
+            assert 0 < timeout <= 15.0
+
+    def popen(args: list[str], **kwargs: Any) -> Process:
+        command = args[1:]
+        calls.append(command)
+        if command[0] == "image":
+            # Python/uv image defaults, complete preparation labels, large ignored layer metadata.
+            image = {
+                "Id": b.image,
+                "Config": {
+                    "Labels": E["image_labels"](b),
+                    "Env": [
+                        "PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin",
+                        "LANG=C.UTF-8",
+                        "PYTHON_VERSION=3.11.15",
+                        "PYTHON_SHA256=" + "0" * 64,
+                        "UV_COMPILE_BYTECODE=1",
+                        "UV_LINK_MODE=copy",
+                    ],
+                },
+                "RootFS": {"Layers": ["sha256:" + "f" * 64] * 1000},
+            }
+            value = canonical_json_bytes(fake_projection(command[3], image))
+        elif command[0] == "create":
+            wall = float(
+                next(v.split("=", 1)[1] for v in command if v.startswith(E["DEADLINE_ENV"] + "="))
+            )
+            full.update(info_for(b, dec, root / "control/normal" / b.output_id, wall))
+            full["Config"]["Cmd"].extend(("--case", "normal"))
+            full["Config"]["Env"].extend(
+                [
+                    "PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin",
+                    "LANG=C.UTF-8",
+                    "PYTHON_VERSION=3.11.15",
+                    "PYTHON_SHA256=" + "0" * 64,
+                    "UV_COMPILE_BYTECODE=1",
+                    "UV_LINK_MODE=copy",
+                ]
+            )
+            full["GraphDriver"] = {"Data": "x" * 100000}
+            full["HostConfig"]["UnusedDaemonDefaults"] = "x" * 100000
+            if overflow:
+                # Required complete environment cannot be silently filtered to fit the allowance.
+                full["Config"]["Env"].append("UNRELATED_IMAGE_ENV=" + "x" * 4096)
+            value = b"d" * 64 + b"\n"
+        elif command[0] == "start":
+            value = b"d" * 64 + b"\n"
+        elif command[0] == "inspect" and E["POLL"] in command:
+            remaining[0] -= 1
+            value = b"true 0 false\n" if remaining[0] or polls == 70 else b"false 0 false\n"
+        elif command[0] == "inspect":
+            value = canonical_json_bytes(fake_projection(command[2], full))
+        elif command[0] == "rm":
+            assert command == ["rm", "--force", "d" * 64]
+            value = b"d" * 64 + b"\n"
+        else:
+            raise AssertionError(command)
+        charges.append(len(value))
+        return Process(value)
+
+    monkeypatch.setattr(E["subprocess"], "Popen", popen)
+    commands = E["Commands"]("fake-no-external-process", 16384)
+    result = E["host_run"](b, dec, root, commands, "normal")
+    assert commands.cap == 16384 and commands.cleanup_reserve == 8192
+    assert result["cleaned"] and calls[-1] == ["rm", "--force", "d" * 64]
+    assert E["CLEANUP"] in calls[-2]
+    assert commands.used == sum(observed)
+    assert result["command_bytes_charged"] == sum(observed)
+    assert (root / "control/normal/attempt.json").is_file()
+    assert result["status"] == "INCONCLUSIVE"  # No body was invoked and no consumed anchor exists.
+    if overflow:
+        assert not any(call[0] == "start" for call in calls)
+        assert "overflow" in result["reason"]
+        assert commands.used > 8192 and commands.used < 16384
+    else:
+        assert sum(charges[:-2]) < 8192
+        assert len([call for call in calls if E["POLL"] in call]) == polls
+        assert any(call[0] == "start" for call in calls)
+        if polls == 70:
+            assert result["elapsed_seconds"] == 35.0
+            assert result["reason"] == "work watchdog expired"
+    print(
+        f"synthetic cumulative polls={polls} overflow={overflow} "
+        f"generated={charges} observed={observed} total={sum(observed)}"
+    )
+
+
+def test_compact_ci_route_preserves_historical_jobs() -> None:
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    branch = "codex/renderer-discriminator-compact-inspection-20261006"
+    assert ci.count(f"github.head_ref == '{branch}' ||") == 5
+    assert f"github.head_ref != '{branch}'" in ci
+    assert "python scripts/check_renderer_execution_source.py" in ci
