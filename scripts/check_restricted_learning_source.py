@@ -73,7 +73,15 @@ def main() -> int:
     import pytest
 
     result = pytest.main(
-        ["--noconftest", "-o", "addopts=", "-q", "-s", "tests/test_restricted_learning_source.py"]
+        [
+            "--noconftest",
+            "-o",
+            "addopts=",
+            "-q",
+            "-s",
+            "tests/test_restricted_learning_source.py",
+            "tests/test_restricted_learning_collection.py",
+        ]
     )
     loaded()
     print("SYNTHETIC_SOURCE_ONLY smoke/validation/inspection; allocation/collection/models HELD")

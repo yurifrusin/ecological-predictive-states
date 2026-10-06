@@ -12,12 +12,14 @@ import stat
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Protocol
 
 from epsbench.diagnostics.restricted_learning_contract import (
     ARCHITECTURE,
     INITIALIZATIONS,
+    REQUIRED,
     ROSTER,
     VERSION,
     Forecast,
@@ -26,13 +28,16 @@ from epsbench.diagnostics.restricted_learning_contract import (
     sha,
 )
 from epsbench.diagnostics.restricted_learning_membership import (
+    ANNOUNCED,
     BOOTSTRAP_DOMAIN,
+    PREFIXES,
     MembershipLock,
     decisions,
 )
 from epsbench.diagnostics.restricted_learning_sampling import commitment
 from epsbench.diagnostics.restricted_learning_scoring import GeometryScore, Score, score
 from epsbench.diagnostics.visible_forecast_contract import _json, _keys
+from epsbench.schema import ModalityPermissionSet
 from epsbench.utils.canonical import canonical_json_bytes
 
 
@@ -46,6 +51,81 @@ def reject_reparse(path: Path) -> None:
             stat, "FILE_ATTRIBUTE_REPARSE_POINT", 1024
         ):
             raise ValueError("symlink/junction/reparse archive denied")
+
+
+def _control_rule(
+    condition: str,
+    budget: int,
+    lock: MembershipLock,
+    inputs: dict[str, InputEvidence],
+    targets: dict[str, QualifiedTarget],
+) -> tuple[str, dict[tuple[tuple[str, ...], bool], float]]:
+    if (
+        type(lock) is not MembershipLock
+        or condition not in ("persistence", "absent", "visible", "half", "train-frequency")
+        or budget not in (16, 64)
+    ):
+        raise ValueError("actual declared cheap-control scope required")
+    geometries = lock.train[:16] if budget == 16 else lock.train
+    train_root = None
+    if condition == "train-frequency":
+        train_root = digest(
+            canonical_json_bytes(
+                [inputs[d].digest for g in geometries for d in decisions(g.identity)]
+            )
+        )
+    rule = {
+        "version": VERSION,
+        "condition": condition,
+        "train_data": train_root if condition == "train-frequency" else None,
+        "smoothing": "Laplace(1,1)" if condition == "train-frequency" else None,
+    }
+    frequencies: dict[tuple[tuple[str, ...], bool], list[int]] = {}
+    if condition == "train-frequency":
+        for g in geometries:
+            for d in decisions(g.identity):
+                source = inputs[d]
+                visible = {h for h, _ in source.prefix.frames[-1].masks}
+                command_class = tuple(str(v) for v in source.prefix.announced)
+                for h, truth in targets[d].truth:
+                    pair = (command_class, h in visible)
+                    count = frequencies.setdefault(pair, [0, 0])
+                    count[0] += int(truth)
+                    count[1] += 1
+    return digest(canonical_json_bytes(rule)), {
+        k: (v[0] + 1) / (v[1] + 2) for k, v in frequencies.items()
+    }
+
+
+def _check_control(
+    forecast: Forecast,
+    source: InputEvidence,
+    rules: dict[tuple[str, int], tuple[str, dict[tuple[tuple[str, ...], bool], float]]],
+) -> None:
+    if forecast.fit.condition not in (
+        "persistence",
+        "absent",
+        "visible",
+        "half",
+        "train-frequency",
+    ):
+        return
+    root, frequencies = rules[(forecast.fit.condition, forecast.fit.budget)]
+    if forecast.checkpoint_sha256 != root:
+        raise ValueError("cheap-control canonical rule/training-data binding required")
+    visible = {h for h, _ in source.prefix.frames[-1].masks}
+    for h, value in forecast.channels:
+        expected = {
+            "persistence": float(h in visible),
+            "absent": 0.0,
+            "visible": 1.0,
+            "half": 0.5,
+            "train-frequency": frequencies.get(
+                (tuple(str(v) for v in source.prefix.announced), h in visible), 0.5
+            ),
+        }[forecast.fit.condition]
+        if value is not None and value != expected:
+            raise ValueError("cheap control differs from fixed train-only rule")
 
 
 class Archive:
@@ -112,23 +192,45 @@ class Archive:
 
     def fail(self, pending: tuple[str, ...], error: Exception) -> None:
         self.failed = True
-        self.write(
-            "failure.json",
-            canonical_json_bytes(
-                {
-                    "version": VERSION,
-                    "disposition": "INCONCLUSIVE",
-                    "status": "FAILED_CLOSED",
-                    "pending": list(pending),
-                    "failure_kind": type(error).__name__,
-                    "last_event": digest(canonical_json_bytes(self.events[-1]))
-                    if self.events
-                    else None,
-                    "used_bytes": self.used,
-                }
-            ),
-            True,
+        kinds = [e["kind"] for e in self.events]
+        phase = (
+            "SCORING" if "SEAL_B" in kinds else "FORECAST" if "SEAL_A" in kinds else "QUALIFICATION"
         )
+        membership = self.read("membership-lock.json")
+        version = _json(membership)["version"]
+        data = canonical_json_bytes(
+            {
+                "version": version,
+                "disposition": "INCONCLUSIVE",
+                "status": "FAILED_CLOSED",
+                "pending": list(pending),
+                "failure_kind": "PERMISSION"
+                if isinstance(error, PermissionError)
+                else "VALUE"
+                if isinstance(error, ValueError)
+                else "IO"
+                if isinstance(error, OSError)
+                else "LIMIT_OR_CLOSED"
+                if isinstance(error, RuntimeError)
+                else "OTHER",
+                "last_event": digest(canonical_json_bytes(self.events[-1]))
+                if self.events
+                else None,
+                "used_bytes": self.used,
+                "phase": phase,
+                "membership": digest(membership),
+            }
+        )
+        binding = self.write("failure.json", data, True)
+        record = {
+            "index": len(self.events),
+            "kind": "FAILURE",
+            "path": "failure.json",
+            "sha256": binding,
+            "previous": digest(canonical_json_bytes(self.events[-1])) if self.events else None,
+        }
+        self.write(f"event-{len(self.events)}.json", canonical_json_bytes(record), True)
+        self.events.append(record)
 
     def inspect(self) -> dict[str, Any]:
         used = 0
@@ -146,6 +248,11 @@ class Archive:
                 raise ValueError("retained evidence/history changed")
             used += len(data) + len(self.read(p["path"]))
             records.append(p)
+        if records and records[0]["kind"] == "MEMBERSHIP_LOCK":
+            result = inspect_archive(self.root, allow_synthetic=True)
+            if result["failed"] != self.failed:
+                raise ValueError("live/durable failure state differs")
+            return result
         return {
             "version": VERSION,
             "events": len(records),
@@ -155,14 +262,60 @@ class Archive:
         }
 
 
+def _prefix_audit(data: bytes) -> None:
+    annotation = _json(data)
+    _keys(annotation, {"version", "audits", "decision_occlusion"})
+    if (
+        annotation["version"] != VERSION
+        or type(annotation["audits"]) is not list
+        or len(annotation["audits"]) != 3
+    ):
+        raise ValueError("all three independent prefix audits required")
+    for audit in annotation["audits"]:
+        _keys(audit, {"raw", "reference", "ties", "boundaries", "statuses"})
+        if audit["raw"] != audit["reference"] or audit["ties"] != []:
+            raise ValueError("prefix independent unique raster qualification failed")
+        sha(audit["raw"])
+    if annotation["decision_occlusion"] != "COMPLETE_IN_FRUSTUM_OCCLUSION":
+        raise ValueError("previously observed background pure in-frame hiding required")
+
+
+def _readiness(
+    lock: MembershipLock, inputs: dict[str, InputEvidence], targets: dict[str, QualifiedTarget]
+) -> None:
+    if type(lock) is not MembershipLock:
+        raise ValueError("actual lock required")
+    classes = set()
+    for g in lock.evaluation:
+        absent = visible = 0
+        for d in decisions(g.identity):
+            source = inputs[d]
+            currently_visible = {h for h, _ in source.prefix.frames[-1].masks}
+            for h, y in targets[d].truth:
+                if h in currently_visible:
+                    visible += 1
+                else:
+                    absent += 1
+                    classes.add(y)
+        if not absent or not visible:
+            raise ValueError("empty required geometry stratum; all32 retained INCONCLUSIVE")
+    if classes != {False, True}:
+        raise ValueError("both future classes required in current-absent evaluation inventory")
+
+
 def inspect_archive(root: Path, allow_synthetic: bool = False) -> dict[str, Any]:
-    """Read-only durable history verification; never resumes a producer or forecast."""
+    """Reconstruct durable semantic bindings read-only; no resume or recollection.
+
+    The returned archive_root includes terminal failure content. An independently
+    retained immutable bundle receipt authenticates original bytes against coherent
+    wholesale rewrites; this validator establishes semantics at those bytes.
+    """
     reject_reparse(root)
     if not root.is_dir():
         raise ValueError("retained regular directory required")
 
     def read(name: str) -> bytes:
-        if re.fullmatch(r"[a-zA-Z0-9_-]+[.](json|bin)", name) is None:
+        if type(name) is not str or re.fullmatch(r"[a-zA-Z0-9_-]+[.](json|bin)", name) is None:
             raise ValueError("flat artifact name required")
         path = root / name
         reject_reparse(path)
@@ -180,92 +333,295 @@ def inspect_archive(root: Path, allow_synthetic: bool = False) -> dict[str, Any]
         retained_bytes += path.stat().st_size
         if retained_bytes > 1024**3:
             raise ValueError("retained inclusive byte budget exceeded")
-    event_names = {p.name for p in root.glob("event-*.json")}
-    if (
-        not event_names
-        or len(event_names) > 100000
-        or event_names != {f"event-{i}.json" for i in range(len(event_names))}
-    ):
+    names = {p.name for p in root.glob("event-*.json")}
+    if not names or len(names) > 100000 or names != {f"event-{i}.json" for i in range(len(names))}:
         raise ValueError("complete consecutive bounded durable journal required")
     records: list[dict[str, Any]] = []
+    payloads: dict[str, bytes] = {}
     used = 0
-    for i in range(len(event_names)):
+    preceding_bytes: list[int] = []
+    for i in range(len(names)):
         event = read(f"event-{i}.json")
         record = _json(event)
         _keys(record, {"index", "kind", "path", "sha256", "previous"})
-        payload = read(record["path"])
+        data = read(record["path"])
+        sha(record["sha256"])
         if (
             type(record["index"]) is not int
             or record["index"] != i
             or record["previous"]
             != (digest(canonical_json_bytes(records[-1])) if records else None)
-            or digest(payload) != record["sha256"]
+            or digest(data) != record["sha256"]
             or canonical_json_bytes(record) != event
         ):
             raise ValueError("durable artifact or history changed")
-        used += len(event) + len(payload)
-        if used > 1024**3:
-            raise ValueError("durable payload budget exceeded")
+        if record["path"] in payloads:
+            raise ValueError("duplicate durable artifact event")
+        payloads[record["path"]] = data
+        preceding_bytes.append(used)
+        used += len(event) + len(data)
         records.append(record)
     if records[0]["kind"] != "MEMBERSHIP_LOCK" or records[0]["path"] != "membership-lock.json":
         raise ValueError("precollection membership event required")
-    membership = read("membership-lock.json")
-    p = _json(membership)
-    synthetic = p.get("version") == "SYNTHETIC_SOURCE_ONLY"
+    membership = payloads["membership-lock.json"]
+    synthetic = _json(membership).get("version") == "SYNTHETIC_SOURCE_ONLY"
+    lock: MembershipLock | SyntheticLock
     if synthetic:
         if not allow_synthetic or membership != SyntheticLock().canonical_bytes():
-            raise PermissionError("explicit source-smoke inspection only")
+            raise PermissionError("explicit fixed source-smoke inspection only")
+        lock = SyntheticLock()
     else:
-        MembershipLock.from_bytes(membership)
-    kinds = [r["kind"] for r in records]
-    if kinds.count("SEAL_A") > 1 or kinds.count("SEAL_B") > 1 or kinds.count("REPORT") > 1:
-        raise ValueError("immutable single-use seals/report required")
-    if "SEAL_A" in kinds:
-        a_index = kinds.index("SEAL_A")
-        a = _json(read("seal-a.json"))
-        if (
-            a["membership"] != digest(membership)
-            or a["qualification_history"] != digest(canonical_json_bytes(records[:a_index]))
-            or a["version"] != ("SYNTHETIC_SOURCE_ONLY" if synthetic else VERSION)
-        ):
-            raise ValueError("durable SealA differs from precommitted qualified history")
-        if any(
-            k
-            in (
-                "INPUT",
-                "PREFIX_AUDIT",
-                "QUALIFIED_TARGET",
-                "RAW_PRIVATE",
-                "REFERENCE_PRIVATE",
-                "AUDIT_PRIVATE",
+        lock = MembershipLock.from_bytes(membership)
+    decision_roster = lock.decision_roster
+    forecast_roster = lock.forecast_roster
+    decision_set = set(decision_roster)
+    forecast_set = set(forecast_roster)
+    version = "SYNTHETIC_SOURCE_ONLY" if synthetic else VERSION
+    inputs: dict[str, InputEvidence] = {}
+    input_by_digest: dict[str, str] = {}
+    targets: dict[str, QualifiedTarget] = {}
+    prefix_audits: set[str] = set()
+    forecasts: dict[str, Forecast] = {}
+    bindings: dict[str, list[str]] = {}
+    seal_a = seal_b = failure_sha = None
+    report_seen = scoring_seen = False
+    control_rules: dict[tuple[str, int], tuple[str, dict[tuple[tuple[str, ...], bool], float]]] = {}
+    phase = "QUALIFICATION"
+    fixed = {
+        "MEMBERSHIP_LOCK": "membership-lock.json",
+        "COLLECTION_AUTHORITY": "collection-authority.json",
+        "PRIVATE_IDENTITIES": "identity-private.json",
+        "SEAL_A": "seal-a.json",
+        "SEAL_B": "seal-b.json",
+        "SCORING_ACCESS": "scoring-access.json",
+        "REPORT": "report.json",
+        "FAILURE": "failure.json",
+    }
+    private = {
+        "RAW_PRIVATE": r"raw-[0-9]+[.]bin",
+        "REFERENCE_PRIVATE": r"reference-[0-9]+[.]json",
+        "AUDIT_PRIVATE": r"audit-[0-9]+[.]json",
+    }
+    for index, record in enumerate(records):
+        kind, path = record["kind"], record["path"]
+        data = payloads[path]
+        if kind in fixed and path != fixed[kind]:
+            raise ValueError("closed phase artifact path differs")
+        if failure_sha is not None:
+            raise ValueError("terminal failure forbids subsequent events")
+        if kind == "MEMBERSHIP_LOCK":
+            if index != 0:
+                raise ValueError("duplicate membership lock")
+        elif kind in ("COLLECTION_AUTHORITY", "PRIVATE_IDENTITIES"):
+            if phase != "QUALIFICATION" or inputs or synthetic:
+                raise ValueError("collection instrumentation outside initial actual phase")
+        elif kind in private:
+            if phase != "QUALIFICATION" or synthetic or re.fullmatch(private[kind], path) is None:
+                raise ValueError("private qualification path/phase differs")
+        elif kind in ("INPUT", "PREFIX_AUDIT", "QUALIFIED_TARGET"):
+            prefix = {
+                "INPUT": "input",
+                "PREFIX_AUDIT": "prefix-audit",
+                "QUALIFIED_TARGET": "target",
+            }[kind]
+            match = re.fullmatch(prefix + r"-([0-9]+)[.]json", path)
+            if phase != "QUALIFICATION" or match is None:
+                raise ValueError("qualification path/phase differs")
+            ordinal = int(match[1])
+            if ordinal >= len(decision_roster):
+                raise ValueError("extra qualification member")
+            decision = decision_roster[ordinal]
+            if kind == "INPUT":
+                if ordinal != len(inputs):
+                    raise ValueError("missing/duplicate input ordinal")
+                source = InputEvidence.from_bytes(data, ModalityPermissionSet(allowed=REQUIRED))
+                if data != source.canonical_bytes():
+                    raise ValueError("noncanonical retained input")
+                if not synthetic:
+                    _, prefix_name, action_name = decision.split("/")
+                    poses = PREFIXES[int(prefix_name.removeprefix("prefix-"))]
+                    executed = tuple(
+                        (Fraction(0), poses[j + 1] - poses[j], Fraction(0)) for j in range(2)
+                    )
+                    announced = (
+                        Fraction(0),
+                        ANNOUNCED[int(action_name.removeprefix("action-"))],
+                        Fraction(0),
+                    )
+                    if source.prefix.executed != executed or source.prefix.announced != announced:
+                        raise ValueError("committed prefix/action chronology differs")
+                input_root = source.digest
+                if input_root in input_by_digest:
+                    raise ValueError("distinct episode input identity required")
+                input_by_digest[input_root] = decision
+                inputs[decision] = source
+            elif kind == "PREFIX_AUDIT":
+                if decision not in inputs or decision in prefix_audits:
+                    raise ValueError("audit before input or duplicate audit")
+                _prefix_audit(data)
+                prefix_audits.add(decision)
+            else:
+                if decision not in prefix_audits or decision in targets:
+                    raise ValueError("target before frozen audited input or duplicate target")
+                target = QualifiedTarget.from_bytes(data)
+                if {h for h, _ in target.truth} != set(inputs[decision].prefix.inventory):
+                    raise ValueError("retained target observed inventory differs")
+                if (
+                    not synthetic
+                    and _json(target.annotations)["descriptor"] != decision.split("/")[0]
+                ):
+                    raise ValueError("retained target geometry binding differs")
+                targets[decision] = target
+        elif kind == "SEAL_A":
+            if (
+                phase != "QUALIFICATION"
+                or set(inputs) != decision_set
+                or set(targets) != decision_set
+            ):
+                raise ValueError("complete qualification required before single SealA")
+            if type(lock) is MembershipLock:
+                _readiness(lock, inputs, targets)
+            a = _json(data)
+            _keys(
+                a,
+                {
+                    "version",
+                    "architecture",
+                    "membership",
+                    "qualification_history",
+                    "inputs",
+                    "targets",
+                    "readiness",
+                },
             )
-            for k in kinds[a_index + 1 :]
-        ):
-            raise ValueError("qualification artifacts after SealA denied")
-    if "SEAL_B" in kinds:
-        if "SEAL_A" not in kinds or kinds.index("SEAL_B") <= kinds.index("SEAL_A"):
-            raise ValueError("qualification must precede complete forecast SealB")
-        b = _json(read("seal-b.json"))
-        if (
-            b["membership"] != digest(membership)
-            or b["seal_a"] != digest(read("seal-a.json"))
-            or (b["version"] != ("SYNTHETIC_SOURCE_ONLY" if synthetic else VERSION))
-        ):
-            raise ValueError("durable SealB binding differs")
-        if any(k == "FORECAST" for k in kinds[kinds.index("SEAL_B") + 1 :]):
-            raise ValueError("forecast after SealB denied")
-    if "SCORING_ACCESS" in kinds and (
-        "SEAL_B" not in kinds or kinds.index("SCORING_ACCESS") < kinds.index("SEAL_B")
-    ):
-        raise ValueError("scoring before global forecast seal denied")
+            expected: dict[str, Any] = {
+                "version": version,
+                "architecture": ARCHITECTURE,
+                "membership": lock.digest,
+                "qualification_history": digest(canonical_json_bytes(records[:index])),
+                "inputs": {d: v.digest for d, v in inputs.items()},
+                "targets": {d: digest(v.canonical_bytes()) for d, v in targets.items()},
+                "readiness": "SOURCE_SMOKE_ONLY" if synthetic else "QUALIFIED",
+            }
+            if a != expected or data != canonical_json_bytes(expected):
+                raise ValueError("complete immutable SealA semantic bindings differ")
+            seal_a, phase = digest(data), "FORECAST"
+            if type(lock) is MembershipLock:
+                control_rules = {
+                    (c, b): _control_rule(c, b, lock, inputs, targets)
+                    for b in (16, 64)
+                    for c in ("persistence", "absent", "visible", "half", "train-frequency")
+                }
+        elif kind == "FORECAST":
+            if phase != "FORECAST" or path != f"forecast-{len(forecasts)}.json":
+                raise ValueError("forecast ordinal/phase differs")
+            p = _json(data)
+            forecast_input = p.get("input")
+            if type(forecast_input) is not str:
+                raise ValueError("strict forecast input identity required")
+            matched_decision = input_by_digest.get(forecast_input)
+            if matched_decision is None:
+                raise ValueError("unique retained input binding required")
+            decision = matched_decision
+            forecast = Forecast.from_bytes(data, inputs[decision])
+            if not synthetic:
+                _check_control(forecast, inputs[decision], control_rules)
+            key = forecast.fit.key + "/" + decision
+            if key not in forecast_set or key in forecasts or data != forecast.canonical_bytes():
+                raise ValueError("missing/extra/duplicate/noncanonical forecast binding")
+            pair = [forecast.checkpoint_sha256, forecast.run_sha256]
+            if forecast.fit.key in bindings and bindings[forecast.fit.key] != pair:
+                raise ValueError("retained fit checkpoint/run differs")
+            bindings[forecast.fit.key] = pair
+            forecasts[key] = forecast
+        elif kind == "SEAL_B":
+            if phase != "FORECAST" or set(forecasts) != forecast_set:
+                raise ValueError("all declared forecasts required before single SealB")
+            b = _json(data)
+            _keys(b, {"version", "seal_a", "membership", "forecasts", "bindings", "roster"})
+            expected = {
+                "version": version,
+                "seal_a": seal_a,
+                "membership": lock.digest,
+                "forecasts": {k: digest(v.canonical_bytes()) for k, v in forecasts.items()},
+                "bindings": bindings,
+                "roster": list(forecast_roster),
+            }
+            if b != expected or data != canonical_json_bytes(expected):
+                raise ValueError("complete immutable SealB semantic bindings differ")
+            seal_b, phase = digest(data), "SCORING"
+        elif kind == "SCORING_ACCESS":
+            if phase != "SCORING" or scoring_seen or synthetic:
+                raise ValueError("single actual scoring access after SealB required")
+            a = _json(data)
+            _keys(a, {"seal_a", "seal_b", "resource_receipt"})
+            sha(a["resource_receipt"])
+            if a["seal_a"] != seal_a or a["seal_b"] != seal_b:
+                raise ValueError("scoring seal binding differs")
+            scoring_seen = True
+        elif kind == "REPORT":
+            if not scoring_seen or report_seen:
+                raise ValueError("single report after scoring access required")
+            report_seen = True
+        elif kind == "FAILURE":
+            f = _json(data)
+            _keys(
+                f,
+                {
+                    "version",
+                    "disposition",
+                    "status",
+                    "pending",
+                    "failure_kind",
+                    "last_event",
+                    "used_bytes",
+                    "phase",
+                    "membership",
+                },
+            )
+            roster = decision_roster if phase == "QUALIFICATION" else forecast_roster
+            done = (
+                set(targets)
+                if phase == "QUALIFICATION"
+                else set(forecasts)
+                if phase == "FORECAST"
+                else set()
+            )
+            pending = [k for k in roster if k not in done]
+            if (
+                f["version"] != version
+                or f["disposition"] != "INCONCLUSIVE"
+                or f["status"] != "FAILED_CLOSED"
+                or (
+                    type(f["pending"]) is not list
+                    or f["pending"] != pending
+                    or f["phase"] != phase
+                    or f["membership"] != lock.digest
+                    or f["last_event"] != record["previous"]
+                    or type(f["used_bytes"]) is not int
+                    or not preceding_bytes[index] <= f["used_bytes"] <= 1024**3
+                    or f["failure_kind"]
+                    not in ("VALUE", "PERMISSION", "IO", "LIMIT_OR_CLOSED", "OTHER")
+                )
+                or data != canonical_json_bytes(f)
+            ):
+                raise ValueError("closed terminal failure schema/chronology/coverage differs")
+            failure_sha = digest(data)
+        else:
+            raise ValueError("unknown durable phase event kind")
+    if (root / "failure.json").exists() != (failure_sha is not None):
+        raise ValueError("orphan/unbound failure record cannot establish failure evidence")
+    history = digest(canonical_json_bytes(records))
     return {
-        "version": "SYNTHETIC_SOURCE_ONLY" if synthetic else VERSION,
+        "version": version,
         "events": len(records),
         "validated_bytes": used,
-        "history_root": digest(canonical_json_bytes(records)),
-        "failed": (root / "failure.json").is_file(),
-        "seal_a": digest(read("seal-a.json")) if "SEAL_A" in kinds else None,
-        "seal_b": digest(read("seal-b.json")) if "SEAL_B" in kinds else None,
+        "history_root": history,
+        "failure_sha256": failure_sha,
+        "archive_root": digest(canonical_json_bytes({"history": history, "failure": failure_sha})),
+        "failed": failure_sha is not None,
+        "seal_a": seal_a,
+        "seal_b": seal_b,
     }
 
 
@@ -286,6 +642,7 @@ class QualifiedTarget:
         _keys(p, {"version", "descriptor", "raw", "reference", "ties", "boundaries", "statuses"})
         if p["version"] != VERSION or p["raw"] != p["reference"] or p["ties"]:
             raise ValueError("unique independent exact reference agreement required")
+        VisibilityLabels(self.truth)
         sha(p["descriptor"])
         sha(p["raw"])
         # Clipping/boundaries and support UNKNOWN_DOMAIN are retained, not discarded.
@@ -294,6 +651,17 @@ class QualifiedTarget:
         return canonical_json_bytes(
             {"truth": dict(self.truth), "annotations": _json(self.annotations)}
         )
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> QualifiedTarget:
+        p = _json(data)
+        _keys(p, {"truth", "annotations"})
+        if type(p["truth"]) is not dict:
+            raise ValueError("closed retained truth map required")
+        result = cls(tuple(p["truth"].items()), canonical_json_bytes(p["annotations"]))
+        if data != result.canonical_bytes():
+            raise ValueError("canonical retained target required")
+        return result
 
 
 @dataclass(frozen=True)
@@ -447,22 +815,7 @@ class Lifecycle:
     def _readiness(self) -> None:
         if type(self.lock) is not MembershipLock:
             raise ValueError("actual lock required")
-        classes = set()
-        for g in self.lock.evaluation:
-            absent = visible = 0
-            for d in decisions(g.identity):
-                source = self.inputs[d]
-                currently_visible = {h for h, _ in source.prefix.frames[-1].masks}
-                for h, y in self._targets[d].truth:
-                    if h in currently_visible:
-                        visible += 1
-                    else:
-                        absent += 1
-                        classes.add(y)
-            if not absent or not visible:
-                raise ValueError("empty required geometry stratum; all32 retained INCONCLUSIVE")
-        if classes != {False, True}:
-            raise ValueError("both future classes required in current-absent evaluation inventory")
+        _readiness(self.lock, self.inputs, self._targets)
 
     def training_material(
         self, geometry: str
@@ -493,52 +846,21 @@ class Lifecycle:
     def control_rule(
         self, condition: str, budget: int
     ) -> tuple[str, dict[tuple[tuple[str, ...], bool], float]]:
-        if (
-            type(self.lock) is not MembershipLock
-            or condition not in ("persistence", "absent", "visible", "half", "train-frequency")
-            or budget not in (16, 64)
-        ):
+        if type(self.lock) is not MembershipLock:
             raise ValueError("actual declared cheap-control scope required")
-        geometries = self.lock.train[:16] if budget == 16 else self.lock.train
-        train_root = None
-        if condition == "train-frequency":
-            train_root = digest(
-                canonical_json_bytes(
-                    [self.inputs[d].digest for g in geometries for d in decisions(g.identity)]
-                )
-            )
-        rule = {
-            "version": VERSION,
-            "condition": condition,
-            "train_data": train_root if condition == "train-frequency" else None,
-            "smoothing": "Laplace(1,1)" if condition == "train-frequency" else None,
-        }
-        frequencies: dict[tuple[tuple[str, ...], bool], list[int]] = {}
-        if condition == "train-frequency":
-            for g in geometries:
-                for d in decisions(g.identity):
-                    source = self.inputs[d]
-                    visible = {h for h, _ in source.prefix.frames[-1].masks}
-                    command_class = tuple(str(v) for v in source.prefix.announced)
-                    for h, truth in self._targets[d].truth:
-                        pair = (command_class, h in visible)
-                        count = frequencies.setdefault(pair, [0, 0])
-                        count[0] += int(truth)
-                        count[1] += 1
-        return digest(canonical_json_bytes(rule)), {
-            k: (v[0] + 1) / (v[1] + 2) for k, v in frequencies.items()
-        }
+        return _control_rule(condition, budget, self.lock, self.inputs, self._targets)
 
     def seal_forecasts(self, forecasts: tuple[tuple[str, Forecast], ...]) -> str:
         self.verify_a()
         if self.seal_b is not None or self.archive.failed:
             raise PermissionError("single SealB; no rerun/reseal")
-        pending = self.lock.forecast_roster
+        expected_roster = self.lock.forecast_roster
+        pending = list(expected_roster)
         try:
             if (
                 type(forecasts) is not tuple
-                or len(forecasts) != len(pending)
-                or ({k for k, _ in forecasts} != set(pending))
+                or len(forecasts) != len(expected_roster)
+                or ({k for k, _ in forecasts} != set(expected_roster))
             ):
                 raise ValueError(
                     "complete all24 learned fits and all scoped cheap controls required"
@@ -559,32 +881,8 @@ class Lifecycle:
                 if key != f.fit.key + "/" + d or d not in self.inputs:
                     raise ValueError("exact fit/decision binding required")
                 f.validate_input(self.inputs[d])
-                if type(self.lock) is MembershipLock and f.fit.condition in (
-                    "persistence",
-                    "absent",
-                    "visible",
-                    "half",
-                    "train-frequency",
-                ):
-                    root, frequency = control_rules[(f.fit.condition, f.fit.budget)]
-                    if f.checkpoint_sha256 != root:
-                        raise ValueError(
-                            "cheap-control canonical rule/training-data binding required"
-                        )
-                    source = self.inputs[d]
-                    visible = {h for h, _ in source.prefix.frames[-1].masks}
-                    for h, value in f.channels:
-                        expected = {
-                            "persistence": float(h in visible),
-                            "absent": 0.0,
-                            "visible": 1.0,
-                            "half": 0.5,
-                            "train-frequency": frequency.get(
-                                (tuple(str(v) for v in source.prefix.announced), h in visible), 0.5
-                            ),
-                        }[f.fit.condition]
-                        if value is not None and value != expected:
-                            raise ValueError("cheap control differs from fixed train-only rule")
+                if type(self.lock) is MembershipLock:
+                    _check_control(f, self.inputs[d], control_rules)
                 pair = (f.checkpoint_sha256, f.run_sha256)
                 if f.fit.key in bindings and bindings[f.fit.key] != pair:
                     raise ValueError("fit checkpoint/run changed within roster")
@@ -593,6 +891,7 @@ class Lifecycle:
                     "FORECAST", f"forecast-{i}.json", f.canonical_bytes()
                 )
                 self._forecasts[key] = f
+                pending.remove(key)
             self.seal_b = self.archive.event(
                 "SEAL_B",
                 "seal-b.json",
@@ -605,14 +904,14 @@ class Lifecycle:
                         "membership": self.lock.digest,
                         "forecasts": roots,
                         "bindings": bindings,
-                        "roster": list(pending),
+                        "roster": list(expected_roster),
                     }
                 ),
             )
             return self.seal_b
         except Exception as e:
             try:
-                self.archive.fail(pending, e)
+                self.archive.fail(tuple(pending), e)
             except Exception as preservation_error:
                 e.add_note("failure preservation error: " + type(preservation_error).__name__)
             raise

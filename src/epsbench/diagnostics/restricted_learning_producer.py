@@ -54,6 +54,7 @@ def exact_bytes(value: Any) -> bytes:
 
 
 SOURCE_FILES = (
+    "src/epsbench/diagnostics/restricted_learning_collection.py",
     "src/epsbench/diagnostics/restricted_learning_contract.py",
     "src/epsbench/diagnostics/restricted_learning_membership.py",
     "src/epsbench/diagnostics/restricted_learning_sampling.py",

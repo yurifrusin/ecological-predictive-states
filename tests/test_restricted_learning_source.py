@@ -349,3 +349,152 @@ def test_durable_read_only_inspection_after_synthetic_seals(tmp_path: Path) -> N
     (root / "event-4.json").unlink()
     with pytest.raises(ValueError):
         inspect_archive(root, allow_synthetic=True)
+
+
+def _sealed_symbolic(root: Path) -> Lifecycle:
+    life = Lifecycle(SyntheticLock(), Archive(root))
+    fake = Fake(life)
+    life.qualify(fake)
+    life.seal_forecasts(((SyntheticLock().forecast_roster[0], prediction(fake.source)),))
+    return life
+
+
+def _coherent_rewrite(root: Path, path: str, update: Any) -> None:
+    """Test adversary rewrites hashes too: semantic closure must still reject it."""
+    import json
+
+    data = json.loads((root / path).read_bytes())
+    update(data)
+    payload = canonical_json_bytes(data)
+    (root / path).write_bytes(payload)
+    previous = None
+    files = sorted(root.glob("event-*.json"), key=lambda p: int(p.stem.split("-")[1]))
+    for event_path in files:
+        event = json.loads(event_path.read_bytes())
+        event["previous"] = previous
+        if event["path"] == path:
+            event["sha256"] = digest(payload)
+        encoded = canonical_json_bytes(event)
+        event_path.write_bytes(encoded)
+        previous = digest(encoded)
+
+
+def test_er54_0001_valid_failure_durable_identity_and_orphan_preservation(tmp_path: Path) -> None:
+    from epsbench.diagnostics.restricted_learning_retention import inspect_archive
+
+    root = tmp_path / "failure"
+    life = Lifecycle(SyntheticLock(), Archive(root))
+    life.qualify(Fake(life))
+    with pytest.raises(ValueError):
+        life.seal_forecasts(())
+    summary = inspect_archive(root, allow_synthetic=True)
+    assert summary["failed"] and summary["events"] == 6
+    assert summary["failure_sha256"] == digest((root / "failure.json").read_bytes())
+    assert life.archive.inspect()["archive_root"] == summary["archive_root"]
+    (root / "partial-orphan.bin").write_bytes(b"partial evidence")
+    assert inspect_archive(root, allow_synthetic=True)["archive_root"] == summary["archive_root"]
+    assert (root / "partial-orphan.bin").read_bytes() == b"partial evidence"
+    _coherent_rewrite(root, "failure.json", lambda p: p.update(failure_kind="IO"))
+    changed = inspect_archive(root, allow_synthetic=True)
+    assert changed["failure_sha256"] != summary["failure_sha256"]
+    assert changed["archive_root"] != summary["archive_root"]
+    (root / "failure.json").write_bytes(b"{}")
+    with pytest.raises(ValueError):
+        inspect_archive(root, allow_synthetic=True)
+    with pytest.raises(ValueError):
+        life.archive.inspect()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"last_event": H},
+        {"pending": []},
+        {"phase": "QUALIFICATION"},
+        {"status": "RECOVERED"},
+        {"used_bytes": True},
+        {"membership": H},
+        {"extra": 0},
+    ],
+)
+def test_er54_0001_closed_failure_chronology(tmp_path: Path, mutation: dict[str, Any]) -> None:
+    from epsbench.diagnostics.restricted_learning_retention import inspect_archive
+
+    root = tmp_path / "closed-failure"
+    life = Lifecycle(SyntheticLock(), Archive(root))
+    life.qualify(Fake(life))
+    with pytest.raises(ValueError):
+        life.seal_forecasts(())
+    _coherent_rewrite(root, "failure.json", lambda p: p.update(mutation))
+    with pytest.raises(ValueError):
+        inspect_archive(root, allow_synthetic=True)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"forecasts": {}, "bindings": {}, "roster": []},
+        {"forecasts": {}},
+        {"bindings": {}},
+        {"roster": []},
+        {"roster": ["extra"]},
+        {"extra": 0},
+        {"bindings": {"16/init-0/relational": ["1" * 64, H]}},
+        {"forecasts": {"16/init-0/relational/synthetic/source-only": H}},
+    ],
+)
+def test_er54_0002_closed_complete_sealb(tmp_path: Path, mutation: dict[str, Any]) -> None:
+    from epsbench.diagnostics.restricted_learning_retention import inspect_archive
+
+    root = tmp_path / "seal"
+    _sealed_symbolic(root)
+    _coherent_rewrite(root, "seal-b.json", lambda p: p.update(mutation))
+    with pytest.raises(ValueError):
+        inspect_archive(root, allow_synthetic=True)
+
+
+@pytest.mark.parametrize(
+    "path,mutation",
+    [
+        ("forecast-0.json", {"input": H}),
+        ("forecast-0.json", {"condition": "dense"}),
+        ("forecast-0.json", {"channels": {A: {"probability": 0.8}}}),
+        ("target-0.json", {"truth": {A: True}}),
+        ("target-0.json", {"truth": {A: 1, B: False}}),
+        ("seal-a.json", {"inputs": {}}),
+        ("seal-a.json", {"targets": {}}),
+        ("seal-a.json", {"extra": 0}),
+    ],
+)
+def test_er54_0002_offline_member_bindings(
+    tmp_path: Path, path: str, mutation: dict[str, Any]
+) -> None:
+    from epsbench.diagnostics.restricted_learning_retention import inspect_archive
+
+    root = tmp_path / "member"
+    _sealed_symbolic(root)
+    _coherent_rewrite(root, path, lambda p: p.update(mutation))
+    with pytest.raises(ValueError):
+        inspect_archive(root, allow_synthetic=True)
+
+
+def test_er54_0002_phase_paths_and_terminal_failure(tmp_path: Path) -> None:
+    import json
+
+    from epsbench.diagnostics.restricted_learning_retention import inspect_archive
+
+    root = tmp_path / "phase"
+    life = _sealed_symbolic(root)
+    event = json.loads((root / "event-6.json").read_bytes())
+    event["kind"] = "SEAL_A"
+    (root / "event-6.json").write_bytes(canonical_json_bytes(event))
+    with pytest.raises(ValueError):
+        inspect_archive(root, allow_synthetic=True)
+    root2 = tmp_path / "terminal"
+    failed = Lifecycle(SyntheticLock(), Archive(root2))
+    failed.qualify(Fake(failed))
+    with pytest.raises(ValueError):
+        failed.seal_forecasts(())
+    with pytest.raises(RuntimeError):
+        failed.archive.event("REPORT", "late.json", b"{}")
+    assert life.seal_b is not None

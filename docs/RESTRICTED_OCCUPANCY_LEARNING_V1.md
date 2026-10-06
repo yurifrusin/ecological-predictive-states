@@ -164,3 +164,45 @@ Partial/orphan files remain retained and count toward inclusive bounds. WP2 bulk
 train/dev exports should verify the archive once at the phase boundary; do not invoke
 full-archive verification per training example. Cheap-control rules/frequencies are
 computed once per condition/budget before the complete forecast loop.
+
+## Prospective private qualification operator
+
+`restricted_learning_collection.prepare_private_precommit` is an explicit later-use
+API, requiring an externally supplied preparation decision, clean exact source
+HEAD/tree, private attempt path and an access-staging declaration commitment. It
+creates that attempt exclusively before any seed draw, retains all seven private
+preimages without redraw, snapshots the complete logical LF source recipe, and
+retains the final MembershipLock and precommit before any frame. Reconstruct the
+complete nonces/schedules from those retained seeds and the exact source; no
+placeholder lock or redundant schedule copy is used. Its aggregate receipt is
+evidence, not owner authority or authorization to qualify.
+
+`qualify_once` separately requires the externally authorized exact membership and
+source decision plus separately supplied canonical bytes of the existing adapter
+collection receipt. It verifies the receipt's exact source/membership and closed
+authorization discriminator, retains the original bytes and passes them unchanged;
+it never converts a decision commitment into authorization. A permanent exclusive
+claim prevents reuse after success or
+failure, including failures before dataset construction. The existing Lifecycle
+retains membership as its first dataset event; the existing DescriptorAdapter
+checks the decision and derivations, and qualification runs once followed by
+read-only durable inspection. Preimages, pending coverage, failures and orphan
+files remain private and are never replaced. Returned receipts contain aggregate
+dispositions, roots/counts and retained byte accounting only; no item-level
+evaluation evidence, seeds, geometry descriptors or mappings are printed.
+
+Reserve 536870912 bytes of the inclusive 1073741824-byte allowance for a later
+optional private review package/notes. Precommit originals and qualification
+originals consume the remaining half together; the dataset budget subtracts
+already retained precommit bytes before construction. No package is created by
+this operator. Planning allowances remain one CPU hour and four GiB process RAM;
+payload limits and cooperative deadlines are not hard host resource guarantees.
+Volatile Python/OS/time provenance is retained outside scientific hashes. Actual
+use requires separately verified private ACL staging and evaluator/author process
+separation; path names and Python objects provide no adversarial isolation.
+
+Source acceptance does not authorize either actual operation. Default `collect()`
+remains disabled. A reviewed read-only bulk train/dev exporter and separate
+forecast-stage controller are deferred to WP2; do not reopen the producer or keep
+the qualification process live while implementing models. No model, forecast,
+scoring access, empirical SUPPORT or gate advancement is supplied here.
