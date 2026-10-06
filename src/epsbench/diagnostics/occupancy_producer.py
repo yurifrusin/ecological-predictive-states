@@ -285,6 +285,24 @@ def collect(root: Path, nonces: dict[str, bytes], expected_head: str) -> dict[st
         )
         return result
     except Exception as error:
-        if not retained.failed:
-            retained.fail(list(MEMBERS), error)
+        try:
+            if not retained.failed:
+                retained.fail(list(MEMBERS), error)
+            if not (retained.root / "runtime-metadata.json").exists():
+                retained.write(
+                    "runtime-metadata.json",
+                    encode(
+                        {
+                            "elapsed_seconds": time.monotonic() - retained.start,
+                            "retained_bytes_before_metadata": retained.used,
+                            "producer_calls": retained.calls,
+                            "python": sys.version,
+                            "numpy": version("numpy"),
+                            "epsbench": version("epsbench"),
+                        }
+                    ),
+                    True,
+                )
+        except Exception as receipt_error:
+            raise error from receipt_error
         raise

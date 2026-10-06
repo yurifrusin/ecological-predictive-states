@@ -416,3 +416,33 @@ def test_current_strata_and_reappearance_keep_unknown_inventory(tmp_path: Path) 
             assert len(report["current_strata"]["current_absent"]) == 1
             assert report["reappearance"] == [{"token": TOKEN, "reappeared": True}]
         assert rules["k-frame-agreement"]["U"] == 2
+
+
+def test_inspection_cap_precedes_reads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "large"
+    root.mkdir()
+    with (root / "large.bin").open("wb") as f:
+        f.truncate(TOTAL_BYTES + 1)
+
+    def denied(path: Path) -> bytes:
+        raise AssertionError("oversized evidence read before cap")
+
+    monkeypatch.setattr(Path, "read_bytes", denied)
+    with pytest.raises(ValueError, match="before artifact reads"):
+        inspect(root)
+
+
+def test_failure_receipt_fault_preserves_initiating_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    q, _ = setup(tmp_path / "two-faults")
+
+    def fault(name: str, data: bytes, failure: bool = False) -> str:
+        if failure:
+            raise OSError("receipt also failed")
+        raise ValueError("initiating source failure")
+
+    monkeypatch.setattr(q.retained, "write", fault)
+    with pytest.raises(ValueError, match="initiating") as error:
+        q.run()
+    assert isinstance(error.value.__cause__, OSError)

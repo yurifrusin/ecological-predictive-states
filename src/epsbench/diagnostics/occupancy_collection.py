@@ -416,7 +416,10 @@ class Qualification:
             return reports
         except Exception as error:
             self.sealed = False
-            self.retained.fail(pending, error)
+            try:
+                self.retained.fail(pending, error)
+            except Exception as receipt_error:
+                raise error from receipt_error
             raise
 
 
@@ -429,6 +432,8 @@ def inspect(root: Path) -> dict[str, Any]:
     if any(not p.is_file() or p.is_symlink() for p in files):
         raise ValueError("flat regular retained files required")
     size = sum(p.stat().st_size for p in files)
+    if size > TOTAL_BYTES:
+        raise ValueError("retention exceeds total before artifact reads")
     roots = {
         p.name: digest(p.read_bytes())
         for p in files
