@@ -47,20 +47,30 @@ def main() -> int:
     sys.path.insert(0, str(root / "src"))
     import pytest
 
+    if sys.argv[1:] not in ([], ["--boundary-observation-only"]):
+        raise ValueError("unsupported source-check selection")
+    observation_only = sys.argv[1:] == ["--boundary-observation-only"]
     result = pytest.main(
         [
             "--noconftest",
             "-o",
             "addopts=",
-            "tests/test_a1_action_contrast.py",
-            "tests/test_a1_controls.py",
-            "tests/test_a1_files.py",
-            "tests/test_a1_retention.py",
-            "tests/test_a1_execution.py",
-            "tests/test_causal_history_fixture.py",
-            "tests/test_causal_history_core.py",
-            "tests/test_causal_history_sequence.py",
-            "tests/test_causal_history_execution.py",
+            *(
+                []
+                if observation_only
+                else [
+                    "tests/test_a1_action_contrast.py",
+                    "tests/test_a1_controls.py",
+                    "tests/test_a1_files.py",
+                    "tests/test_a1_retention.py",
+                    "tests/test_a1_execution.py",
+                    "tests/test_causal_history_fixture.py",
+                    "tests/test_causal_history_core.py",
+                    "tests/test_causal_history_sequence.py",
+                    "tests/test_causal_history_execution.py",
+                ]
+            ),
+            "tests/test_boundary_observation.py",
             "-q",
         ]
     )
@@ -68,6 +78,31 @@ def main() -> int:
     if result:
         return int(result)
     import json
+
+    if observation_only:
+        import numpy as np
+
+        from epsbench.diagnostics.boundary_observation import BoundaryObservationView, VisibleRaster
+        from epsbench.schema import Modality, ModalityPermissionSet
+
+        class ExampleProvider:
+            def raster(self, sequence_index):
+                return VisibleRaster(
+                    sequence_index,
+                    np.array([[0, 1]], dtype=np.int32),
+                    ((1, "surface-0000000000000001"),),
+                )
+
+        example = BoundaryObservationView(
+            ExampleProvider(),
+            ModalityPermissionSet(allowed=frozenset({Modality.SURFACE_REGIONS})),
+            0,
+        ).observe(0)
+        payload = example.canonical_bytes()
+        assert json.loads(payload)["edges"][0]["ownership"] == "unknown"
+        print(payload.decode())
+        check_loaded()
+        return 0
 
     from epsbench.diagnostics.causal_history_fixture import check_candidate
 
