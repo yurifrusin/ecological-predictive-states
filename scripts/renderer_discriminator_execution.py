@@ -35,9 +35,10 @@ BINDING_LABEL = "eps.renderer-discriminator.binding"
 IMAGE_PREFIX = "eps.renderer-discriminator."
 HOST_ACTUAL, HOST_DUMMY, RECEIPT_CAP = 768 * 1024, 256 * 1024, 16384
 POLL = "{{.State.Running}} {{.State.ExitCode}} {{.State.OOMKilled}}"
+# Docker typed selectors differ from emitted JSON keys: ID/Id and NanoCPUs/NanoCpus.
 # These projections are local to this adapter; complete labels/environment remain visible.
 IMAGE_INSPECT = (
-    '{"Id":{{json .Id}},"Config":{"Labels":{{json .Config.Labels}},"Env":{{json .Config.Env}}}}'
+    '{"Id":{{json .ID}},"Config":{"Labels":{{json .Config.Labels}},"Env":{{json .Config.Env}}}}'
 )
 MOUNT_INSPECT = (
     "[{{range $i, $m := .Mounts}}{{if $i}},{{end}}"
@@ -61,13 +62,16 @@ HOST_FIELDS = (
     "Tmpfs",
 )
 CONTAINER_INSPECT = (
-    '{"Id":{{json .Id}},"Name":{{json .Name}},"Image":{{json .Image}},'
+    '{"Id":{{json .ID}},"Name":{{json .Name}},"Image":{{json .Image}},'
     '"Config":{"Labels":{{json .Config.Labels}},"Env":{{json .Config.Env}},'
     '"Cmd":{{json .Config.Cmd}},"Entrypoint":{{json .Config.Entrypoint}}},'
     '"Mounts":'
     + MOUNT_INSPECT
     + ',"HostConfig":{'
-    + ",".join('"' + key + '":{{json .HostConfig.' + key + "}}" for key in HOST_FIELDS)
+    + ",".join(
+        '"' + key + '":{{json .HostConfig.' + ("NanoCPUs" if key == "NanoCpus" else key) + "}}"
+        for key in HOST_FIELDS
+    )
     + ',"LogConfig":{"Type":{{json .HostConfig.LogConfig.Type}}},'
     '"RestartPolicy":{"Name":{{json .HostConfig.RestartPolicy.Name}}},'
     '"Mounts":[{{range $i, $m := .HostConfig.Mounts}}{{if $i}},{{end}}'
@@ -75,7 +79,7 @@ CONTAINER_INSPECT = (
     '"Target":{{json $m.Target}},"ReadOnly":{{json $m.ReadOnly}}}{{end}}]}}'
 )
 CLEANUP = (
-    '{"Id":{{json .Id}},"Name":{{json .Name}},'
+    '{"Id":{{json .ID}},"Name":{{json .Name}},'
     '"Config":{"Labels":{{json .Config.Labels}}},"Mounts":' + MOUNT_INSPECT + "}"
 )
 
