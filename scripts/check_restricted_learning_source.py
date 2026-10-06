@@ -10,7 +10,7 @@ from importlib.machinery import ModuleSpec
 from pathlib import Path
 from typing import Any
 
-FORBIDDEN = (
+FORBIDDEN: tuple[str, ...] = (
     "mujoco",
     "OpenGL",
     "glfw",
