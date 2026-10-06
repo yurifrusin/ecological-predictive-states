@@ -66,7 +66,24 @@ def test_exact_prestart_confinement_and_decision_transport(tmp_path: Path, mutat
 
 
 @pytest.mark.parametrize(
-    "fault", [None, "cleanup", "control", "nonzero", "image", "ownership", "overflow"]
+    "fault",
+    [
+        None,
+        "cleanup",
+        "control",
+        "nonzero",
+        "image",
+        "ownership",
+        "overflow",
+        "corrupt_report",
+        "missing_report",
+        "corrupt_terminal",
+        "missing_terminal",
+        "inconsistent_terminal",
+        "invalid_endpoint",
+        "invalid_event",
+        "partial",
+    ],
 )
 def test_owned_host_compact_recomputed_results_and_failure_preservation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None
@@ -119,8 +136,33 @@ def test_owned_host_compact_recomputed_results_and_failure_preservation(
                         }
                     ),
                 )
-                result = d._drive(Capture(sink, control_fault=True), sink)
-                assert result["status"] == "DIAGNOSTIC_COMPLETE"
+                result = d._drive(
+                    Capture(sink, control_fault=True, fail=5 if fault == "partial" else None), sink
+                )
+                assert result["status"] == (
+                    "INCONCLUSIVE" if fault == "partial" else "DIAGNOSTIC_COMPLETE"
+                )
+                if fault in ("corrupt_report", "corrupt_terminal", "invalid_endpoint"):
+                    name = {
+                        "corrupt_report": "report.json",
+                        "corrupt_terminal": "terminal.json",
+                        "invalid_endpoint": "endpoints/e00/rgb.bin",
+                    }[fault]
+                    file = sink.root / name
+                    file.write_bytes(
+                        b"{}" if fault == "corrupt_terminal" else file.read_bytes() + b" "
+                    )
+                elif fault in ("missing_report", "missing_terminal"):
+                    (
+                        sink.root
+                        / ("report.json" if fault == "missing_report" else "terminal.json")
+                    ).unlink()
+                elif fault == "inconsistent_terminal":
+                    terminal = E["bounded_json"](sink.root / "terminal.json")
+                    terminal["counts"]["rgb_attempt"] = 15
+                    (sink.root / "terminal.json").write_bytes(canonical_json_bytes(terminal))
+                elif fault == "invalid_event":
+                    (sink.root / "events/0000.json").write_bytes(b"{}")
                 return ""
             if args[0] == "inspect":
                 if E["POLL"] in args:
@@ -153,12 +195,47 @@ def test_owned_host_compact_recomputed_results_and_failure_preservation(
     if fault == "image":
         assert not any(a[0][0] in ("create", "start", "rm") for a in commands.calls)
         assert result["status"] == "INCONCLUSIVE"
+    elif fault in ("invalid_endpoint", "invalid_event"):
+        assert result["measurement_status"] == "UNVERIFIED"
+        assert "verified_measurement_endpoints" not in result and "arm_suitability" not in result
+        assert result["acquisition_status"] == result["operational_status"] == "INCONCLUSIVE"
+        with pytest.raises(ValueError):
+            d.replay(root / b.output_id, b)
+    elif fault == "partial":
+        assert result["measurement_status"] == "VERIFIED_PREFIX"
+        assert result["verified_measurement_endpoints"] == 5
+        assert result["arm_suitability"] == {"original_default": "FAIL"}
+        assert result["solid_sampling_controls"] == []
+        assert result["acquisition_status"] == result["status"] == "INCONCLUSIVE"
     else:
-        assert result["acquisition_status"] == "DIAGNOSTIC_COMPLETE"
+        assert result["measurement_status"] == "VERIFIED_COMPLETE"
+        assert result["verified_measurement_endpoints"] == 16
         assert result["arm_suitability"]["original_default"] == "FAIL"
         assert "CONTROL_NOT_SUPPORTED" in result["solid_sampling_controls"]
-        assert result["report_reference"]["path"] == "report.json"
-        assert result["status"] == ("DIAGNOSTIC_COMPLETE" if fault is None else "INCONCLUSIVE")
+        final_fault = fault in (
+            "corrupt_report",
+            "missing_report",
+            "corrupt_terminal",
+            "missing_terminal",
+            "inconsistent_terminal",
+        )
+        if final_fault:
+            assert (
+                result["bundle_integrity_status"] == result["acquisition_status"] == "INCONCLUSIVE"
+            )
+            assert result["operational_status"] == result["status"] == "INCONCLUSIVE"
+            assert "retention_error" in result and "report_reference" not in result
+            if fault != "missing_terminal":
+                if fault == "inconsistent_terminal":
+                    # Prefix components remain intact; host exact report counts deny acceptance.
+                    assert len(d.replay(root / b.output_id, b)) == 16
+                else:
+                    with pytest.raises((ValueError, FileNotFoundError)):
+                        d.replay(root / b.output_id, b)
+        else:
+            assert result["acquisition_status"] == "DIAGNOSTIC_COMPLETE"
+            assert result["report_reference"]["path"] == "report.json"
+            assert result["status"] == ("DIAGNOSTIC_COMPLETE" if fault is None else "INCONCLUSIVE")
     with pytest.raises(FileExistsError):
         E["host_run"](b, dec, root, commands)
     assert (root / "control/actual/attempt.json").is_file()

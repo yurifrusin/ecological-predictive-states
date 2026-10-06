@@ -406,6 +406,30 @@ def inside(case: str | None) -> int:
     return 0 if result["status"] == "DIAGNOSTIC_COMPLETE" else 2
 
 
+def measurement_summary(frames: list[d.Endpoint]) -> dict[str, Any]:
+    """Only complete arms/controls supported by an independently verified prefix."""
+    count = len(frames)
+    arms = {
+        arm: d.suitability(frames[i * 4], frames[i * 4 + 2])["status"]
+        for i, arm in enumerate(d.ARMS)
+        if count >= (i + 1) * 4
+    }
+    controls = []
+    relations = []
+    for left, right, relation in ((0, 2, "sampling_original"), (1, 3, "sampling_unit")):
+        if count >= (right + 1) * 4:
+            equal = (frames[left * 4].arrays["rgb"] == frames[right * 4].arrays["rgb"]).all()
+            controls.append("CONTROL_SUPPORTED" if equal else "CONTROL_NOT_SUPPORTED")
+            relations.append(relation)
+    return {
+        "measurement_status": "VERIFIED_COMPLETE" if count == 16 else "VERIFIED_PREFIX",
+        "verified_measurement_endpoints": count,
+        "arm_suitability": arms,
+        "solid_sampling_controls": controls,
+        "verified_control_relations": relations,
+    }
+
+
 def evidence_summary(
     output: Path, binding: d.Binding, assessed: dict[str, Any], count: int
 ) -> dict[str, Any]:
@@ -579,6 +603,8 @@ def host_run(
     result: dict[str, Any] = {
         "status": "INCONCLUSIVE",
         "acquisition_status": "INCONCLUSIVE",
+        "measurement_status": "UNVERIFIED",
+        "bundle_integrity_status": "INCONCLUSIVE",
         "binding_root": binding.root,
         "phase_gate_effect": "NONE",
     }
@@ -654,17 +680,13 @@ def host_run(
                     result["dummy_observation"] = "DUMMY_OBSERVED"
             else:
                 # Retain independently valid measurements even if cleanup/exit/report later failed.
-                frames = d.replay(output, binding)
+                frames = d.reconstruct_measurements(output, binding)
+                result.update(measurement_summary(frames))
+                # Final acceptance is separate; failure cannot erase verified measurements.
+                d.verify_final_receipt(output, binding, len(frames))
                 assessed = d.assess(frames, binding)
-                result.update(acquisition_status=assessed["status"], observed_endpoints=len(frames))
-                if assessed["status"] == "DIAGNOSTIC_COMPLETE":
-                    result["arm_suitability"] = {
-                        k: v["status"] for k, v in assessed["arms"].items()
-                    }
-                    result["solid_sampling_controls"] = [
-                        v["status"] for v in assessed["solid_sampling_controls"]
-                    ]
                 result.update(evidence_summary(output, binding, assessed, len(frames)))
+                result["bundle_integrity_status"] = "VERIFIED"
         except Exception as error:
             result["retention_error"] = str(error)[:1024]
         result["cleaned"] = cleaned

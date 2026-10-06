@@ -39,7 +39,14 @@ Pre-start inspection verifies the actual facts and image. Cleanup reinspects exa
 binding and sole mount before forced removal; it never cleans unrelated containers. Lost create
 replies use the same exact owned name for reinspection, never a search or wildcard.
 
-After observed owned termination, strict core replay reconstructs retained arrays and assessment.
+After observed owned termination, a shared strict component validator reconstructs measurement
+prefixes from bound consumed authority, closed inventory/caps, ordered event receipts, exact component
+hashes and endpoint provenance/relations. VERIFIED_COMPLETE or VERIFIED_PREFIX labels apply only to
+measurements; complete supported arms and direct controls remain explicit even if final writers fail.
+No uncertain component is salvaged, repaired or rewritten. Strict replay still checks final receipts
+when present; separate whole-bundle acceptance requires the final report and terminal. Missing/corrupt
+final writers keep bundle integrity, acquisition and operations INCONCLUSIVE even with16 verified
+measurements. A partial prefix cannot claim a complete matrix or unsupported arms/controls.
 A complete report must equal recomputed measurement results, with exact terminal/report binding,
 counts and hash references. A valid matrix preserves separate arm PASS/FAIL and unsupported direct
 controls even if later control/cleanup fails. Acquisition status and operational status remain
