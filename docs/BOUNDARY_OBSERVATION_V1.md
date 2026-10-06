@@ -32,8 +32,8 @@ access, learned identity recovery, physical boundary ownership or sufficiency.
 RGB, completed flows and commands are not admitted or fetched by this feature
 API. Tests hold these past controls fixed across an evaluator-private synthetic
 intervention; their existence in the test does not authorize their use by this API.
-Completed-flow test controls retain their existing analytic admission/reason
-contract, with source transition completed by the cutoff. They are not RGB-derived.
+The synthetic controls satisfy the `CompletedFlow` payload/validity/reason contract.
+No native or analytic admission is tested; they are past-only and not RGB-derived.
 
 ## Boundary semantics
 
