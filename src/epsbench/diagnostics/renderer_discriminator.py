@@ -1956,14 +1956,19 @@ class NativeCapture:
             self.renderer, self.failed = None, True
 
 
-def _drive(capture: Any, sink: Sink) -> dict[str, Any]:
+def _drive(capture: Any, sink: Sink, deadline: float | None = None) -> dict[str, Any]:
     """Internal finite loop. Valid suitability failures never truncate the factorial."""
     start = sink.started
+    work_deadline = start + 300
     endpoints = []
     failure = None
     try:
+        if deadline is not None:
+            if type(deadline) is not float or not math.isfinite(deadline):
+                raise ValueError("finite shortening-only deadline required")
+            work_deadline = min(work_deadline, deadline)
         for ordinal in range(16):
-            if time.monotonic() - start >= 300:
+            if time.monotonic() >= work_deadline:
                 raise TimeoutError("inclusive 300s slot")
             endpoint = capture.capture(ordinal)
             validate_endpoint(endpoint, sink.binding)
@@ -1987,7 +1992,7 @@ def _drive(capture: Any, sink: Sink) -> dict[str, Any]:
             "absolute_native_uv_transfer_qualification": "UNRESOLVED",
         }
     )
-    if time.monotonic() - start >= 300:
+    if time.monotonic() >= work_deadline:
         result["status"], result["failure"] = "INCONCLUSIVE", "inclusive deadline"
     if not sink.failed:
         report = sink.put("report.json", canonical_json_bytes(result))
