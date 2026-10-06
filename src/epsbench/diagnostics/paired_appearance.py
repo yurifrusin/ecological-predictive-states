@@ -15,6 +15,7 @@ import numpy.typing as npt
 import yaml
 from PIL import Image
 
+from epsbench.diagnostics.appearance_study import CONTRAST_V1, PAIRED_V1, StudySpec, require_spec
 from epsbench.diagnostics.boundary_observation import BoundaryObservationView, VisibleRaster
 from epsbench.schema import Modality, ModalityPermissionSet
 from epsbench.utils.canonical import canonical_json_bytes, logical_array_hash, sha256_bytes
@@ -129,56 +130,66 @@ FIXED: dict[str, Any] = {
 }
 
 
-def fixed_config(payload: bytes) -> dict[str, Any]:
+def fixed_config(payload: bytes, study: StudySpec = PAIRED_V1) -> dict[str, Any]:
+    require_spec(study)
     if len(payload) > 16384:
         raise ValueError("config bound")
     value = strict_json(payload)
-    if canonical_json_bytes(value) != canonical_json_bytes(FIXED):
+    if canonical_json_bytes(value) != canonical_json_bytes(study.fixed):
         raise ValueError("exact prospective configuration required; no substitution")
     return copy.deepcopy(value)
 
 
-def config_bytes() -> bytes:
-    return canonical_json_bytes(FIXED)
+def config_bytes(study: StudySpec = PAIRED_V1) -> bytes:
+    require_spec(study)
+    return canonical_json_bytes(study.fixed)
 
 
-def contexts() -> tuple[tuple[Family, str, int], ...]:
+def contexts(study: StudySpec = PAIRED_V1) -> tuple[tuple[Family, str, int], ...]:
+    require_spec(study)
     return tuple(
         (family, appearance, repeat)
         for family in FAMILIES
-        for appearance in APPEARANCES
+        for appearance in study.appearances
         for repeat in range(2)
     )
 
 
-def seed_domain(family: Family) -> dict[str, int]:
-    root = FIXED["roots"][FAMILIES.index(family)]
-    episode = derive_seed(root, VERSION + ":episode:0")
+def seed_domain(family: Family, study: StudySpec = PAIRED_V1) -> dict[str, int]:
+    require_spec(study)
+    root = study.fixed["roots"][FAMILIES.index(family)]
+    episode = derive_seed(root, study.schema + ":episode:0")
     return {
         "root": root,
         "episode": episode,
         **{
-            name: derive_seed(episode, VERSION + ":" + name)
+            name: derive_seed(episode, study.schema + ":" + name)
             for name in ("geometry", "opaque", "style", "texture")
         },
     }
 
 
-def slots(family: Family) -> tuple[int, ...]:
+def slots(family: Family, study: StudySpec = PAIRED_V1) -> tuple[int, ...]:
+    require_spec(study)
     return tuple(
         int(v)
-        for v in rng_for(seed_domain(family)["style"], VERSION).permutation(len(SURFACES[family]))
+        for v in rng_for(seed_domain(family, study=study)["style"], study.schema).permutation(
+            len(SURFACES[family])
+        )
     )
 
 
-def mapping(family: Family, raw_ids: tuple[int, ...]) -> tuple[tuple[int, int, str], ...]:
+def mapping(
+    family: Family, raw_ids: tuple[int, ...], study: StudySpec = PAIRED_V1
+) -> tuple[tuple[int, int, str], ...]:
+    require_spec(study)
     if (
         len(raw_ids) != len(SURFACES[family])
         or len(set(raw_ids)) != len(raw_ids)
         or any(type(v) is not int or v < 0 for v in raw_ids)
     ):
         raise ValueError("complete unique controlled geom IDs required")
-    rng = rng_for(seed_domain(family)["opaque"], VERSION)
+    rng = rng_for(seed_domain(family, study=study)["opaque"], study.schema)
     labels = [int(v) + 1 for v in rng.permutation(len(raw_ids))]
     tokens = ["surface-" + bytes(rng.bytes(8)).hex() for _ in raw_ids]
     if len(set(tokens)) != len(tokens):
@@ -186,10 +197,11 @@ def mapping(family: Family, raw_ids: tuple[int, ...]) -> tuple[tuple[int, int, s
     return tuple(zip(raw_ids, labels, tokens, strict=True))
 
 
-def brick(slot: int) -> Array:
+def brick(slot: int, study: StudySpec = PAIRED_V1) -> Array:
+    require_spec(study)
     rows, cols = np.indices((128, 128))
     background = (rows % 16 < 4) | ((cols + 16 * ((rows // 16) % 2)) % 32 < 8)
-    fg, bg = PALETTE[slot]
+    fg, bg = study.palette[slot]
     return np.asarray(np.where(background[..., None], bg, fg), dtype=np.uint8)
 
 
@@ -214,15 +226,18 @@ CANONICAL_ASSET_SHA256 = (
 )
 
 
-def canonical_assets() -> dict[int, bytes]:
+def canonical_assets(study: StudySpec = PAIRED_V1) -> dict[int, bytes]:
     """Validate the complete fixed inventory before any visual plan is constructed."""
-    directory = CANONICAL_ASSET_DIRECTORY
-    names = {f"brick-slot-{slot}.png" for slot in range(4)}
+    require_spec(study)
+    directory = Path(__file__).parent / "source_assets" / study.asset_directory
+    names = set(study.asset_names)
     if {path.name for path in directory.iterdir()} != names:
         raise ValueError("canonical appearance asset inventory mismatch")
     assets = {}
-    for slot, expected_hash in enumerate(CANONICAL_ASSET_SHA256):
-        path = directory / f"brick-slot-{slot}.png"
+    for slot in range(4):
+        inventory_slot = slot if study is PAIRED_V1 else 0
+        expected_hash = study.asset_hashes[inventory_slot]
+        path = directory / study.asset_names[inventory_slot]
         if path.is_symlink() or not path.is_file():
             raise ValueError("canonical appearance asset must be a regular source file")
         raw = path.read_bytes()
@@ -232,28 +247,35 @@ def canonical_assets() -> dict[int, bytes]:
             if image.format != "PNG" or image.mode != "RGB" or image.size != (128, 128):
                 raise ValueError("canonical appearance asset PNG/RGB contract mismatch")
             pixels = np.asarray(image)
-            if pixels.dtype != np.uint8 or not np.array_equal(pixels, brick(slot)):
+            if (
+                pixels.dtype != np.uint8
+                or not np.array_equal(pixels, brick(slot, study=study))
+                or logical_array_hash(pixels) != study.asset_pixel_hashes[inventory_slot]
+            ):
                 raise ValueError("canonical appearance asset pixel mismatch")
         assets[slot] = raw
     return assets
 
 
-def visual_plan(family: Family, appearance: str) -> DevelopmentVisualPlan:
-    if family not in FAMILIES or appearance not in APPEARANCES:
+def visual_plan(
+    family: Family, appearance: str, study: StudySpec = PAIRED_V1
+) -> DevelopmentVisualPlan:
+    require_spec(study)
+    if family not in FAMILIES or appearance not in study.appearances:
         raise ValueError("fixed development appearance/family required")
-    fixed_assets = canonical_assets()
+    fixed_assets = canonical_assets(study=study)
     colours, materials, assets, xml, asset_hashes = {}, {}, {}, [], {}
-    assignment = slots(family)
+    assignment = slots(family, study=study)
     for i, (name, slot) in enumerate(zip(SURFACES[family], assignment, strict=True)):
-        if appearance == APPEARANCES[0]:
-            colours[name] = " ".join(str(v / 255.0) for v in PALETTE[slot][0]) + " 1"
+        if appearance == study.appearances[0]:
+            colours[name] = " ".join(str(v / 255.0) for v in study.palette[slot][0]) + " 1"
             materials[name] = f' material="dev_material_{i}"'
             xml.append(
                 f'<material name="dev_material_{i}" rgba="1 1 1 1" '
                 'specular="0" shininess="0" reflectance="0"/>'
             )
         else:
-            array = brick(slot)
+            array = brick(slot, study=study)
             filename = f"dev-brick-{i}.png"
             assets[filename] = fixed_assets[slot]
             asset_hashes[filename] = {
@@ -270,19 +292,19 @@ def visual_plan(family: Family, appearance: str) -> DevelopmentVisualPlan:
             )
             colours[name] = "1 1 1 1"
             materials[name] = f' material="dev_material_{i}"'
-    direction = FIXED["visual"]["directions"][FAMILIES.index(family)]
+    direction = study.fixed["visual"]["directions"][FAMILIES.index(family)]
     record = {
-        "schema": VERSION + ":appearance",
+        "schema": study.schema + ":appearance",
         "purpose": "development_only",
         "family": family,
         "appearance": appearance,
-        "config_sha256": sha256_bytes(config_bytes()),
-        "seeds": seed_domain(family),
+        "config_sha256": sha256_bytes(config_bytes(study=study)),
+        "seeds": seed_domain(family, study=study),
         "slots": assignment,
         "assets": asset_hashes,
-        "visual": FIXED["visual"],
-        "palette": FIXED["palette"],
-        "texture": FIXED["texture"] if assets else {"generator": "solid_foreground_v1"},
+        "visual": study.fixed["visual"],
+        "palette": study.fixed["palette"],
+        "texture": study.fixed["texture"] if assets else {"generator": "solid_foreground_v1"},
     }
     return DevelopmentVisualPlan(
         colours,
@@ -309,8 +331,9 @@ PROTECTED_APPEARANCES = (
 )
 
 
-def protection_check(repository: Path) -> dict[str, Any]:
+def protection_check(repository: Path, study: StudySpec = PAIRED_V1) -> dict[str, Any]:
     """Included public commitments only; no historical/private recovery completeness claim."""
+    require_spec(study)
     protected: set[int] = set()
     roots: list[dict[str, str]] = []
 
@@ -340,7 +363,7 @@ def protection_check(repository: Path) -> dict[str, Any]:
         "texture-phase",
         "texture-slot",
         "illumination",
-        *(VERSION + ":" + n for n in ("episode:0", "geometry", "opaque", "style", "texture")),
+        *(study.schema + ":" + n for n in ("episode:0", "geometry", "opaque", "style", "texture")),
     )
     protected |= {derive_seed(seed, ns) for seed in tuple(protected) for ns in namespaces}
     # Explicit episode0 appearance chain and per-slot phase inputs used by included producers.
@@ -357,12 +380,43 @@ def protection_check(repository: Path) -> dict[str, Any]:
                     for slot in range(4)
                     for index in range(4)
                 )
-    fresh = {v for family in FAMILIES for v in seed_domain(family).values()}
+    fresh = {v for family in FAMILIES for v in seed_domain(family, study=study).values()}
     fresh.update(
-        derive_seed(seed_domain(family)[name], VERSION)
+        derive_seed(seed_domain(family, study=study)[name], study.schema)
         for family in FAMILIES
         for name in ("style", "opaque")
     )
+    if study is CONTRAST_V1:
+        old_raw = (repository / PAIRED_V1.config_path).read_bytes()
+        if old_raw != PAIRED_V1.config_file_bytes:
+            raise ValueError("protected old study config bytes differ")
+        roots.append({"path": PAIRED_V1.config_path, "sha256": PAIRED_V1.config_file_hash})
+        old_values = {v for f in FAMILIES for v in seed_domain(f, PAIRED_V1).values()}
+        old_values.update(
+            derive_seed(seed_domain(f, PAIRED_V1)[n], PAIRED_V1.schema)
+            for f in FAMILIES
+            for n in ("style", "opaque")
+        )
+        protected.update(old_values)
+        old_assets = canonical_assets(PAIRED_V1)
+        for slot, raw in old_assets.items():
+            roots.append(
+                {
+                    "path": "src/epsbench/diagnostics/source_assets/paired_appearance_v1/"
+                    + PAIRED_V1.asset_names[slot],
+                    "sha256": sha256_bytes(raw),
+                }
+            )
+        if set(study.appearances) & set(PAIRED_V1.appearances) or set(study.palette) & set(
+            PAIRED_V1.palette
+        ):
+            raise ValueError("protected old study appearance alias")
+        if {fg for fg, _ in study.palette} & {fg for fg, _ in PAIRED_V1.palette}:
+            raise ValueError("protected old study solid colour alias")
+        if {logical_array_hash(brick(i, study)) for i in range(4)} & {
+            logical_array_hash(brick(i, PAIRED_V1)) for i in range(4)
+        }:
+            raise ValueError("protected old study pixel alias")
     if fresh & protected:
         raise ValueError("protected seed collision; fixed candidate rejected")
     for filename in PROTECTED_APPEARANCES:
@@ -375,19 +429,19 @@ def protection_check(repository: Path) -> dict[str, Any]:
                 for values in old_palette.values()
                 for slot in values
             }
-            new_pairs = {fg + bg for fg, bg in PALETTE}
+            new_pairs = {fg + bg for fg, bg in study.palette}
             if old_pairs & new_pairs:
                 raise ValueError("protected palette-slot alias")
             # A solid alias can have different hidden background bytes.
             if profile["texture"]["family"] == "solid" and {
                 tuple(s["foreground_rgb"]) for values in old_palette.values() for s in values
-            } & {fg for fg, _ in PALETTE}:
+            } & {fg for fg, _ in study.palette}:
                 raise ValueError("protected solid colour alias")
             if profile["texture"]["family"] not in ("solid", "checker", "stripes"):
                 raise ValueError("unsupported protected texture definition")
             # Our staggered rectangular brick is structurally neither canonical checker nor stripe.
             for slot in range(4):
-                pixels = brick(slot)
+                pixels = brick(slot, study=study)
                 if not (
                     np.any(pixels[5, 0] != pixels[5, 9])
                     and np.any(pixels[5, 0] != pixels[21, 0])
@@ -395,7 +449,7 @@ def protection_check(repository: Path) -> dict[str, Any]:
                 ):
                     raise ValueError("brick structural signature differs")
     return {
-        "schema": VERSION + ":protection",
+        "schema": study.schema + ":protection",
         "inputs": roots,
         "fresh_seed_values": sorted(fresh),
         "included_protected_seed_values": len(protected),
@@ -479,11 +533,13 @@ class Frame:
     horizontal: Array
     vertical: Array
     evidence: dict[str, Any]
+    study: StudySpec = PAIRED_V1
 
     def __post_init__(self) -> None:
+        require_spec(self.study)
         if (
             self.family not in FAMILIES
-            or self.appearance not in APPEARANCES
+            or self.appearance not in self.study.appearances
             or type(self.index) is not int
             or self.index not in (0, 1)
         ):
@@ -507,7 +563,10 @@ class Frame:
         object.__setattr__(self, "evidence", json.loads(canonical_json_bytes(self.evidence)))
 
 
-def validate_frame(frame: Frame) -> None:
+def validate_frame(frame: Frame, study: StudySpec = PAIRED_V1) -> None:
+    require_spec(study)
+    if frame.study is not study:
+        raise ValueError("cross-study frame denied")
     e = frame.evidence
     required = {
         "schema",
@@ -533,9 +592,9 @@ def validate_frame(frame: Frame) -> None:
     }
     if (
         set(e) != required
-        or e["schema"] != VERSION + ":endpoint"
-        or e["config_sha256"] != sha256_bytes(config_bytes())
-        or e["appearance_record"] != visual_plan(frame.family, frame.appearance).record
+        or e["schema"] != study.schema + ":endpoint"
+        or e["config_sha256"] != sha256_bytes(config_bytes(study=study))
+        or e["appearance_record"] != visual_plan(frame.family, frame.appearance, study=study).record
     ):
         raise ValueError("endpoint evidence fields/config/appearance")
     for key in ("source_head", "source_tree"):
@@ -556,10 +615,10 @@ def validate_frame(frame: Frame) -> None:
         raise ValueError("scene/orientation/separate RGB provenance")
     validate_registration(e)
     validate_compiled(frame.family, e["compiled"])
-    validate_camera(frame.family, frame.index, e["camera"], e["action"])
-    validate_fixed_draw(frame.family, frame.appearance, e)
+    validate_camera(frame.family, frame.index, e["camera"], e["action"], study=study)
+    validate_fixed_draw(frame.family, frame.appearance, e, study=study)
     raw_ids = tuple(e["compiled"]["raw_geom_ids"][name] for name in SURFACES[frame.family])
-    remap = mapping(frame.family, raw_ids)
+    remap = mapping(frame.family, raw_ids, study=study)
     if e["mapping"] != [list(v) for v in remap]:
         raise ValueError("independent opaque mapping")
     raw, depth = derive_pair(
@@ -659,14 +718,15 @@ def interior(mask: Array) -> Array:
     )
 
 
-def comparison(solid: Frame, texture: Frame) -> dict[str, Any]:
-    validate_frame(solid)
-    validate_frame(texture)
+def comparison(solid: Frame, texture: Frame, study: StudySpec = PAIRED_V1) -> dict[str, Any]:
+    require_spec(study)
+    validate_frame(solid, study=study)
+    validate_frame(texture, study=study)
     if (solid.family, solid.index, solid.appearance, texture.appearance) != (
         texture.family,
         texture.index,
-        APPEARANCES[0],
-        APPEARANCES[1],
+        study.appearances[0],
+        study.appearances[1],
     ):
         raise ValueError("matched appearance pair")
     if any(
@@ -744,9 +804,10 @@ def comparison(solid: Frame, texture: Frame) -> dict[str, Any]:
     }
 
 
-def repeat_equal(a: Frame, b: Frame) -> bool:
-    validate_frame(a)
-    validate_frame(b)
+def repeat_equal(a: Frame, b: Frame, study: StudySpec = PAIRED_V1) -> bool:
+    require_spec(study)
+    validate_frame(a, study=study)
+    validate_frame(b, study=study)
     return (
         (a.family, a.appearance, a.index) == (b.family, b.appearance, b.index)
         and a.evidence == b.evidence
@@ -767,11 +828,12 @@ ARRAY_NAMES = (
 )
 
 
-def encode(frame: Frame) -> bytes:
-    validate_frame(frame)
+def encode(frame: Frame, study: StudySpec = PAIRED_V1) -> bytes:
+    require_spec(study)
+    validate_frame(frame, study=study)
     metadata = canonical_json_bytes(
         {
-            "schema": VERSION + ":frame",
+            "schema": study.schema + ":frame",
             "family": frame.family,
             "appearance": frame.appearance,
             "index": frame.index,
@@ -791,7 +853,8 @@ def encode(frame: Frame) -> bytes:
     return data
 
 
-def decode(data: bytes) -> Frame:
+def decode(data: bytes, study: StudySpec = PAIRED_V1) -> Frame:
+    require_spec(study)
     if len(data) > ENDPOINT_CAP:
         raise ValueError("endpoint decoding cap")
     import zipfile
@@ -815,7 +878,7 @@ def decode(data: bytes) -> Frame:
         meta = strict_json(metadata_array.tobytes())
         if (
             set(meta) != {"schema", "family", "appearance", "index", "evidence", "hashes"}
-            or meta["schema"] != VERSION + ":frame"
+            or meta["schema"] != study.schema + ":frame"
         ):
             raise ValueError("frame envelope")
         frame = Frame(
@@ -824,16 +887,18 @@ def decode(data: bytes) -> Frame:
             meta["index"],
             **{n: archive[n] for n in ARRAY_NAMES},
             evidence=meta["evidence"],
+            study=study,
         )
-    validate_frame(frame)
+    validate_frame(frame, study=study)
     if meta["hashes"] != {n: logical_array_hash(getattr(frame, n)) for n in ARRAY_NAMES}:
         raise ValueError("scientific array hash corruption")
     return frame
 
 
-def inspect(frame: Frame) -> bytes:
+def inspect(frame: Frame, study: StudySpec = PAIRED_V1) -> bytes:
     """Small RGB/lattice overlay, returned as bytes; no filesystem or native action."""
-    validate_frame(frame)
+    require_spec(study)
+    validate_frame(frame, study=study)
     rgb = frame.rgb.copy()
     edge = np.zeros((HEIGHT, WIDTH), dtype=np.bool_)
     edge[:, :-1] |= frame.horizontal
@@ -1022,23 +1087,28 @@ def expected_scene_cameras(camera: dict[str, Any], near: float, far: float) -> l
     ]
 
 
-def expected_material(family: Family, appearance: str, compiled: dict[str, Any]) -> dict[str, Any]:
+def expected_material(
+    family: Family, appearance: str, compiled: dict[str, Any], study: StudySpec = PAIRED_V1
+) -> dict[str, Any]:
     """Closed 3.12 model/scene representation of this exact source plan; no native work."""
+    require_spec(study)
     import math
 
-    plan = visual_plan(family, appearance)
+    plan = visual_plan(family, appearance, study=study)
     names = SURFACES[family]
     ids = compiled["raw_geom_ids"]
     count = len(names)
-    textured = appearance == APPEARANCES[1]
+    textured = appearance == study.appearances[1]
     rgba = {n: float32_values([float(v) for v in plan.rgba_by_surface[n].split()]) for n in names}
-    direction = FIXED["visual"]["directions"][FAMILIES.index(family)]
+    direction = study.fixed["visual"]["directions"][FAMILIES.index(family)]
     norm = math.sqrt(sum(v * v for v in direction))
     direction = [v / norm for v in direction]
-    position = FIXED["visual"]["positions"][FAMILIES.index(family)]
+    position = study.fixed["visual"]["positions"][FAMILIES.index(family)]
     role_ids = [[-1, i if textured else -1, *([-1] * 8)] for i in range(count)]
     texture_data = (
-        np.concatenate([brick(slot).reshape(-1) for slot in slots(family)])
+        np.concatenate(
+            [brick(slot, study=study).reshape(-1) for slot in slots(family, study=study)]
+        )
         if textured
         else np.empty(0, dtype=np.uint8)
     )
@@ -1108,10 +1178,13 @@ def expected_material(family: Family, appearance: str, compiled: dict[str, Any])
     return {"model": model, "scene_geoms": geoms, "scene_lights": lights}
 
 
-def validate_fixed_draw(family: Family, appearance: str, evidence: dict[str, Any]) -> None:
+def validate_fixed_draw(
+    family: Family, appearance: str, evidence: dict[str, Any], study: StudySpec = PAIRED_V1
+) -> None:
+    require_spec(study)
     state = evidence["paired_stable"]
-    near = float(np.float32(FIXED["visual"]["znear"])) * state["extent"]
-    far = float(np.float32(FIXED["visual"]["zfar"][FAMILIES.index(family)])) * state["extent"]
+    near = float(np.float32(study.fixed["visual"]["znear"])) * state["extent"]
+    far = float(np.float32(study.fixed["visual"]["zfar"][FAMILIES.index(family)])) * state["extent"]
     if (evidence["near"], evidence["far"]) != (near, far):
         raise ValueError("actual clipping differs from fixed source map/extent")
     if state["scene_geometry"] != expected_draw_geometry(evidence["compiled"]):
@@ -1120,7 +1193,7 @@ def validate_fixed_draw(family: Family, appearance: str, evidence: dict[str, Any
         evidence["camera"], evidence["near"], evidence["far"]
     ):
         raise ValueError("actual draw camera/frustum differs from fixed camera")
-    expected = expected_material(family, appearance, evidence["compiled"])
+    expected = expected_material(family, appearance, evidence["compiled"], study=study)
     if canonical_json_bytes(evidence["paired_material"]) != canonical_json_bytes(expected):
         raise ValueError("closed actual material/light/texture differs from fixed plan")
 
@@ -1143,15 +1216,16 @@ def validate_compiled(family: Family, compiled: dict[str, Any]) -> None:
         raise ValueError("compiled inventory/calibration")
 
 
-def validate_xml(family: Family, appearance: str, xml: str) -> None:
+def validate_xml(family: Family, appearance: str, xml: str, study: StudySpec = PAIRED_V1) -> None:
     """Check builder constants/visual plan BEFORE compilation, without native imports."""
+    require_spec(study)
     import xml.etree.ElementTree as ET
 
     root = ET.fromstring(xml)
     geoms = root.findall("worldbody/geom")
     if len(geoms) != len(SURFACES[family]):
         raise ValueError("fixed builder geom inventory")
-    plan = visual_plan(family, appearance)
+    plan = visual_plan(family, appearance, study=study)
 
     def vector(text: str) -> list[float]:
         return [float(v) for v in text.split()]
@@ -1174,7 +1248,7 @@ def validate_xml(family: Family, appearance: str, xml: str) -> None:
     camera = root.find("worldbody/camera")
     if camera is None or camera.get("name") != "monocular_camera":
         raise ValueError("fixed builder camera")
-    fixed = FIXED["single" if family == "single_occluder" else "corridor"]
+    fixed = study.fixed["single" if family == "single_occluder" else "corridor"]
     pos = [fixed["poses"][0], -3.0, 1.25] if family == "single_occluder" else [0.0, 0.5, 1.25]
     if (
         vector(camera.attrib["pos"]) != pos
@@ -1191,7 +1265,7 @@ def validate_xml(family: Family, appearance: str, xml: str) -> None:
         or vector(light.attrib["ambient"]) != [0.1, 0.1, 0.1]
         or vector(light.attrib["diffuse"]) != [0.7, 0.7, 0.7]
         or vector(light.attrib["specular"]) != [0.0, 0.0, 0.0]
-        or vector(light.attrib["pos"]) != FIXED["visual"]["positions"][FAMILIES.index(family)]
+        or vector(light.attrib["pos"]) != study.fixed["visual"]["positions"][FAMILIES.index(family)]
     ):
         raise ValueError("fixed builder light")
     actual = root.find("asset")
@@ -1210,7 +1284,7 @@ def validate_xml(family: Family, appearance: str, xml: str) -> None:
         or global_.attrib != {"offwidth": "160", "offheight": "120"}
         or map_ is None
         or float(map_.attrib["znear"]) != 0.01
-        or float(map_.attrib["zfar"]) != FIXED["visual"]["zfar"][FAMILIES.index(family)]
+        or float(map_.attrib["zfar"]) != study.fixed["visual"]["zfar"][FAMILIES.index(family)]
         or quality is None
         or quality.attrib != {"shadowsize": "0"}
         or head is None
@@ -1221,9 +1295,14 @@ def validate_xml(family: Family, appearance: str, xml: str) -> None:
 
 
 def validate_camera(
-    family: Family, index: int, camera: dict[str, Any], action: list[float]
+    family: Family,
+    index: int,
+    camera: dict[str, Any],
+    action: list[float],
+    study: StudySpec = PAIRED_V1,
 ) -> None:
-    fixed = FIXED["single" if family == "single_occluder" else "corridor"]
+    require_spec(study)
+    fixed = study.fixed["single" if family == "single_occluder" else "corridor"]
     position = (
         [fixed["poses"][index], -3.0, 1.25]
         if family == "single_occluder"
@@ -1382,24 +1461,27 @@ def validate_producer_state(state: dict[str, Any]) -> None:
         raise ValueError("pinned retained runtime")
 
 
-def assess(frames: dict[tuple[Family, str, int], tuple[Frame, Frame]]) -> dict[str, Any]:
+def assess(
+    frames: dict[tuple[Family, str, int], tuple[Frame, Frame]], study: StudySpec = PAIRED_V1
+) -> dict[str, Any]:
     """Finite full-matrix analysis only; failures are never dropped or pooled away."""
-    if set(frames) != set(contexts()):
+    require_spec(study)
+    if set(frames) != set(contexts(study=study)):
         return {"status": "INCONCLUSIVE", "reason": "missing/extra fixed context evidence"}
     cells: list[dict[str, Any]] = []
     try:
-        for family, appearance, repeat in contexts():
+        for family, appearance, repeat in contexts(study=study):
             pair = frames[(family, appearance, repeat)]
             if len(pair) != 2:
                 raise ValueError("endpoint coverage")
             for index, frame in enumerate(pair):
                 if (frame.family, frame.appearance, frame.index) != (family, appearance, index):
                     raise ValueError("matrix/frame membership")
-                validate_frame(frame)
+                validate_frame(frame, study=study)
         for family in FAMILIES:
-            for appearance in APPEARANCES:
+            for appearance in study.appearances:
                 if not all(
-                    repeat_equal(a, b)
+                    repeat_equal(a, b, study=study)
                     for a, b in zip(
                         frames[(family, appearance, 0)],
                         frames[(family, appearance, 1)],
@@ -1410,8 +1492,9 @@ def assess(frames: dict[tuple[Family, str, int], tuple[Frame, Frame]]) -> dict[s
             for repeat in range(2):
                 for index in range(2):
                     result = comparison(
-                        frames[(family, APPEARANCES[0], repeat)][index],
-                        frames[(family, APPEARANCES[1], repeat)][index],
+                        frames[(family, study.appearances[0], repeat)][index],
+                        frames[(family, study.appearances[1], repeat)][index],
+                        study=study,
                     )
                     cells.append(
                         {"family": family, "repeat": repeat, "endpoint": index, "result": result}

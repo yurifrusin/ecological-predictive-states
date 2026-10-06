@@ -16,6 +16,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, BinaryIO
 
 from epsbench.diagnostics import paired_appearance as p
+from epsbench.diagnostics.appearance_study import CONTRAST_V1, PAIRED_V1, select_study
 from epsbench.diagnostics.paired_appearance_execution import (
     DUMMY_CASES,
     HOST_ACTUAL,
@@ -31,7 +32,6 @@ from epsbench.diagnostics.paired_appearance_execution import (
     ready as e_ready,
 )
 from epsbench.diagnostics.paired_appearance_runtime import (
-    DUMMY,
     AppearanceExecutionBinding,
     LaunchDecision,
     environment_binding,
@@ -128,7 +128,7 @@ def environment(binding: AppearanceExecutionBinding) -> dict[str, str]:
 def create_arguments(
     binding: AppearanceExecutionBinding, output: Path, case: str | None, work_deadline_unix: float
 ) -> list[str]:
-    if (binding.purpose == DUMMY) != (case in DUMMY_CASES):
+    if (binding.purpose == binding.preparation.study.dummy_purpose) != (case in DUMMY_CASES):
         raise ValueError("native/dummy task mismatch")
     args = [
         "create",
@@ -256,7 +256,7 @@ def host_run(
     case: str | None = None,
 ) -> dict[str, Any]:
     require_decision(binding, decision)
-    if (binding.purpose == DUMMY) != (case in DUMMY_CASES):
+    if (binding.purpose == binding.preparation.study.dummy_purpose) != (case in DUMMY_CASES):
         raise ValueError("closed task purpose")
     safe_path(root)
     # Reject aliases/mount delimiters before constructing Docker arguments.
@@ -393,7 +393,8 @@ def host_run(
                     (
                         v
                         for c, i in sorted(frames)
-                        if (v := e_ready(frames, c, i))["status"] == "FAIL"
+                        if (v := e_ready(frames, c, i, binding.preparation.study))["status"]
+                        == "FAIL"
                     ),
                     None,
                 )
@@ -425,8 +426,9 @@ def host_run(
                         and p.assess(
                             {
                                 key: (frames[(i, 0)], frames[(i, 1)])
-                                for i, key in enumerate(p.contexts())
-                            }
+                                for i, key in enumerate(p.contexts(binding.preparation.study))
+                            },
+                            study=binding.preparation.study,
                         )["status"]
                         == "PASS"
                     ):
@@ -468,6 +470,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inside", action="store_true")
     parser.add_argument("--prepare", action="store_true")
+    parser.add_argument("--study", choices=(PAIRED_V1.schema, CONTRAST_V1.schema))
     parser.add_argument("--case", choices=DUMMY_CASES)
     parser.add_argument("--binding", type=Path)
     parser.add_argument("--decision", type=Path)
@@ -478,12 +481,19 @@ def main() -> int:
     if args.prepare:
         if args.inside or args.case or args.binding or args.decision or args.root:
             raise ValueError("preparation is separate from execution")
-        manifest = preparation(repository, os.environ["SOURCE_HEAD"], os.environ["SOURCE_TREE"])
+        manifest = preparation(
+            repository,
+            os.environ["SOURCE_HEAD"],
+            os.environ["SOURCE_TREE"],
+            select_study(args.study or PAIRED_V1.schema),
+        )
         exclusive_file(
             Path("/preparation/appearance.json"),
             canonical_json_bytes(manifest.model_dump(mode="json")),
         )
         return 0
+    if args.study:
+        raise ValueError("execution selects study only from consumed exact binding")
     if args.inside:
         if args.prepare or args.binding or args.decision or args.root:
             raise ValueError("inside uses consumed mounted authority only")
@@ -497,7 +507,7 @@ def main() -> int:
             raise ValueError("finite outer watchdog required")
         # Host monotonic watchdog remains authoritative if wall clocks move.
         deadline = time.monotonic() + max(0, external_deadline - time.time())
-        if binding.purpose == DUMMY:
+        if binding.purpose == binding.preparation.study.dummy_purpose:
             # Install the existing source guard before dummy bodies; dummy cannot import SDK.
             guard = runpy.run_path(str(repository / "scripts/check_a1_source.py"))
             guard["check_loaded"]()

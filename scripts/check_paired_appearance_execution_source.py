@@ -29,6 +29,7 @@ def main() -> int:
             "addopts=",
             "tests/test_paired_appearance.py",
             "tests/test_paired_appearance_execution.py",
+            "tests/test_appearance_contrast_calibration.py",
             "-q",
         ]
     )

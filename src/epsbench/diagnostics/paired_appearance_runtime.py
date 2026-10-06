@@ -7,9 +7,10 @@ import platform
 from pathlib import Path
 from typing import Annotated, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator, model_validator
 
 from epsbench.diagnostics import paired_appearance as p
+from epsbench.diagnostics.appearance_study import CONTRAST_V1, PAIRED_V1, StudySpec, require_spec
 from epsbench.utils.canonical import canonical_json_bytes, sha256_bytes
 
 Hex40 = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{40}$")]
@@ -29,24 +30,55 @@ class Closed(BaseModel):
 
 
 class Preparation(Closed):
-    version: Literal["paired_appearance_execution_v1"] = VERSION
+    version: Literal[
+        "paired_appearance_execution_v1", "appearance_contrast_calibration_execution_v1"
+    ] = VERSION
     source_url: Literal["https://github.com/yurifrusin/ecological-predictive-states.git"]
     source_head: Hex40
     source_tree: Hex40
-    config_file: Literal["8a21410230a9f2ef1ce9b065671ff31e6ef97bcdcbb47ce936fbee5ba1afe9cd"]
+    config_file: Hex64
     config_root: Hex64
     asset_root: Hex64
     protection_root: Hex64
     membership_root: Hex64
 
+    @model_validator(mode="after")
+    def source_selection(self) -> Preparation:
+        spec = self.study
+        if (
+            self.config_file != spec.config_file_hash
+            or self.config_root != sha256_bytes(p.config_bytes(spec))
+            or self.membership_root != sha256_bytes(canonical_json_bytes(list(p.contexts(spec))))
+        ):
+            raise ValueError("study/config/membership mixture denied")
+        return self
+
+    @property
+    def study(self) -> StudySpec:
+        return PAIRED_V1 if self.version == PAIRED_V1.execution_version else CONTRAST_V1
+
 
 class AppearanceExecutionBinding(Closed):
     preparation: Preparation
     image: Image
-    purpose: Literal["paired_appearance_native_v1", "paired_appearance_dummy_v1"]
+    purpose: Literal[
+        "paired_appearance_native_v1",
+        "paired_appearance_dummy_v1",
+        "appearance_contrast_calibration_native_v1",
+        "appearance_contrast_calibration_dummy_v1",
+    ]
     output_id: Token
     token: Token
     policy: Literal["2g_2cpu_64pid_300s_64m_v1"] = "2g_2cpu_64pid_300s_64m_v1"
+
+    @model_validator(mode="after")
+    def study_purpose(self) -> AppearanceExecutionBinding:
+        if self.purpose not in (
+            self.preparation.study.native_purpose,
+            self.preparation.study.dummy_purpose,
+        ):
+            raise ValueError("cross-study purpose denied")
+        return self
 
     @property
     def root(self) -> str:
@@ -56,7 +88,12 @@ class AppearanceExecutionBinding(Closed):
 class LaunchDecision(Closed):
     binding_root: Hex64
     approved: Literal[True]
-    purpose: Literal["paired_appearance_native_v1", "paired_appearance_dummy_v1"]
+    purpose: Literal[
+        "paired_appearance_native_v1",
+        "paired_appearance_dummy_v1",
+        "appearance_contrast_calibration_native_v1",
+        "appearance_contrast_calibration_dummy_v1",
+    ]
     # A substantive external decision, not a generated default or hash-only opt-in.
     authorization: Annotated[str, StringConstraints(strict=True, min_length=1, max_length=4096)]
 
@@ -77,24 +114,28 @@ def parse(model: type[ClosedType], data: bytes) -> ClosedType:
     return model.model_validate(p.strict_json(data))
 
 
-def preparation(repository: Path, head: str, tree: str) -> Preparation:
-    raw = (repository / "configs/development/paired_appearance_v1.json").read_bytes()
-    p.fixed_config(raw)
-    if sha256_bytes(raw) != CONFIG_FILE:
+def preparation(
+    repository: Path, head: str, tree: str, study: StudySpec = PAIRED_V1
+) -> Preparation:
+    require_spec(study)
+    raw = (repository / study.config_path).read_bytes()
+    p.fixed_config(raw, study)
+    if raw != study.config_file_bytes:
         raise ValueError("exact fixed config file bytes required")
     return Preparation(
+        version=study.execution_version,
         source_url="https://github.com/yurifrusin/ecological-predictive-states.git",
         source_head=head,
         source_tree=tree,
-        config_file=CONFIG_FILE,
-        config_root=sha256_bytes(p.config_bytes()),
+        config_file=study.config_file_hash,
+        config_root=sha256_bytes(p.config_bytes(study)),
         asset_root=sha256_bytes(
             canonical_json_bytes(
-                [p.visual_plan(f, a).record for f in p.FAMILIES for a in p.APPEARANCES]
+                [p.visual_plan(f, a, study).record for f in p.FAMILIES for a in study.appearances]
             )
         ),
-        protection_root=sha256_bytes(canonical_json_bytes(p.protection_check(repository))),
-        membership_root=sha256_bytes(canonical_json_bytes(list(p.contexts()))),
+        protection_root=sha256_bytes(canonical_json_bytes(p.protection_check(repository, study))),
+        membership_root=sha256_bytes(canonical_json_bytes(list(p.contexts(study)))),
     )
 
 
@@ -123,7 +164,7 @@ def paired_appearance_candidate() -> bool:
     try:
         binding = environment_binding()
         if (
-            binding.purpose != NATIVE
+            binding.purpose != binding.preparation.study.native_purpose
             or platform.system() != "Linux"
             or not Path("/.dockerenv").is_file()
             or any(
@@ -134,7 +175,7 @@ def paired_appearance_candidate() -> bool:
                 os.environ.get(k) != v
                 for k, v in {
                     "EPS_PAIRED_APPEARANCE_RUNTIME": "docker_candidate_v1",
-                    "EPS_PAIRED_APPEARANCE_PURPOSE": NATIVE,
+                    "EPS_PAIRED_APPEARANCE_PURPOSE": binding.preparation.study.native_purpose,
                     "EPS_PAIRED_APPEARANCE_SOURCE_HEAD": binding.preparation.source_head,
                     "EPS_PAIRED_APPEARANCE_SOURCE_TREE": binding.preparation.source_tree,
                     "EPS_PAIRED_APPEARANCE_IMAGE": binding.image,
@@ -169,12 +210,20 @@ def paired_appearance_candidate() -> bool:
 
 
 def require_native_binding(repository: Path, binding: AppearanceExecutionBinding) -> None:
-    if type(binding) is not AppearanceExecutionBinding or binding.purpose != NATIVE:
+    if (
+        type(binding) is not AppearanceExecutionBinding
+        or binding.purpose != binding.preparation.study.native_purpose
+    ):
         raise PermissionError("appearance native purpose required before SDK access")
     if environment_binding() != binding or not paired_appearance_candidate():
         raise PermissionError("unsupported exact appearance runtime")
     if (
-        preparation(repository, binding.preparation.source_head, binding.preparation.source_tree)
+        preparation(
+            repository,
+            binding.preparation.source_head,
+            binding.preparation.source_tree,
+            binding.preparation.study,
+        )
         != binding.preparation
     ):
         raise PermissionError("config/assets/protection binding differs")

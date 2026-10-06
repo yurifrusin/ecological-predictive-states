@@ -336,7 +336,7 @@ def test_tiny_four_dummy_source_only_and_ci_isolation() -> None:
     assert "def run_dummy" in source
     # Never call run_dummy: real once-only qualification remains held.
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
-    assert ci.count("github.head_ref == 'codex/paired-appearance-execution-20261006' ||") == 4
+    assert ci.count("github.head_ref == 'codex/paired-appearance-execution-20261006' ||") == 5
     assert "python scripts/check_paired_appearance_execution_source.py" in ci
     assert "github.head_ref != 'codex/paired-appearance-execution-20261006'" in ci
 
