@@ -12,7 +12,9 @@ adapter, dataset, renderer, study execution, model or learned extractor is provi
 
 `CausalView` checks exactly SURFACE_REGIONS, REGION_CORRESPONDENCE and EXECUTED_ACTION typed
 permissions and denies future requests before provider access. A complete consecutive prefix
-0..t is required. `CausalInput` owns immutable Boolean token-mask snapshots; opaque persistent
+0..t is required. `CausalInput` owns immutable Boolean token-mask bytes and fixed shape. Input and
+forecast public mask arrays are fresh read-only views with detached metadata, so changing a view
+shape/dtype cannot alter admitted bytes, Boolean interpretation or canonical identities. Opaque persistent
 association is explicitly privileged oracle supervision. Local raster labels are adapter-only.
 Masks carry image-plane occupancy; no hidden total surface area, raw identifier/map, invisible
 catalogue, metric/pose/depth/generation records, seed/root, RGB, flow, ownership or boundary payload

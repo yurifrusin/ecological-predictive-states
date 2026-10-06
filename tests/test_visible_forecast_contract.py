@@ -342,3 +342,42 @@ def test_holes_reappearance_missing_prefix_and_owned_snapshots() -> None:
         forecast(before, "current-mask-persistence").masks[0][1],
         forecast(after, "current-mask-persistence").masks[0][1],
     )
+
+
+@pytest.mark.parametrize("metadata", ["shape", "dtype"])
+def test_input_and_forecast_metadata_mutation_is_detached(metadata: str) -> None:
+    s = source([[1, 0, 0], [0, 1, 0]], [[1, 0, 0], [0, 1, 0]])
+    before = s.canonical_bytes()
+    digest = s.digest
+    f = forecast(s, "k-frame-agreement", 2)
+    saved = f.canonical_bytes()
+    account = storage(s, saved)
+    expected = score(s, [[1, 0, 0], [0, 1, 0]], "k-frame-agreement", 2)
+    exposed = (s.frames[0].masks[0][1], s.frames[1].masks[0][1], f.masks[0][1])
+    for mask in exposed:
+        assert mask is not None
+        assert not mask.flags.writeable
+        with pytest.raises(ValueError):
+            mask.setflags(write=True)
+        with pytest.raises(ValueError):
+            mask[0, 0] = False
+        if metadata == "shape":
+            mask.shape = (1, 6)
+            assert mask.shape == (1, 6)
+        else:
+            mask.dtype = np.uint8  # type: ignore[misc, assignment]  # Runtime regression.
+            assert mask.tolist() == [[1, 0, 0], [0, 1, 0]]
+    # Exposed arrays may change their own metadata, never the admitted byte/shape state.
+    assert s.canonical_bytes() == before and s.digest == digest
+    assert f.canonical_bytes() == saved
+    assert s.shape == f.shape == (2, 3)
+    for mask in (s.frames[0].masks[0][1], s.frames[1].masks[0][1], f.masks[0][1]):
+        assert mask is not None and mask.shape == (2, 3) and mask.dtype == np.bool_
+        assert mask.tolist() == [[True, False, False], [False, True, False]]
+    assert forecast(s, "k-frame-agreement", 2).canonical_bytes() == saved
+    assert CausalInput.from_bytes(before, ACCESS, LIMITS).canonical_bytes() == before
+    assert Forecast.from_bytes(saved, s).canonical_bytes() == saved
+    assert storage(s, saved) == account
+    p = Provider((raster([[0]], 0), raster([[0]], 1), raster([[1, 0, 0], [0, 1, 0]], 2)))
+    assert evaluate(s, saved, p) == expected
+    assert p.calls == [2]

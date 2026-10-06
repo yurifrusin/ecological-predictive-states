@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any, Protocol
 
@@ -54,10 +54,15 @@ def validate_shape(shape: tuple[int, int]) -> None:
         integer(v, 1)
 
 
-def snapshot(array: Array, shape: tuple[int, int]) -> Array:
+def snapshot(array: Array, shape: tuple[int, int]) -> bytes:
     if not isinstance(array, np.ndarray) or array.dtype != np.bool_ or array.shape != shape:
         raise ValueError("fixed-shape Boolean mask required")
-    return np.frombuffer(array.tobytes(order="C"), dtype=np.bool_).reshape(shape)
+    return array.tobytes(order="C")
+
+
+def mask_view(data: bytes, shape: tuple[int, int]) -> Array:
+    # Each access owns its metadata; only immutable bytes are shared with the contract.
+    return np.frombuffer(data, dtype=np.bool_).reshape(shape)
 
 
 @dataclass(frozen=True)
@@ -80,30 +85,37 @@ class Limits:
             raise ValueError("token budget exceeded before mask expansion")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class TokenFrame:
     index: int
     shape: tuple[int, int]
-    masks: Masks
+    _mask_bytes: tuple[tuple[str, bytes], ...] = field(repr=False)
 
-    def __post_init__(self) -> None:
-        integer(self.index)
-        validate_shape(self.shape)
-        Limits(1, self.shape[0] * self.shape[1], max(1, len(self.masks))).check(1, self.shape, 0)
+    def __init__(self, index: int, shape: tuple[int, int], masks: Masks) -> None:
+        integer(index)
+        validate_shape(shape)
+        Limits(1, shape[0] * shape[1], max(1, len(masks))).check(1, shape, 0)
         seen = set()
         owned = []
-        occupied = np.zeros(self.shape, dtype=np.bool_)
-        for t, a in self.masks:
+        occupied = np.zeros(shape, dtype=np.bool_)
+        for t, a in masks:
             token(t)
             if t in seen:
                 raise ValueError("duplicate token")
             seen.add(t)
-            a = snapshot(a, self.shape)
+            data = snapshot(a, shape)
+            a = mask_view(data, shape)
             if not np.any(a) or np.any(occupied & a):
                 raise ValueError("visible token masks must be nonempty and disjoint")
             occupied |= a
-            owned.append((t, a))
-        object.__setattr__(self, "masks", tuple(sorted(owned, key=lambda p: p[0])))
+            owned.append((t, data))
+        object.__setattr__(self, "index", index)
+        object.__setattr__(self, "shape", shape)
+        object.__setattr__(self, "_mask_bytes", tuple(sorted(owned, key=lambda p: p[0])))
+
+    @property
+    def masks(self) -> Masks:
+        return tuple((t, mask_view(data, self.shape)) for t, data in self._mask_bytes)
 
     def payload(self) -> dict[str, Any]:
         return {"index": self.index, "masks": {t: a.tolist() for t, a in self.masks}}
@@ -321,39 +333,57 @@ def _command(value: Any) -> Command:
     return (result[0], result[1], result[2])
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class Forecast:
     input_sha256: str
     rule: str
     window: int
     decision_index: int
     shape: tuple[int, int]
-    masks: tuple[tuple[str, Array | None], ...]
+    _mask_bytes: tuple[tuple[str, bytes | None], ...] = field(repr=False)
 
-    def __post_init__(self) -> None:
-        if (
-            type(self.input_sha256) is not str
-            or re.fullmatch(r"[0-9a-f]{64}", self.input_sha256) is None
-        ):
+    def __init__(
+        self,
+        input_sha256: str,
+        rule: str,
+        window: int,
+        decision_index: int,
+        shape: tuple[int, int],
+        masks: tuple[tuple[str, Array | None], ...],
+    ) -> None:
+        if type(input_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", input_sha256) is None:
             raise ValueError("input digest required")
-        integer(self.window, 1)
-        integer(self.decision_index)
+        integer(window, 1)
+        integer(decision_index)
+        validate_shape(shape)
         if (
-            self.rule not in {"current-mask-persistence", "k-frame-agreement"}
-            or (self.rule == "current-mask-persistence" and self.window != 1)
-            or self.window > self.decision_index + 1
+            rule not in {"current-mask-persistence", "k-frame-agreement"}
+            or (rule == "current-mask-persistence" and window != 1)
+            or window > decision_index + 1
         ):
             raise ValueError("predeclared control/window required")
-        Limits(1, self.shape[0] * self.shape[1], max(1, len(self.masks))).check(1, self.shape, 0)
+        Limits(1, shape[0] * shape[1], max(1, len(masks))).check(1, shape, 0)
         seen = set()
         owned = []
-        for t, a in self.masks:
+        for t, a in masks:
             token(t)
             if t in seen:
                 raise ValueError("unique forecast inventory required")
             seen.add(t)
-            owned.append((t, None if a is None else snapshot(a, self.shape)))
-        object.__setattr__(self, "masks", tuple(sorted(owned, key=lambda p: p[0])))
+            owned.append((t, None if a is None else snapshot(a, shape)))
+        object.__setattr__(self, "input_sha256", input_sha256)
+        object.__setattr__(self, "rule", rule)
+        object.__setattr__(self, "window", window)
+        object.__setattr__(self, "decision_index", decision_index)
+        object.__setattr__(self, "shape", shape)
+        object.__setattr__(self, "_mask_bytes", tuple(sorted(owned, key=lambda p: p[0])))
+
+    @property
+    def masks(self) -> tuple[tuple[str, Array | None], ...]:
+        return tuple(
+            (t, None if data is None else mask_view(data, self.shape))
+            for t, data in self._mask_bytes
+        )
 
     def canonical_bytes(self) -> bytes:
         return canonical_json_bytes(
