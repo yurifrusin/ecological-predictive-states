@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import io
 import time
+import zipfile
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from typing import Any
@@ -21,6 +24,45 @@ from tests.test_paired_appearance_execution import HOST, container_info, decisio
 
 ROOT = Path(__file__).resolve().parents[1]
 STUDY = CONTRAST_V1
+
+OLD_FRAME_MEMBER_SHA256 = {
+    "metadata.npy": "d179c5bfa5686032e8299c9575ae8591adf4aaf4d5ec648e00720d1b2a631915",
+    "rgb.npy": "5365b57300d7d4bafa1303a89ba5bc3dfdd228d918aed3f1ed5515101d175cb4",
+    "native_id.npy": "f03b49c86077d54ac17af82421389c4739d20c203a4cb55a2cfc639d5d9d34ae",
+    "native_depth.npy": "14caf9eceb53906f930f134e03acd9594a10c1256ce94278beb94711658b4ce0",
+    "raw.npy": "380a7c70dcdbfe837f3ddff90bc97275394af1aba8c71676f73219536bc5fea7",
+    "depth.npy": "da034c64293a7ac37d880810253dda1aec5b594b816b0924a04c73db770ee5b0",
+    "opaque.npy": "ab38d80a85bed9247a2cce0ada4aa5495e628702e8b2446a6b6c815b33a58dd8",
+    "controlled.npy": "63c7a66c2f88fa7baa79d4fde13f3d0a29159ee84cb9e7d4f9e12888389337a3",
+    "horizontal.npy": "9323967659098e8705a0424d3ed7f8ab70909f9ea1345322fe18b2219a279675",
+    "vertical.npy": "6b0af5ce52f020e05172d3d2911e3282ecb4a88271612790af77a73a9ca152ed",
+}
+
+
+def archive_member_sha256(data: bytes) -> dict[str, str]:
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        return {name: hashlib.sha256(archive.read(name)).hexdigest() for name in archive.namelist()}
+
+
+def archive_with_creator_os(data: bytes, creator_os: int) -> bytes:
+    changed = bytearray(data)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        cursor = archive.start_dir
+        for _ in archive.infolist():
+            if changed[cursor : cursor + 4] != b"PK\x01\x02":
+                raise AssertionError("invalid ZIP central directory")
+            changed[cursor + 5] = creator_os
+            filename_length = int.from_bytes(changed[cursor + 28 : cursor + 30], "little")
+            extra_length = int.from_bytes(changed[cursor + 30 : cursor + 32], "little")
+            comment_length = int.from_bytes(changed[cursor + 32 : cursor + 34], "little")
+            cursor += 46 + filename_length + extra_length + comment_length
+        if cursor != len(changed) - 22:
+            raise AssertionError("unexpected ZIP end record")
+    return bytes(changed)
+
+
+def require_old_frame_payloads(data: bytes) -> None:
+    assert archive_member_sha256(data) == OLD_FRAME_MEMBER_SHA256
 
 
 def binding() -> r.AppearanceExecutionBinding:
@@ -98,10 +140,34 @@ def test_fixed_calibration_and_old_contract_are_distinct() -> None:
         sha256_bytes(canonical_json_bytes(old_frame.evidence))
         == "361826c4edf3f2e9806b8d9ae18d047463d3db8cfaa76c86d3dd2ec52b1270b5"
     )
-    assert (
-        sha256_bytes(p.encode(old_frame))
-        == "6bc0510fe88e33835352eaba90435c445c47cd5cd91fc2f73b5771af761fc1ba"
+    old_payload = p.encode(old_frame)
+    require_old_frame_payloads(old_payload)
+    windows_envelope = archive_with_creator_os(old_payload, 0)
+    unix_envelope = archive_with_creator_os(old_payload, 3)
+    assert windows_envelope != unix_envelope
+    require_old_frame_payloads(windows_envelope)
+    require_old_frame_payloads(unix_envelope)
+    decoded_windows = p.decode(windows_envelope)
+    decoded_unix = p.decode(unix_envelope)
+    assert decoded_windows.evidence == decoded_unix.evidence == old_frame.evidence
+    assert all(
+        logical_array_hash(getattr(decoded_windows, name))
+        == logical_array_hash(getattr(decoded_unix, name))
+        for name in p.ARRAY_NAMES
     )
+
+    changed_member = io.BytesIO()
+    with (
+        zipfile.ZipFile(io.BytesIO(old_payload)) as source,
+        zipfile.ZipFile(changed_member, "w") as target,
+    ):
+        for name in source.namelist():
+            payload = source.read(name)
+            if name == "rgb.npy":
+                payload = bytes((payload[0] ^ 1,)) + payload[1:]
+            target.writestr(name, payload)
+    with pytest.raises(AssertionError):
+        require_old_frame_payloads(changed_member.getvalue())
 
     assert p.seed_domain("single_occluder")["root"] == 2026100601
     assert p.seed_domain("corridor")["root"] == 2026100602
