@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from epsbench.diagnostics.return_view_analytic import Frame, adapt, validate_config
+from epsbench.diagnostics.return_view_analytic import CONFIG_SHA256, Frame, adapt, validate_config
 from epsbench.diagnostics.return_view_core import (
     REQUIRED,
     HistoryView,
@@ -161,3 +162,73 @@ def test_target_failure_keeps_whole_exposure(tmp_path: Path) -> None:
     assert (root / "exposure.json").exists()
     assert (root / "failure.json").exists()
     assert not (root / "frame-1-3.npz").exists()
+
+
+WRONG_ATTESTATIONS: tuple[object, ...] = (1, 1.0, "true", None, [], {}, False)
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong"),
+    [
+        (field, value)
+        for field in ("authorize_one_analytic_attempt", "independent_exact_head_reviews_complete")
+        for value in WRONG_ATTESTATIONS
+    ]
+    + [
+        (field, 1)
+        for field in ("schema", "source_head", "config_sha256", "authorization_path", "output_path")
+    ],
+)
+def test_launch_decision_strict_types_before_producer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, wrong: object
+) -> None:
+    from epsbench.diagnostics import return_view_execution as execution
+
+    root = tmp_path / "synthetic-never-launched"
+    decision_path = tmp_path / "synthetic-malformed-decision.json"
+
+    # Synthetic Git binding: never issue a real exact-source launch decision.
+    def metadata(command: list[str], **kwargs: object) -> str:
+        return "synthetic-source-head" if command[1] == "rev-parse" else ""
+
+    def producer_denied(*args: object, **kwargs: object) -> None:
+        pytest.fail("malformed decision reached Producer construction")
+
+    monkeypatch.setattr(subprocess, "check_output", metadata)
+    monkeypatch.setattr(execution, "Producer", producer_denied)
+    decision: dict[str, object] = {
+        "schema": "return-view-launch-decision-v1",
+        "source_head": "synthetic-source-head",
+        "config_sha256": CONFIG_SHA256,
+        "authorization_path": str(decision_path.resolve()),
+        "output_path": str(root.resolve()),
+        "authorize_one_analytic_attempt": True,
+        "independent_exact_head_reviews_complete": True,
+    }
+    decision[field] = wrong
+    decision_path.write_text(json.dumps(decision))
+    with pytest.raises(PermissionError):
+        execution.launch(root, decision_path)
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("shape", [None, [], True, "object"])
+def test_launch_decision_requires_json_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shape: object
+) -> None:
+    from epsbench.diagnostics import return_view_execution as execution
+
+    def metadata(command: list[str], **kwargs: object) -> str:
+        return "synthetic-source-head" if command[1] == "rev-parse" else ""
+
+    def producer_denied(*args: object, **kwargs: object) -> None:
+        pytest.fail("non-object decision reached Producer construction")
+
+    monkeypatch.setattr(subprocess, "check_output", metadata)
+    monkeypatch.setattr(execution, "Producer", producer_denied)
+    decision_path = tmp_path / "synthetic-non-object.json"
+    decision_path.write_text(json.dumps(shape))
+    root = tmp_path / "synthetic-never-launched"
+    with pytest.raises(PermissionError):
+        execution.launch(root, decision_path)
+    assert not root.exists()

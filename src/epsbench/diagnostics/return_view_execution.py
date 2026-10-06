@@ -316,7 +316,14 @@ def launch(root: Path, decision_path: Path) -> dict[str, Any]:
         "authorize_one_analytic_attempt": True,
         "independent_exact_head_reviews_complete": True,
     }
-    if decision != expected or clean:
+    # JSON integer 1 equals True in Python; equality alone is not a typed admission check.
+    if (
+        type(decision) is not dict
+        or decision.keys() != expected.keys()
+        or any(type(decision[key]) is not type(value) for key, value in expected.items())
+        or decision != expected
+        or clean
+    ):
         raise PermissionError(
             "separate exact-source/config/path launch decision and clean source required"
         )
