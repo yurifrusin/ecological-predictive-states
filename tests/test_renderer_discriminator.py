@@ -408,6 +408,8 @@ def test_newly_decidable_relations_stop_before_next_capture(
     assert result["endpoints"] == fault_ordinal + 1
     assert capture.visited == list(range(fault_ordinal + 1)) and capture.closed
     assert len(d.replay(sink.root, b)) == fault_ordinal + 1
+    with pytest.raises(ValueError, match=r"relation|differs"):
+        d.reconstruct_measurements(sink.root, b)
 
 
 def test_independent_inward_plane_coverage_and_wall_texels() -> None:

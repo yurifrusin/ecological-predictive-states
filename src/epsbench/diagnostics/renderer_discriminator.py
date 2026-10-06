@@ -1529,8 +1529,8 @@ class Sink:
             self.stage = 0
 
 
-def replay(root: Path, binding: Binding) -> list[Endpoint]:
-    """Strict prefix replay and immediate producer reconstruction; never resumes a run."""
+def _replay_components(root: Path, binding: Binding) -> list[Endpoint]:
+    """Verify the closed physical/event/component prefix independently of final writers."""
     safe_path(root)
     physical = physical_inventory(root)
     consumed_raw = (root / "consumed.json").read_bytes()
@@ -1681,7 +1681,12 @@ def replay(root: Path, binding: Binding) -> list[Endpoint]:
         allowed_orphans.add(f"endpoints/e{ordinal:02d}/sampler_failure.json")
     if not orphans <= allowed_orphans:
         raise ValueError("unsupported orphan evidence")
-    if "terminal.json" in physical:
+    return completed
+
+
+def verify_final_receipt(root: Path, binding: Binding, completed: int) -> None:
+    """Strict final writer check when present; missing writers never establish completion."""
+    if (root / "terminal.json").exists():
         terminal = p.strict_json((root / "terminal.json").read_bytes())
         counts = {s for s in STAGES if s.endswith("attempt") or s.endswith("complete")}
         if (
@@ -1690,7 +1695,7 @@ def replay(root: Path, binding: Binding) -> list[Endpoint]:
             or terminal["status"] not in ("INCONCLUSIVE", "DIAGNOSTIC_COMPLETE")
             or terminal["binding_root"] != binding.root
             or type(terminal["completed"]) is not int
-            or not 0 <= terminal["completed"] <= len(completed)
+            or not 0 <= terminal["completed"] <= completed
             or type(terminal["counts"]) is not dict
             or set(terminal["counts"]) != counts
             or any(type(v) is not int or not 0 <= v <= 16 for v in terminal["counts"].values())
@@ -1703,6 +1708,20 @@ def replay(root: Path, binding: Binding) -> list[Endpoint]:
             or sha256_bytes(report) != terminal["report"]["sha256"]
         ):
             raise ValueError("terminal report corruption")
+
+
+def replay(root: Path, binding: Binding) -> list[Endpoint]:
+    """Strict prefix replay including final writer integrity; never resumes a run."""
+    completed = _replay_components(root, binding)
+    verify_final_receipt(root, binding, len(completed))
+    return completed
+
+
+def reconstruct_measurements(root: Path, binding: Binding) -> list[Endpoint]:
+    """Verified measurement prefix only, never whole-bundle/acquisition acceptance."""
+    completed = _replay_components(root, binding)
+    if completed:
+        validate_relations(completed)
     return completed
 
 
@@ -1956,14 +1975,19 @@ class NativeCapture:
             self.renderer, self.failed = None, True
 
 
-def _drive(capture: Any, sink: Sink) -> dict[str, Any]:
+def _drive(capture: Any, sink: Sink, deadline: float | None = None) -> dict[str, Any]:
     """Internal finite loop. Valid suitability failures never truncate the factorial."""
     start = sink.started
+    work_deadline = start + 300
     endpoints = []
     failure = None
     try:
+        if deadline is not None:
+            if type(deadline) is not float or not math.isfinite(deadline):
+                raise ValueError("finite shortening-only deadline required")
+            work_deadline = min(work_deadline, deadline)
         for ordinal in range(16):
-            if time.monotonic() - start >= 300:
+            if time.monotonic() >= work_deadline:
                 raise TimeoutError("inclusive 300s slot")
             endpoint = capture.capture(ordinal)
             validate_endpoint(endpoint, sink.binding)
@@ -1987,7 +2011,7 @@ def _drive(capture: Any, sink: Sink) -> dict[str, Any]:
             "absolute_native_uv_transfer_qualification": "UNRESOLVED",
         }
     )
-    if time.monotonic() - start >= 300:
+    if time.monotonic() >= work_deadline:
         result["status"], result["failure"] = "INCONCLUSIVE", "inclusive deadline"
     if not sink.failed:
         report = sink.put("report.json", canonical_json_bytes(result))
