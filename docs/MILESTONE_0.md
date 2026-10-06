@@ -121,3 +121,13 @@ Exit criteria:
 ### Segmentation/depth alignment interpretation
 
 For Milestone 0, “segmentation and depth align pixel-for-pixel” means correspondence evidence that the segmentation identifier and depth value at an image index originate from the same depth-tested draw and use the same orientation in a verified single-sample framebuffer with unchanged scene, camera, viewport, and attachment state. Sequential color and depth readback from that draw is acceptable; hardware-atomic readback is not required. This contract does not itself establish ideal geometric boundary ownership or metric depth accuracy. Those remain separate qualifications.
+
+
+## Prospective restricted occupancy route
+
+[M0-occupancy-development-v1](RESTRICTED_OCCUPANCY_LEARNING_V1.md) is a bounded
+oracle composite-architecture pilot related to A2. This prospective route may precede
+original Gates0B/0C completion; their original exit criteria remain unchanged and unmet.
+Original0B/0C/0E remain incomplete. Source acceptance grants no Gate0D model,
+collection, comparative launch or empirical gate authority. This pilot cannot establish
+the charter appearance hypothesis, full-state sufficiency or learned association.
