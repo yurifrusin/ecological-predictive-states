@@ -539,6 +539,7 @@ def require_supported_runtime(backend: str) -> None:
     python_version = platform.python_version()
     from epsbench.diagnostics.a1_docker_runtime import docker_candidate
     from epsbench.diagnostics.causal_history_runtime import causal_candidate
+    from epsbench.diagnostics.corridor_aperture_runtime import aperture_candidate, aperture_selected
     from epsbench.diagnostics.paired_appearance_runtime import paired_appearance_candidate
     from epsbench.diagnostics.renderer_discriminator import candidate_runtime
 
@@ -550,19 +551,31 @@ def require_supported_runtime(backend: str) -> None:
         or np.__version__ != SUPPORTED_RUNTIME["numpy"]
         or os.environ.get("PYOPENGL_PLATFORM") != "osmesa"
         or not (
-            os.environ.get("WSL_INTEROP")
-            or os.environ.get("WSL_DISTRO_NAME")
-            or docker_candidate()
-            or causal_candidate()
-            or paired_appearance_candidate()
-            or candidate_runtime()
+            aperture_candidate()
+            if aperture_selected()
+            else (
+                os.environ.get("WSL_INTEROP")
+                or os.environ.get("WSL_DISTRO_NAME")
+                or docker_candidate()
+                or causal_candidate()
+                or paired_appearance_candidate()
+                or candidate_runtime()
+            )
         )
         or any(
             importlib.metadata.version(name) != SUPPORTED_RUNTIME[name]
             for name in ("PyOpenGL", "glfw")
         )
     ):
-        raise CanonicalPairedCaptureError("canonical paired capture runtime is unsupported")
+        from epsbench.diagnostics.corridor_aperture_runtime import aperture_rejection
+
+        if not aperture_selected():
+            raise CanonicalPairedCaptureError("canonical paired capture runtime is unsupported")
+        reason = aperture_rejection()
+        raise CanonicalPairedCaptureError(
+            "canonical paired capture runtime is unsupported; aperture="
+            + (reason or "candidate_present_common_facts_unsupported")
+        )
 
 
 def observe_canonical_paired_state(renderer: Any) -> Mapping[str, object]:
