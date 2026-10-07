@@ -130,17 +130,19 @@ jobs:
 
       - name: Lint and format the runtime-only source checks
         run: |
-          uv run --locked ruff check src/epsbench/diagnostics/restricted_health_runtime.py tests/test_restricted_health_runtime.py
-          uv run --locked ruff format --check src/epsbench/diagnostics/restricted_health_runtime.py tests/test_restricted_health_runtime.py
+          uv run --locked --no-sync ruff check src/epsbench/diagnostics/restricted_health_runtime.py tests/test_restricted_health_runtime.py
+          uv run --locked --no-sync ruff format --check src/epsbench/diagnostics/restricted_health_runtime.py tests/test_restricted_health_runtime.py
 
       - name: Type-check runtime-only source checks
-        run: uv run --locked mypy --no-incremental src/epsbench/diagnostics/restricted_health_runtime.py tests/test_restricted_health_runtime.py
+        env:
+          MYPYPATH: src
+        run: uv run --locked --no-sync mypy --config-file=/dev/null --strict --python-version=3.11 --no-incremental src/epsbench/diagnostics/restricted_health_runtime.py tests/test_restricted_health_runtime.py
 
       - name: Run public synthetic runtime checks
         env:
           PYTHONPATH: src
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
-        run: uv run --locked python -m pytest --noconftest -o addopts= -q tests/test_restricted_health_runtime.py
+        run: uv run --locked --no-sync python -m pytest --noconftest -o addopts= -q tests/test_restricted_health_runtime.py
 
   quality:
     if: ${{ !(github.event_name == 'pull_request' && (github.head_ref == 'codex/occupancy-qualification-20261007' || github.head_ref == 'codex/restricted-learning-data-20261007' || github.head_ref == 'codex/restricted-exact-producer-20261007' || github.head_ref == 'codex/a1-canonical-integration-20261005' || github.head_ref == 'codex/a1-retained-output-20261006' || github.head_ref == 'codex/a1-docker-execution-20261006' || github.head_ref == 'codex/causal-history-design-20261006' || github.head_ref == 'codex/causal-history-fixtures-20261006' || github.head_ref == 'codex/causal-history-core-20261006' || github.head_ref == 'codex/causal-history-sequences-20261006' || github.head_ref == 'codex/causal-history-execution-20261006' || github.head_ref == 'codex/observational-boundary-contract-20261006' || github.head_ref == 'codex/return-view-diagnostic-20261006' || github.head_ref == 'codex/paired-appearance-canonical-assets-20261006' || github.head_ref == 'codex/paired-appearance-execution-20261006' || github.head_ref == 'codex/paired-appearance-diagnostic-20261006' || github.head_ref == 'codex/causal-visible-forecast-contract-20261006' || github.head_ref == 'codex/renderer-typed-selectors-20261006' || github.head_ref == 'codex/renderer-discriminator-compact-inspection-20261006' || github.head_ref == 'codex/renderer-discriminator-execution-20261006' || github.head_ref == 'codex/renderer-illumination-sampling-20261006' || github.head_ref == 'codex/renderer-failure-evidence-20261006' || github.head_ref == 'codex/renderer-storage-contract-20261007' || github.head_ref == 'codex/appearance-contrast-calibration-20261006' || github.head_ref == 'codex/restricted-models-20261007' || github.head_ref == 'codex/restricted-health-20261007' || github.head_ref == 'codex/restricted-health-runtime-20261007' || github.head_ref == 'codex/runtime-provenance-preflight-20261007') && github.base_ref == 'codex/a1-integration-base-20261005') }}
