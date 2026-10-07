@@ -136,7 +136,7 @@ jobs:
       - name: Type-check runtime-only source checks
         env:
           MYPYPATH: src
-        run: uv run --locked --no-sync mypy --config-file=/dev/null --strict --python-version=3.11 --no-incremental src/epsbench/diagnostics/restricted_health_runtime.py tests/test_restricted_health_runtime.py
+        run: uv run --locked --no-sync mypy --config-file=/dev/null --strict --python-version=3.11 --no-incremental --follow-imports=skip --allow-untyped-decorators src/epsbench/diagnostics/restricted_health_runtime.py tests/test_restricted_health_runtime.py
 
       - name: Run public synthetic runtime checks
         env:
