@@ -148,11 +148,18 @@ Generation refuses to overwrite a non-empty output directory. Inspection output 
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
-uv run mypy src tests
+uv run --locked --group restricted-models mypy --no-incremental src tests
 git diff --check
 ```
 
 Use `uv run ruff format .` to apply formatting intentionally.
+
+The default environment has no learning dependency; default pytest skips the optional
+restricted-model test module when PyTorch is absent. Whole-source typing explicitly
+includes the optional group. For restricted model source verification, use
+`uv run --locked --group restricted-models python scripts/check_restricted_models_source.py`.
+This guarded check runs synthetic inputs only and grants no actual-data launch authority.
+See [restricted model source boundaries](docs/RESTRICTED_MODELS_WP2.md).
 
 ## Modality boundaries
 
