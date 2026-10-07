@@ -326,3 +326,92 @@ def test_permission_denial_precedes_all_side_effects(tmp_path: Path, access: Any
     with pytest.raises(PermissionError):
         m.inspect(path, access, side_effect)
     assert signals == [] and not path.exists()
+
+
+@pytest.mark.parametrize(
+    "filename", ["src/epsbench/appearance.py", "src/epsbench/utils/seeding.py"]
+)
+def test_transitive_changed_source_bytes_rejected(
+    filename: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    context = m.source_context(root, {"fixture": "handwritten-v1"})
+    assert filename in context["sources"]
+    original = Path.read_bytes
+
+    def changed_bytes(path: Path) -> bytes:
+        value = original(path)
+        return value + b"\n# changed runtime source\n" if path == root / filename else value
+
+    monkeypatch.setattr(Path, "read_bytes", changed_bytes)
+    with pytest.raises(ValueError, match="source head/tree/bytes differ"):
+        m.verify_source(root, context)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"failure": {"type": "OSError", "message": "handwritten closure failure"}},
+        {"completion": "INVALID"},
+        {"completion": "STOPPED_INCOMPLETE"},
+        {"failure": "failure"},
+        {"failure": []},
+        {"failure": {}},
+        {"failure": {"type": "OSError"}},
+        {"failure": {"type": "OSError", "message": 1}},
+        {"failure": {"type": None, "message": "failure"}},
+        {"failure": {"type": "OSError", "message": "failure", "extra": True}},
+        {"failure": {"type": "Contradiction", "message": "unqualified fake assertion"}},
+    ],
+)
+def test_inconsistent_or_malformed_terminal_cannot_inspect_pass(
+    tmp_path: Path, changes: dict[str, Any]
+) -> None:
+    path = tmp_path / "cell"
+    fake = Fake(path)
+    assert run(path, fake)["cell_outcome"] == "PASS"
+    terminal = m.read(path, "terminal.json")
+    terminal.update(changes)
+    (path / "terminal.json").write_bytes(canonical_json_bytes(terminal))
+    with pytest.raises(ValueError):
+        m.inspect(path, ACCESS, lambda: None)
+    assert len(fake.calls) == 8
+
+
+def test_complete_operational_failure_remains_inconclusive(tmp_path: Path) -> None:
+    path = tmp_path / "cell"
+    fake = Fake(path)
+    run(path, fake)
+    terminal = m.read(path, "terminal.json")
+    terminal["failure"] = {"type": "OSError", "message": "handwritten post-return closure failure"}
+    terminal["analysis"] = m.conclusion(
+        "COMPLETE", "UNRESOLVED", "INCONCLUSIVE", terminal["analysis"]["branches"]
+    )
+    (path / "terminal.json").write_bytes(canonical_json_bytes(terminal))
+    assert m.inspect(path, ACCESS, lambda: None) == terminal["analysis"]
+    assert len(fake.calls) == 8
+
+
+def test_qualified_contradiction_failure_stays_fail(tmp_path: Path) -> None:
+    path = tmp_path / "cell"
+    fake = Fake(path)
+    fake.mode = "contradiction"
+    assert run(path, fake)["cell_outcome"] == "FAIL"
+    terminal = m.read(path, "terminal.json")
+    terminal["failure"] = {
+        "type": "Contradiction",
+        "message": "qualified handwritten contradiction",
+    }
+    (path / "terminal.json").write_bytes(canonical_json_bytes(terminal))
+    assert m.inspect(path, ACCESS, lambda: None) == terminal["analysis"]
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1, True])
+def test_terminal_elapsed_requires_finite_nonnegative_number(tmp_path: Path, value: Any) -> None:
+    path = tmp_path / "cell"
+    fake = Fake(path)
+    run(path, fake)
+    terminal = m.read(path, "terminal.json")
+    terminal["elapsed_seconds"] = value
+    with pytest.raises(ValueError, match="finite terminal"):
+        m.terminal_check(terminal)

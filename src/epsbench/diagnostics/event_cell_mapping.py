@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import subprocess
 import time
@@ -43,6 +44,8 @@ SOURCES = (
     *SOURCE_FILES,
     "src/epsbench/diagnostics/known_region_events.py",
     "src/epsbench/diagnostics/event_cell_mapping.py",
+    "src/epsbench/appearance.py",
+    "src/epsbench/utils/seeding.py",
 )
 INITIAL = {"cell.json", "context.json", "identity.json"}
 ALLOWED = INITIAL | {"seal.json", "before-0.json", "before-1.json", "score-0.json", "score-1.json"}
@@ -325,6 +328,95 @@ def read(path: Path, name: str) -> Any:
     return result
 
 
+def terminal_check(finish: Any) -> None:
+    """Validate operational metadata before using any recorded scientific disposition."""
+    if (
+        type(finish) is not dict
+        or set(finish)
+        != {
+            "version",
+            "completion",
+            "analysis",
+            "failure",
+            "attempted_calls",
+            "elapsed_seconds",
+            "external_bytes",
+            "files",
+        }
+        or finish["version"] != VERSION
+        or finish["completion"] not in ("COMPLETE", "STOPPED_INCOMPLETE")
+        or type(finish["files"]) is not dict
+        or not set(finish["files"]) <= ALLOWED
+        or type(finish["attempted_calls"]) is not int
+        or not 0 <= finish["attempted_calls"] <= 8
+        or type(finish["external_bytes"]) is not int
+        or finish["external_bytes"] < 0
+        or type(finish["elapsed_seconds"]) not in (int, float)
+        or not math.isfinite(finish["elapsed_seconds"])
+        or finish["elapsed_seconds"] < 0
+    ):
+        raise ValueError("strict finite terminal contract required")
+    analysis, failure = finish["analysis"], finish["failure"]
+    if (
+        type(analysis) is not dict
+        or set(analysis) != set(conclusion("", "", ""))
+        or analysis["version"] != VERSION
+        or analysis["completion"] != finish["completion"]
+        or analysis["qualification"]
+        not in ("UNRESOLVED", "PARTIAL_EXACT_GRID_AGREEMENT", "EXACT_CELL_MAPPING_AGREEMENT")
+        or analysis["cell_outcome"] not in ("PASS", "FAIL", "INCONCLUSIVE")
+        or analysis["scope"] != "EXACT_PUBLIC_CELL_ONLY"
+        or analysis["phase_gate_effect"] != "NONE"
+        or type(analysis["branches"]) is not list
+    ):
+        raise ValueError("terminal completion/analysis vocabulary differs")
+    if failure is not None and (
+        type(failure) is not dict
+        or set(failure) != {"type", "message"}
+        or type(failure["type"]) is not str
+        or not failure["type"]
+        or type(failure["message"]) is not str
+    ):
+        raise ValueError("typed terminal failure record required")
+    if failure is not None:
+        if failure["type"] == "Contradiction":
+            if analysis["cell_outcome"] != "FAIL":
+                raise ValueError("qualified Contradiction must record FAIL")
+        elif (
+            analysis["cell_outcome"] != "INCONCLUSIVE" or analysis["qualification"] != "UNRESOLVED"
+        ):
+            raise ValueError("operational failure must remain INCONCLUSIVE")
+    if analysis["cell_outcome"] == "PASS" and (
+        failure is not None
+        or finish["completion"] != "COMPLETE"
+        or analysis["qualification"] != "EXACT_CELL_MAPPING_AGREEMENT"
+        or len(analysis["branches"]) != 2
+        or finish["elapsed_seconds"] > SECONDS
+    ):
+        raise ValueError("PASS requires complete qualified failure-free operation")
+    if (
+        analysis["cell_outcome"] == "FAIL"
+        and analysis["qualification"] != "PARTIAL_EXACT_GRID_AGREEMENT"
+    ):
+        raise ValueError("FAIL requires qualified contradictory evidence")
+    if (
+        analysis["cell_outcome"] == "INCONCLUSIVE"
+        and analysis["qualification"] == "EXACT_CELL_MAPPING_AGREEMENT"
+    ):
+        raise ValueError("INCONCLUSIVE cannot certify exact mapping")
+    if finish["completion"] == "COMPLETE" and (
+        finish["attempted_calls"] != 8
+        or not {
+            f"{i}-{kind}-{suffix}.json"
+            for i in range(4)
+            for kind in ("raw", "audit")
+            for suffix in ("attempt", "return")
+        }
+        <= set(finish["files"])
+    ):
+        raise ValueError("COMPLETE requires all eight attempted and retained returns")
+
+
 def inspect(
     path: Path,
     access: ModalityPermissionSet,
@@ -337,29 +429,7 @@ def inspect(
     source_check()
     finish = read(path, "terminal.json") if terminal else None
     if finish is not None:
-        if (
-            set(finish)
-            != {
-                "version",
-                "completion",
-                "analysis",
-                "failure",
-                "attempted_calls",
-                "elapsed_seconds",
-                "external_bytes",
-                "files",
-            }
-            or finish["version"] != VERSION
-            or type(finish["files"]) is not dict
-            or not set(finish["files"]) <= ALLOWED
-            or type(finish["attempted_calls"]) is not int
-            or not 0 <= finish["attempted_calls"] <= 8
-            or type(finish["external_bytes"]) is not int
-            or finish["external_bytes"] < 0
-            or type(finish["elapsed_seconds"]) not in (int, float)
-            or finish["elapsed_seconds"] < 0
-        ):
-            raise ValueError("strict finite terminal contract required")
+        terminal_check(finish)
         actual = {
             p.name: sha256_bytes(p.read_bytes())
             for p in path.iterdir()
@@ -481,12 +551,8 @@ def inspect(
     completion = "COMPLETE" if len(branches) == 2 and count == 8 else "STOPPED_INCOMPLETE"
     output = conclusion(completion, qualification, outcome, branches)
     if finish is not None:
-        if (
-            finish["completion"] == "STOPPED_INCOMPLETE"
-            and finish["failure"] is not None
-            and finish["failure"]["type"] != "Contradiction"
-        ):
-            output = conclusion("STOPPED_INCOMPLETE", "UNRESOLVED", "INCONCLUSIVE", branches)
+        if finish["failure"] is not None and finish["failure"]["type"] != "Contradiction":
+            output = conclusion(finish["completion"], "UNRESOLVED", "INCONCLUSIVE", branches)
         if output != finish["analysis"]:
             raise ValueError("retained terminal analysis differs")
         if finish["elapsed_seconds"] > SECONDS and output["cell_outcome"] != "INCONCLUSIVE":

@@ -111,8 +111,22 @@ model/stub authority exists. Recovery18/21, Slice6 FAILED_CLOSED and held48 pers
 Closed motion/learning failures and exposed prefixes stay closed; no old outcome access.
 The charter matched-budget appearance hypothesis remains **UNTESTED**.
 
+PR77 bounded correction: EPS-ER77-0001 and EPS-ER77-0002 are
+**IMPLEMENTED_PENDING_VERIFICATION**, with separate renewed reviews required.
+The new source pin includes transitive `appearance.py` and `utils/seeding.py`;
+the guarded checker rejects any imported local runtime module outside that pin,
+and virtual byte-change regressions verify both added dependencies are checked.
+Historical source lists remain unchanged. Terminal completion/failure/analysis
+vocabulary and structure are validated before disposition acceptance. A recorded
+operational failure requires UNRESOLVED/INCONCLUSIVE regardless of whether all
+calls completed; internally contradictory PASS receipts reject. Qualified
+Contradiction remains FAIL only with supporting reconstructed evidence. Complete
+and incomplete operational INCONCLUSIVE packets remain representable.
+
 Local source validation used the existing eps-mask-models environment: Python3.11.15,
 uv0.11.26, ruff0.16.4 and mypy1.20.2. Locked/offline sync dry-run checked38 packages
 and reported no changes. Scoped lint, formatting, fresh typing and17 guarded fake
 checks passed, including handwritten smoke construction, validation and retained
-inspection. No package was installed and no physical producer/audit was executed.
+inspection. The bounded correction passes36 guarded checks, scoped lint/format,
+fresh typing and diff checking. No package was installed and no physical
+producer/audit was executed.

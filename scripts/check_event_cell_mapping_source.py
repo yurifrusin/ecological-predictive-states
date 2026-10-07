@@ -49,6 +49,25 @@ def loaded() -> None:
         raise RuntimeError("forbidden dependency already loaded")
 
 
+def source_closure() -> None:
+    """All guarded imported local runtime modules must belong to the new source pin."""
+    from epsbench.diagnostics.event_cell_mapping import SOURCES
+
+    root = Path(__file__).resolve().parents[1]
+    imported = set()
+    for name, module in sys.modules.items():
+        filename = getattr(module, "__file__", None)
+        if name.startswith("epsbench") and filename:
+            source = Path(filename).resolve()
+            if source.is_relative_to(root / "src"):
+                imported.add(source.relative_to(root).as_posix())
+    missing = imported - set(SOURCES)
+    if missing:
+        raise RuntimeError(
+            "guarded imported source bytes not pinned: " + ", ".join(sorted(missing))
+        )
+
+
 def denied(*args: object, **kwargs: object) -> NoReturn:
     raise RuntimeError("real geometry/collector execution forbidden in fake source checks")
 
@@ -103,6 +122,7 @@ def main() -> int:
         ]
     )
     loaded()
+    source_closure()
     print("Handwritten fake mapping/inspection only; physical cell remains unexecuted")
     return int(result)
 
