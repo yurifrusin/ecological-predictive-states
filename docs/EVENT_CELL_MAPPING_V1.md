@@ -122,11 +122,15 @@ operational failure requires UNRESOLVED/INCONCLUSIVE regardless of whether all
 calls completed; internally contradictory PASS receipts reject. Qualified
 Contradiction remains FAIL only with supporting reconstructed evidence. Complete
 and incomplete operational INCONCLUSIVE packets remain representable.
+EPS-ER77-0003: **IMPLEMENTED_PENDING_VERIFICATION**. Deadline failure takes
+operational precedence over an initiating Contradiction in both closure paths;
+the TimeoutError message preserves the initiating type/message. Combined fake
+failures inspect as INCONCLUSIVE; an in-budget Contradiction remains FAIL.
 
 Local source validation used the existing eps-mask-models environment: Python3.11.15,
 uv0.11.26, ruff0.16.4 and mypy1.20.2. Locked/offline sync dry-run checked38 packages
 and reported no changes. Scoped lint, formatting, fresh typing and17 guarded fake
 checks passed, including handwritten smoke construction, validation and retained
-inspection. The bounded correction passes36 guarded checks, scoped lint/format,
+inspection. The bounded corrections pass41 guarded checks, scoped lint/format,
 fresh typing and diff checking. No package was installed and no physical
 producer/audit was executed.

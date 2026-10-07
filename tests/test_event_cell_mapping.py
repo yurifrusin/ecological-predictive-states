@@ -124,6 +124,7 @@ def test_complete_fake_smoke_retained_inspection_and_fixed_scores(tmp_path: Path
     assert result["qualification"] == "EXACT_CELL_MAPPING_AGREEMENT"
     assert fake.calls == [(i, k) for i in range(4) for k in ("raw", "audit")]
     assert m.inspect(path, ACCESS, lambda: None) == result
+
     assert len(fake.calls) == 8  # Inspector did not make physical calls.
     expected = {
         "stable": ("1/2", "1/2"),
@@ -415,3 +416,79 @@ def test_terminal_elapsed_requires_finite_nonnegative_number(tmp_path: Path, val
     terminal["elapsed_seconds"] = value
     with pytest.raises(ValueError, match="finite terminal"):
         m.terminal_check(terminal)
+
+
+@pytest.mark.parametrize("expiry", ["none", "score", "terminal"])
+def test_deadline_precedence_retains_initiating_contradiction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, expiry: str
+) -> None:
+    path = tmp_path / "cell"
+    fake = Fake(path)
+
+    def contradiction(*args: Any, **kwargs: Any) -> Any:
+        if expiry == "score":
+            fake.clock.value = 61
+        raise m.Contradiction("handwritten initiating contradiction")
+
+    monkeypatch.setattr(m, "score", contradiction)
+    if expiry == "terminal":
+        original = m.Store.write
+
+        def expired_closure(self: m.Store, name: str, value: Any, *, closure: bool = False) -> None:
+            original(self, name, value, closure=closure)
+            if name == "terminal.json":
+                fake.clock.value = 61
+
+        monkeypatch.setattr(m.Store, "write", expired_closure)
+    result = run(path, fake)
+    assert len(fake.calls) == 6
+    terminal = m.read(path, "terminal.json")
+    assert result["cell_outcome"] == ("FAIL" if expiry == "none" else "INCONCLUSIVE")
+    assert terminal["failure"]["type"] == ("Contradiction" if expiry == "none" else "TimeoutError")
+    assert "handwritten initiating contradiction" in terminal["failure"]["message"]
+    if expiry != "none":
+        assert "initiating Contradiction" in terminal["failure"]["message"]
+    assert m.inspect(path, ACCESS, lambda: None) == result
+
+
+@pytest.mark.parametrize("expiry", ["source", "terminal"])
+def test_deadline_keeps_other_initiating_operational_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, expiry: str
+) -> None:
+    path = tmp_path / "cell"
+    fake = Fake(path)
+
+    def source_check() -> None:
+        if len(fake.calls) == 8:
+            if expiry == "source":
+                fake.clock.value = 61
+            raise OSError("handwritten initiating source failure")
+
+    if expiry == "terminal":
+        original = m.Store.write
+
+        def expired_closure(self: m.Store, name: str, value: Any, *, closure: bool = False) -> None:
+            original(self, name, value, closure=closure)
+            if name == "terminal.json":
+                fake.clock.value = 61
+
+        monkeypatch.setattr(m.Store, "write", expired_closure)
+    result = m.run_mapping(
+        path,
+        ACCESS,
+        CONTEXT,
+        fake,
+        source_check,
+        lambda: 0,
+        lambda p: None,
+        clock=fake.clock,
+        allocate=lambda: IDENTITY,
+    )
+    terminal = m.read(path, "terminal.json")
+    assert terminal["failure"]["type"] == "TimeoutError"
+    assert (
+        "initiating OSError: handwritten initiating source failure"
+        in terminal["failure"]["message"]
+    )
+    assert result["cell_outcome"] == "INCONCLUSIVE" and len(fake.calls) == 8
+    assert m.inspect(path, ACCESS, lambda: None) == result

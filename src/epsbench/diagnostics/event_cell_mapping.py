@@ -560,6 +560,12 @@ def inspect(
     return output
 
 
+def deadline_failure(message: str, initiating: dict[str, str] | None) -> dict[str, str]:
+    if initiating is not None:
+        message += f"; initiating {initiating['type']}: {initiating['message']}"
+    return {"type": "TimeoutError", "message": message}
+
+
 def run_mapping(
     path: Path,
     access: ModalityPermissionSet,
@@ -656,7 +662,7 @@ def run_mapping(
         analysis = conclusion("STOPPED_INCOMPLETE", "UNRESOLVED", "INCONCLUSIVE", branches)
     elapsed = clock() - store.started
     if elapsed > SECONDS:
-        failure = failure or {"type": "TimeoutError", "message": "closure time bound exceeded"}
+        failure = deadline_failure("closure time bound exceeded", failure)
         analysis = conclusion("STOPPED_INCOMPLETE", "UNRESOLVED", "INCONCLUSIVE", branches)
     finish = {
         "version": VERSION,
@@ -678,7 +684,7 @@ def run_mapping(
             completion="STOPPED_INCOMPLETE",
             analysis=analysis,
             elapsed_seconds=closed,
-            failure={"type": "TimeoutError", "message": "terminal closure crossed time cap"},
+            failure=deadline_failure("terminal closure crossed time cap", finish["failure"]),
         )
         raw = canonical_json_bytes(finish)
         if store.account(len(raw)) > LIMIT:
