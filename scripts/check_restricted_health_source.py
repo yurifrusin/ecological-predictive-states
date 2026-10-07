@@ -107,6 +107,7 @@ def main() -> int:
             "-s",
             "tests/test_restricted_models_source.py",
             "tests/test_restricted_health_source.py",
+            "tests/test_restricted_health_runtime.py",
         ]
     )
     loaded()
