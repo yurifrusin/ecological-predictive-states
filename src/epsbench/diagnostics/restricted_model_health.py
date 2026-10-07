@@ -5,16 +5,14 @@ No operation on import. Private archive ACLs and a later exact admission remain 
 
 from __future__ import annotations
 
-import ctypes
 import math
 import os
-import platform
+import stat
 import struct
 import subprocess
 import sys
 import time
 from collections.abc import Callable
-from ctypes import wintypes
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -23,6 +21,8 @@ from typing import Any, cast
 import numpy as np
 import torch
 
+from epsbench.diagnostics import restricted_health_runtime
+from epsbench.diagnostics.restricted_health_runtime import OwnedProcess, filtered_environment
 from epsbench.diagnostics.restricted_learning_contract import (
     ARCHITECTURE,
     CONDITIONS,
@@ -50,8 +50,8 @@ from epsbench.utils.canonical import canonical_json_bytes
 VERSION = "EPS-HEALTH-ONLY-1"
 SCHEDULE_DOMAIN = "M0-occupancy-development-v1/schedule-v1"
 PACKET_LIMIT, RESULT_LIMIT = 32768, 4 * 1024**2
-CPU_LIMIT, RAM_LIMIT, DISK_LIMIT = 3600, 4 * 1024**3, 1024**3
-PLANNING_RESERVE_CPU, PACKAGING_RESERVE = 3600, 256 * 1024**2
+CPU_LIMIT, RAM_LIMIT, DISK_LIMIT = 2480, 4 * 1024**3, 1024**3
+PLANNING_RESERVE_CPU, PACKAGING_RESERVE = 1120, 256 * 1024**2
 UPDATES = 200
 _USED = False
 
@@ -440,6 +440,7 @@ class HealthAdmission:
     precommit: str
     admission_cpu_debit: float
     environment_bytes: int
+    retained_evidence_bytes: int
     packaging_reserve_bytes: int = PACKAGING_RESERVE
 
     def __post_init__(self) -> None:
@@ -453,7 +454,11 @@ class HealthAdmission:
             or self.admission_cpu_debit < 0
             or any(
                 type(v) is not int or v <= 0
-                for v in (self.environment_bytes, self.packaging_reserve_bytes)
+                for v in (
+                    self.environment_bytes,
+                    self.retained_evidence_bytes,
+                    self.packaging_reserve_bytes,
+                )
             )
         ):
             raise ValueError("retained measured allowance inputs and positive reserve required")
@@ -462,6 +467,7 @@ class HealthAdmission:
         if (
             self.admission_cpu_debit + 13 * 60 >= CPU_LIMIT
             or self.environment_bytes
+            + self.retained_evidence_bytes
             + self.packaging_reserve_bytes
             + 8 * RESULT_LIMIT
             + 8 * 1024**2
@@ -479,120 +485,106 @@ class ProcessOutcome:
     wall: float
 
 
-def _process_clock(pid: int) -> tuple[Callable[[], float | None], Callable[[], None]]:
-    """Retain Windows process handle for inclusive kernel+user CPU; absent is unknown."""
-    loader = getattr(ctypes, "windll", None)
-    if platform.system() != "Windows" or not isinstance(loader, ctypes.LibraryLoader):
-        return lambda: None, lambda: None
-    try:
-        library = loader.LoadLibrary("kernel32")
-        opened, times, closed = library.OpenProcess, library.GetProcessTimes, library.CloseHandle
-    except (AttributeError, OSError):
-        return lambda: None, lambda: None
-    opened.argtypes, opened.restype = (
-        (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD),
-        wintypes.HANDLE,
-    )
-    times.argtypes, times.restype = (
-        (wintypes.HANDLE, *([ctypes.POINTER(wintypes.FILETIME)] * 4)),
-        wintypes.BOOL,
-    )
-    closed.argtypes, closed.restype = (wintypes.HANDLE,), wintypes.BOOL
-    handle = opened(0x1000, False, pid)
-    if not handle:
-        return lambda: None, lambda: None
-
-    def read() -> float | None:
-        values = tuple(wintypes.FILETIME() for _ in range(4))
-        if not times(handle, *(ctypes.byref(v) for v in values)):
-            return None
-        return sum((v.dwHighDateTime << 32) + v.dwLowDateTime for v in values[2:]) / 10**7
-
-    def close() -> None:
-        closed(handle)
-
-    return read, close
-
-
-def _communicate(
-    child: subprocess.Popen[bytes],
-    payload: bytes,
-    remaining: float,
-    read: Callable[[], float | None],
-    retain: Callable[[float | None], None],
-) -> float | None:
-    try:
-        child.communicate(payload, timeout=remaining)
-    except BaseException:
-        try:
-            if child.poll() is None:
-                child.kill()
-                child.wait()
-            retain(read())
-        except BaseException:
-            pass  # Retention must not replace the original timeout/child exception.
-        raise
-    cpu = read()
-    retain(cpu)
-    return cpu
-
-
 def child_process(
     payload: bytes, condition: str, directory: Path, remaining: float
 ) -> ProcessOutcome:
-    environment = {
-        k: v
-        for k, v in os.environ.items()
-        if k.upper() in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATH")
-    }
-    environment.update(
-        {
-            "OMP_NUM_THREADS": "1",
-            "MKL_NUM_THREADS": "1",
-            "OPENBLAS_NUM_THREADS": "1",
-            "PYTHONHASHSEED": "0",
-        }
-    )
-    command = [sys.executable, "-m", __name__, "--learner", digest(payload), condition]
+    environment = filtered_environment()
+    ready, go = (directory / (condition + suffix) for suffix in ("-runtime.json", "-ack"))
+    helper = Path(restricted_health_runtime.__file__).resolve()
+    source = digest(helper.read_bytes())
+    command = [
+        sys.executable,
+        str(helper),
+        "--learner",
+        str(ready),
+        str(go),
+        source,
+        digest(payload),
+        condition,
+    ]
     started = time.monotonic()
-    with (
-        (directory / f"{condition}.stdout").open("xb") as output,
-        (directory / f"{condition}.stderr").open("xb") as error,
-    ):
-        child = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=output,
-            stderr=error,
-            cwd=directory,
-            env=environment,
-        )
-        read, close = _process_clock(child.pid)
-
-        def retain(cpu: float | None) -> None:
-            _write(
-                directory,
-                condition + "-process.json",
-                canonical_json_bytes(
-                    {
-                        "cpu": cpu,
-                        "wall": time.monotonic() - started,
-                        "exit": child.returncode,
-                        "scope": "process-lifetime kernel+user CPU; spawn-through-exit wall",
-                    }
-                ),
+    owned = None
+    child = None
+    record: dict[str, Any] = {"cpu": None, "exit": None, "identity_complete": False}
+    try:
+        with (
+            (directory / f"{condition}.stdout").open("xb") as output,
+            (directory / f"{condition}.stderr").open("xb") as error,
+        ):
+            child = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=output,
+                stderr=error,
+                cwd=directory,
+                env=environment,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-
+            owned = OwnedProcess(child, ready, remaining)
+            restricted_health_runtime.publish(go, source.encode())
+            child.communicate(payload, timeout=max(0.001, remaining - (time.monotonic() - started)))
+            observation = owned.finish(max(0.001, remaining - (time.monotonic() - started)))
+            record.update(observation)
+            record.update(
+                {
+                    "exit": child.returncode,
+                    "wall": time.monotonic() - started,
+                    "identity_complete": True,
+                }
+            )
+            if child.returncode != 0:
+                raise RuntimeError("health child failed; terminal observations retained")
+            if observation["peak"] is None or observation["peak"] > RAM_LIMIT:
+                raise RuntimeError("actual owned process peak unavailable or over allowance")
+    except BaseException as initiating:
+        record["error_type"] = type(initiating).__name__
+        record["cleanup_complete"] = False
         try:
-            cpu = _communicate(child, payload, remaining, read, retain)
+            if owned is not None:
+                record["owned_cleanup"] = owned.cleanup()
+                record["cleanup_complete"] = record["owned_cleanup"]["complete"]
+            if child is not None and child.poll() is None:
+                with (
+                    (directory / f"{condition}-cleanup.stdout").open("xb") as out,
+                    (directory / f"{condition}-cleanup.stderr").open("xb") as err,
+                ):
+                    cleanup = subprocess.run(
+                        ["taskkill", "/PID", str(child.pid), "/T", "/F"],
+                        stdout=out,
+                        stderr=err,
+                        timeout=20,
+                        check=False,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                    record["cleanup_exit"] = cleanup.returncode
+                    child.wait(timeout=20)
+                    record["launcher_tree_cleanup_complete"] = cleanup.returncode == 0
+            if owned is not None:
+                record["terminal_after_failure"] = owned.finish(0.001)
+        except BaseException as cleanup_error:
+            record["cleanup_error_type"] = type(cleanup_error).__name__
+        raise
+    finally:
+        failing = sys.exc_info()[0] is not None
+        try:
+            _write(directory, condition + "-process.json", canonical_json_bytes(record))
+        except BaseException:
+            if not failing:
+                raise
         finally:
-            close()
-        if child.returncode != 0:
-            raise RuntimeError("health child failed; stdout/stderr/process observations retained")
+            if owned is not None:
+                owned.close()
     path = directory / f"{condition}.stdout"
     if path.stat().st_size > RESULT_LIMIT:
         raise ValueError("child result exceeds bound")
-    return ProcessOutcome(path.read_bytes(), cpu, time.monotonic() - started)
+    raw = path.read_bytes()
+    result = validate_result(raw, payload, condition)
+    actual = next(p for p in record["processes"] if p["pid"] == record["ready"]["pid"])
+    if actual["final"]["cpu"] + 1e-6 < max(
+        result["elapsed_cpu"], result["provenance"]["cpu_seconds"]
+    ):
+        raise RuntimeError("actual interpreter lifetime CPU undercounts its self snapshots")
+    return ProcessOutcome(raw, record["cpu"], time.monotonic() - started)
 
 
 def _write(directory: Path, name: str, data: bytes) -> None:
@@ -603,14 +595,33 @@ def _write(directory: Path, name: str, data: bytes) -> None:
 
 
 def _environment_bytes() -> int:
-    root = Path(sys.prefix).resolve()
+    root = Path(sys.prefix)
     reject_reparse(root)
+    if not stat.S_ISDIR(root.stat().st_mode):
+        raise ValueError("existing environment directory required")
+    root = root.resolve()
+
+    def unavailable(error: OSError) -> None:
+        raise error
+
     total = 0
-    for directory, children, files in os.walk(root, followlinks=False):
-        for name in (*children, *files):
-            path = Path(directory) / name
+    for directory, children, files in os.walk(root, followlinks=False, onerror=unavailable):
+        current = Path(directory)
+        reject_reparse(current)
+        if not stat.S_ISDIR(current.stat().st_mode):
+            raise ValueError("environment traversal directory changed")
+        for name in children:
+            path = current / name
             reject_reparse(path)
-        total += sum((Path(directory) / name).stat().st_size for name in files)
+            if not stat.S_ISDIR(path.stat().st_mode):
+                raise ValueError("environment child directory changed")
+        for name in files:
+            path = current / name
+            reject_reparse(path)
+            observed = path.stat()
+            if not stat.S_ISREG(observed.st_mode):
+                raise ValueError("regular environment file required")
+            total += observed.st_size
     return total
 
 
@@ -667,6 +678,7 @@ def _operate(
             current_bytes = sum(path.stat().st_size for path in output.iterdir() if path.is_file())
             if (
                 admission.environment_bytes
+                + admission.retained_evidence_bytes
                 + PACKAGING_RESERVE
                 + current_bytes
                 + 2 * RESULT_LIMIT
@@ -707,7 +719,13 @@ def _operate(
             ):
                 raise RuntimeError("inclusive health allowance exhausted")
             total = sum(path.stat().st_size for path in output.iterdir() if path.is_file())
-            if admission.environment_bytes + admission.packaging_reserve_bytes + total > DISK_LIMIT:
+            if (
+                admission.environment_bytes
+                + admission.retained_evidence_bytes
+                + admission.packaging_reserve_bytes
+                + total
+                > DISK_LIMIT
+            ):
                 raise RuntimeError("inclusive logical health disk allowance exhausted")
             if not criterion(result["initial"], result["final"], result["floor"]):
                 raise RuntimeError("fixed final health criterion failed; no retry")
@@ -721,6 +739,7 @@ def _operate(
         terminal_environment = _environment_bytes()
         if (
             terminal_environment
+            + admission.retained_evidence_bytes
             + admission.packaging_reserve_bytes
             + sum(path.stat().st_size for path in output.iterdir() if path.is_file())
             + 65536
@@ -754,6 +773,8 @@ def _operate(
             "parent_cpu": time.process_time() - started_cpu,
             "child_cpu": child_cpu,
             "child_cpu_complete": cpu_complete,
+            "original_actual_health_allocation": 3600,
+            "successor_cpu_ceiling": CPU_LIMIT,
             "actual_health_cpu_ceiling": CPU_LIMIT,
             "debited_planning_reserve_cpu": PLANNING_RESERVE_CPU,
             "historical_wp2_cpu": "UNKNOWN",
@@ -772,7 +793,11 @@ def _operate(
         _write(output, "completed.json", canonical_json_bytes(report))
         final_bytes = sum(path.stat().st_size for path in output.iterdir() if path.is_file())
         if (
-            terminal_environment + admission.packaging_reserve_bytes + final_bytes + 1024
+            terminal_environment
+            + admission.retained_evidence_bytes
+            + admission.packaging_reserve_bytes
+            + final_bytes
+            + 1024
             > DISK_LIMIT
             or admission.admission_cpu_debit + time.process_time() - started_cpu + child_cpu
             > CPU_LIMIT

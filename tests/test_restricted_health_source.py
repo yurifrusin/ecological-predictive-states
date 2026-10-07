@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import platform
+import os
 import struct
+import sys
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
@@ -27,6 +29,8 @@ from epsbench.diagnostics.restricted_model_training import ModelSource
 from epsbench.diagnostics.visible_forecast_contract import _json
 from epsbench.utils.canonical import canonical_json_bytes
 from tests.test_restricted_models_source import example
+
+_ENVIRONMENT_BYTES = health._environment_bytes
 
 SOURCE = ModelSource("1" * 40, "2" * 40, "3" * 64)
 
@@ -54,7 +58,7 @@ def payload() -> bytes:
 
 def admission() -> health.HealthAdmission:
     return health.HealthAdmission(
-        SOURCE, "e" * 64, "c" * 64, "f" * 64, 1.0, 662146229, 256 * 1024**2
+        SOURCE, "e" * 64, "c" * 64, "f" * 64, 1.0, 662146229, 1000000, 256 * 1024**2
     )
 
 
@@ -316,13 +320,6 @@ def test_disjoint_before_any_write_and_planning_denial(tmp_path: Path) -> None:
         replace(admission(), packaging_reserve_bytes=0)
 
 
-def test_missing_process_clock_capability(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(platform, "system", lambda: "Linux")
-    read, close = health._process_clock(123)
-    assert read() is None
-    close()
-
-
 def test_remaining_deadline_shrinks_and_missing_stops(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -383,79 +380,68 @@ def test_environment_change_retained_fail_closed(
     assert (tmp_path / "new" / "failure.json").exists()
 
 
-def test_windows_process_clock_fake_handle_and_signatures(monkeypatch: pytest.MonkeyPatch) -> None:
-    import ctypes
-    from ctypes import wintypes
-
-    pointer = ctypes.POINTER(wintypes.FILETIME)
-    open_api = ctypes.CFUNCTYPE(wintypes.HANDLE, wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)(
-        lambda access, inherit, pid: 123
-    )
-    calls = []
-
-    def times(handle: int, created: Any, exited: Any, kernel: Any, user: Any) -> int:
-        kernel.contents.dwLowDateTime = 10000000
-        user.contents.dwLowDateTime = 20000000
-        return 1
-
-    times_api = ctypes.CFUNCTYPE(
-        wintypes.BOOL, wintypes.HANDLE, pointer, pointer, pointer, pointer
-    )(times)
-
-    def closed(handle: int) -> int:
-        calls.append(handle)
-        return 1
-
-    close_api = ctypes.CFUNCTYPE(wintypes.BOOL, wintypes.HANDLE)(closed)
-    functions = {"OpenProcess": open_api, "GetProcessTimes": times_api, "CloseHandle": close_api}
-
-    class FakeLibrary(ctypes.CDLL):
-        def __init__(self, name: str) -> None:
-            pass  # no DLL or native process is loaded
-
-        def __getattr__(self, name: str) -> Any:
-            return functions[name]
-
-    monkeypatch.setattr(platform, "system", lambda: "Windows")
-    monkeypatch.setattr(ctypes, "windll", ctypes.LibraryLoader(FakeLibrary), raising=False)
-    read, close = health._process_clock(123)
-    assert read() == 3.0
-    assert open_api.restype is wintypes.HANDLE
-    assert times_api.argtypes == (wintypes.HANDLE, pointer, pointer, pointer, pointer)
-    close()
-    assert calls == [123]
-    monkeypatch.setattr(ctypes, "windll", None)
-    read, close = health._process_clock(123)
-    assert read() is None
-    close()
+def test_complete_environment_tree_positive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "a.bin").write_bytes(b"abc")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "b.bin").write_bytes(b"12345")
+    (nested / "empty").mkdir()
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    assert _ENVIRONMENT_BYTES() == 8
 
 
-def test_fake_child_timeout_preserves_exception_if_process_retention_fails() -> None:
-    import subprocess
+@pytest.mark.parametrize("kind", ("missing", "file"))
+def test_environment_root_must_be_existing_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    root = tmp_path / kind
+    if kind == "file":
+        root.write_bytes(b"synthetic file-as-root")
+    monkeypatch.setattr(sys, "prefix", str(root))
+    with pytest.raises((FileNotFoundError, ValueError)):
+        _ENVIRONMENT_BYTES()
 
-    class FakeChild:
-        returncode = None
 
-        def communicate(self, data: bytes, timeout: float) -> None:
-            assert data == b"SYNTHETIC" and timeout == 2.0
-            raise subprocess.TimeoutExpired("SYNTHETIC fake child", timeout)
+@pytest.mark.parametrize("where", ("root", "subtree"))
+def test_environment_enumeration_failure_propagates_after_partial_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    (tmp_path / "counted.bin").write_bytes(b"partial bytes cannot certify completeness")
+    (tmp_path / "unreadable").mkdir()
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    initiating = PermissionError("synthetic unreadable " + where)
 
-        def poll(self) -> None:
-            return None
+    def walk(
+        root: Path, *, followlinks: bool, onerror: Callable[[OSError], None]
+    ) -> Iterator[tuple[str, list[str], list[str]]]:
+        assert root == tmp_path and not followlinks
+        if where == "subtree":
+            yield str(root), ["unreadable"], ["counted.bin"]
+        onerror(initiating)
 
-        def kill(self) -> None:
-            self.killed = True
+    monkeypatch.setattr(os, "walk", walk)
+    with pytest.raises(PermissionError) as caught:
+        _ENVIRONMENT_BYTES()
+    assert caught.value is initiating
 
-        def wait(self) -> int:
-            return -9
 
-    child = FakeChild()
+def test_environment_stat_failure_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broken = tmp_path / "unstatable.bin"
+    broken.write_bytes(b"synthetic")
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    original = Path.stat
+    initiating = PermissionError("synthetic file stat failure")
 
-    def retain(cpu: float | None) -> None:
-        raise OSError("synthetic process retention failure")
+    def observed(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
+        if path == broken:
+            raise initiating
+        return original(path, *args, **kwargs)
 
-    with pytest.raises(subprocess.TimeoutExpired):
-        health._communicate(
-            cast(subprocess.Popen[bytes], child), b"SYNTHETIC", 2.0, lambda: 1.0, retain
-        )
-    assert child.killed
+    monkeypatch.setattr(Path, "stat", observed)
+    with pytest.raises(PermissionError) as caught:
+        _ENVIRONMENT_BYTES()
+    assert caught.value is initiating
