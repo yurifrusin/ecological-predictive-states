@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from fractions import Fraction as Q
 from itertools import product
-from typing import Literal
+from typing import Any, Literal
 
 from epsbench.diagnostics.corridor_aperture import BOXES, NAMES, Box, Point, index
 from epsbench.diagnostics.corridor_aperture_camera import camera_map, validate_camera
@@ -55,6 +56,59 @@ class DrawDomain:
     model_zfar: float
     scene_cameras: tuple[SceneCamera, ...]
     draw_boxes: tuple[CompiledBox, ...]
+    model_clip_precision: str = "binary32"
+
+
+MODEL_ZNEAR = Q(5368709, 536870912)
+MODEL_ZFAR = Q(30)
+
+
+def floating_operand(value: object) -> dict[str, Any]:
+    """Raw widened operand and hex, including nonfinite/type rejection facts."""
+    import math
+
+    return {
+        "value": value if type(value) is float and math.isfinite(value) else None,
+        "hex": value.hex() if type(value) is float else None,
+        "type": type(value).__name__,
+    }
+
+
+def clipping_declarations(domain: DrawDomain) -> dict[str, Any]:
+    """Check declarative binary32 realization exactly; never round incoming evidence."""
+    supported = (
+        type(domain.model_clip_precision) is str and domain.model_clip_precision == "binary32"
+    )
+    operands = (domain.model_znear, domain.model_zfar)
+    try:
+        near, far = map(rational, operands)
+        range_valid = 0 < near < far
+    except ValueError:
+        range_valid = False
+    checks = {}
+    for name, actual, expected in zip(
+        ("model_znear", "model_zfar"), operands, (MODEL_ZNEAR, MODEL_ZFAR), strict=True
+    ):
+        try:
+            residual: str | None = str(abs(rational(actual) - expected))
+        except ValueError:
+            residual = None
+        admitted = supported and range_valid and residual == "0"
+        checks[name] = {
+            "observed": floating_operand(actual),
+            "expected": floating_operand(float(expected)),
+            "residual": residual,
+            "budget": "0",
+            "status": "ADMITTED" if admitted else "REJECTED",
+        }
+    return {
+        "precision": domain.model_clip_precision,
+        "range_valid": range_valid,
+        "status": "ADMITTED"
+        if all(c["status"] == "ADMITTED" for c in checks.values())
+        else "REJECTED",
+        "checks": checks,
+    }
 
 
 def rational(value: float) -> Q:
@@ -175,10 +229,8 @@ def domain_boxes(domain: DrawDomain) -> tuple[Box, ...]:
     near, far, extent = map(rational, (domain.near, domain.far, domain.extent))
     if not 0 < near < far or extent <= 0:
         raise ValueError("invalid clipping/extent")
-    if abs(rational(domain.model_znear) - Q(1, 100)) > COORDINATE_TOLERANCE or (
-        abs(rational(domain.model_zfar) - 30) > COORDINATE_TOLERANCE
-    ):
-        raise ValueError("model clipping declaration differs")
+    if clipping_declarations(domain)["status"] != "ADMITTED":
+        raise ValueError("model clipping declaration or binary32 precision differs")
     # SDK draw frusta can store float32 rounded near/far; bounded ratio comparison.
     if abs(near / extent - Q(1, 100)) > PROJECTION_TOLERANCE or (
         abs(far / extent - 30) > PROJECTION_TOLERANCE * 30
@@ -194,6 +246,138 @@ def clip_planes(domain: DrawDomain) -> tuple[Q, Q]:
     if a <= 0 or b <= 0:
         raise ValueError("unsupported reverse-Z projection depth coefficients")
     return b / (a + 1), b / a
+
+
+DEPTH_POLICY = "conditional-binary32-depth-v3"
+ROUNDING_U = Q(1, 2**24)
+ROUNDING_ETA = (1 + ROUNDING_U) ** 2 / (1 - ROUNDING_U) - 1
+
+
+@dataclass(frozen=True)
+class DepthEnvelope:
+    near: Q
+    far: Q
+    a: Q
+    b: Q
+    eps_a: Q
+    eps_b: Q
+    delta_near: Q
+    delta_far: Q
+
+    @property
+    def near_guard(self) -> Q:
+        return max(self.delta_near, PROJECTION_TOLERANCE * self.near)
+
+
+def depth_envelope(domain: DrawDomain) -> DepthEnvelope:
+    """Conditional engineering family, not a measurement of driver arithmetic.
+
+    The conservative exponent window makes sums, differences, 2fn, divisions,
+    cancellation and halving normal finite binary32 under the declared family.
+    """
+    if type(domain.scene_cameras) is not tuple or len(domain.scene_cameras) != 2:
+        raise ValueError("two depth frusta required")
+    values = []
+    for camera in domain.scene_cameras:
+        if type(camera) is not SceneCamera:
+            raise ValueError("typed depth frusta required")
+        pair = tuple(map(rational, (camera.frustum_near, camera.frustum_far)))
+        for value in pair:
+            if not Q(1, 2**30) <= value <= 2**30:
+                raise ValueError("normal finite depth arithmetic exponent window required")
+            if Q.from_float(struct.unpack("<f", struct.pack("<f", float(value)))[0]) != value:
+                raise ValueError("exact widened binary32 depth frusta required")
+        values.append(pair)
+    if values[0] != values[1]:
+        raise ValueError("identical eye depth frusta required")
+    n, f = values[0]
+    if not f > 3 * n:
+        raise ValueError("depth arithmetic Sterbenz domain required")
+    a, b, c = n / (f - n), f * n / (f - n), (f + n) / (f - n)
+    if not 1 <= c * (1 - ROUNDING_ETA) <= c * (1 + ROUNDING_ETA) <= 2:
+        raise ValueError("rounded coefficient Sterbenz range required")
+    eps_a = ROUNDING_ETA * c / 2
+    eps_b = max(ROUNDING_ETA * b, PROJECTION_TOLERANCE * abs(b))
+    if (
+        not eps_a < a
+        or a - eps_a < Q(1, 2**126)
+        or b * (1 - ROUNDING_ETA) < Q(1, 2**126)
+        or b - eps_b < Q(1, 2**126)
+    ):
+        raise ValueError("positive propagated depth denominator required")
+    return DepthEnvelope(
+        n,
+        f,
+        a,
+        b,
+        eps_a,
+        eps_b,
+        (eps_b + n * eps_a) / (1 + a - eps_a),
+        (eps_b + f * eps_a) / (a - eps_a),
+    )
+
+
+def target_depth_margins(domain: DrawDomain, near: Q, far: Q) -> tuple[Q, Q]:
+    target = next((b for b in domain.draw_boxes if b.name == "target"), None)
+    if target is None:
+        raise ValueError("drawn target required for depth clearance")
+    vector(target.position, 3)
+    vector(target.half_size, 3)
+    lo = tuple(
+        rational(c) - rational(h) for c, h in zip(target.position, target.half_size, strict=True)
+    )
+    hi = tuple(
+        rational(c) + rational(h) for c, h in zip(target.position, target.half_size, strict=True)
+    )
+    camera = camera_map(domain.modelview)
+    depths = [
+        -camera.view((corner[0], corner[1], corner[2]))[2]
+        for corner in product(*zip(lo, hi, strict=True))
+    ]
+    return min(depths) - near, far - max(depths)
+
+
+def depth_projection_report(domain: DrawDomain) -> dict[str, Any]:
+    """Compact amended checks retained before any domain validation rejection."""
+    report: dict[str, Any] = {
+        "policy": DEPTH_POLICY,
+        "arithmetic_family": "conditional-normal-binary32",
+        "observed_p10": floating_operand(domain.projection[10]),
+        "observed_p14": floating_operand(domain.projection[14]),
+        "checks": {},
+    }
+    checks = report["checks"]
+
+    def check(name: str, actual: Q, expected: Q, budget: Q, *, clearance: bool = False) -> None:
+        residual = actual if clearance else abs(actual - expected)
+        admitted = residual > budget if clearance else residual <= budget
+        checks[name] = {
+            "actual": str(actual),
+            "expected": str(expected),
+            "residual": str(residual),
+            "budget": str(budget),
+            "comparison": ">" if clearance else "<=",
+            "status": "ADMITTED" if admitted else "REJECTED",
+        }
+
+    try:
+        env = depth_envelope(domain)
+        report["frustum_near"] = str(env.near)
+        report["frustum_far"] = str(env.far)
+        check("p10", rational(domain.projection[10]), env.a, env.eps_a)
+        check("p14", rational(domain.projection[14]), env.b, PROJECTION_TOLERANCE * abs(env.b))
+        pn, pf = clip_planes(domain)
+        check("projected far", pf, env.far, env.delta_far)
+        near_margin, far_margin = target_depth_margins(domain, pn, pf)
+        check("target near margin", near_margin, Q(0), env.near_guard, clearance=True)
+        check("target far margin", far_margin, Q(0), env.delta_far, clearance=True)
+        report["status"] = (
+            "ADMITTED" if all(c["status"] == "ADMITTED" for c in checks.values()) else "REJECTED"
+        )
+    except ValueError as error:
+        report["status"] = "REJECTED"
+        report["reason"] = str(error)
+    return report
 
 
 def validate_frusta(domain: DrawDomain) -> None:
@@ -217,19 +401,22 @@ def validate_frusta(domain: DrawDomain) -> None:
         or (halfwidth <= 0)
     ):
         raise ValueError("unsupported actual draw frustum")
+    env = depth_envelope(domain)
     expected = {0: n / halfwidth, 5: 2 * n / (top - bottom), 10: n / (f - n), 14: f * n / (f - n)}
     for i, value in expected.items():
-        if abs(rational(domain.projection[i]) - value) > PROJECTION_TOLERANCE * abs(value):
+        budget = env.eps_a if i == 10 else PROJECTION_TOLERANCE * abs(value)
+        if abs(rational(domain.projection[i]) - value) > budget:
             raise ValueError("retained projection and actual draw frustum disagree")
     projected_near, projected_far = clip_planes(domain)
     for a, b in (
         (n, rational(domain.near)),
         (f, rational(domain.far)),
         (projected_near, n),
-        (projected_far, f),
     ):
         if abs(a - b) > PROJECTION_TOLERANCE * abs(b):
             raise ValueError("actual frustum/projection/model clipping disagree")
+    if abs(projected_far - f) > env.delta_far:
+        raise ValueError("actual projected far plane outside propagated bound")
 
 
 @dataclass(frozen=True)
@@ -327,6 +514,10 @@ def target_cause(domain: DrawDomain) -> str:
         or not clip_planes(domain)[0] < min(depths) <= max(depths) < clip_planes(domain)[1]
     ):
         raise ValueError("target clipping/frame clearance missing")
+    env = depth_envelope(domain)
+    near_margin, far_margin = target_depth_margins(domain, *clip_planes(domain))
+    if near_margin <= env.near_guard or far_margin <= env.delta_far:
+        raise ValueError("target depth uncertainty clearance missing")
     # Convex half-space separation of every origin-to-target segment.
     if not by_name["floor"].upper[2] < min(origin[2], target.lower[2]) or (
         by_name["left"].upper[0] >= min(origin[0], target.lower[0])

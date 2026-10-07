@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from fractions import Fraction as Q
 from typing import Any
 
-VERSION = "corridor-aperture-box-capability-v2"
+VERSION = "corridor-aperture-box-capability-v3"
 WIDTH, HEIGHT = 128, 96
 POSES = (2, 4, 6)
 ACTIONS = ((2, 0, 0), (2, 0, 0))
@@ -54,6 +54,19 @@ def digest(value: bytes) -> str:
 def configuration() -> dict[str, Any]:
     return {
         "version": VERSION,
+        "model_clipping_declaration_precision": "binary32",
+        "model_clipping_declarations": ["5368709/536870912", "30"],
+        "depth_projection_policy": "conditional-binary32-depth-v3",
+        "depth_arithmetic": "normal-round-to-nearest-binary32-sum-difference-product-division",
+        "depth_operand_window": ["1/1073741824", "1073741824"],
+        "depth_eye_frusta": "identical-near-far-exact-widened-binary32",
+        "depth_normal_endpoints": "A-epsA,B*(1-eta),B-epsB>=2^-126",
+        "depth_sterbenz": "f>3n;1<=C*(1-eta)<=C*(1+eta)<=2",
+        "depth_excluded_arithmetic": "overflow-underflow-flush-to-zero-extra-operations",
+        "depth_eta": "(1+2^-24)^2/(1-2^-24)-1",
+        "depth_p10_allowance": "eta*(f+n)/(2*(f-n))",
+        "depth_p14_propagation": "max(eta*B,existing-relative-p14-budget)",
+        "depth_target_clearance": "strict-max(derived-near,existing-near);strict-derived-far",
         "camera_numerical_policy": "aperture-camera-numerical-v2",
         "camera_compiled_component_allowance": str(64 * Q(1, 2**52)),
         "camera_draw_component_allowance": str(4 * Q(1, 2**23) + 64 * Q(1, 2**52)),
