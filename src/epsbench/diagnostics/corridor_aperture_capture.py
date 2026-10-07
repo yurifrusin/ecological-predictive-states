@@ -10,6 +10,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from enum import StrEnum
+from fractions import Fraction as Q
 from pathlib import Path
 from typing import Any, Protocol, TypeAlias
 
@@ -30,6 +31,12 @@ from epsbench.diagnostics.corridor_aperture import (
     scene_xml,
     validate_mapping,
 )
+from epsbench.diagnostics.corridor_aperture_camera import (
+    NumericalCameraError,
+    camera_map,
+    compiled,
+    validate_camera,
+)
 from epsbench.diagnostics.corridor_aperture_reference import (
     CompiledBox,
     DrawDomain,
@@ -37,7 +44,6 @@ from epsbench.diagnostics.corridor_aperture_reference import (
     clip_planes,
     domain_boxes,
     first_hit,
-    sample_ray,
     target_cause,
 )
 from epsbench.schema import Modality, ModalityPermissionSet
@@ -336,9 +342,13 @@ def evaluate_frame(frame: Frame, permissions: ModalityPermissionSet) -> dict[str
         "other_mismatch": 0,
         "target_support": 0,
     }
+    camera = camera_map(frame.domain.modelview)  # One bounded rational inverse per frame.
+    p = tuple(map(Q.from_float, frame.domain.projection))
     for row in range(HEIGHT):
         for col in range(WIDTH):
-            origin, direction = sample_ray(frame.domain, row, col)
+            origin, direction = camera.ray(
+                Q(2 * col + 1 - WIDTH, WIDTH) / p[0], Q(HEIGHT - 1 - 2 * row, HEIGHT) / p[5]
+            )
             solo = first_hit(origin, direction, target, near, far)
             hit = first_hit(origin, direction, boxes, near, far)
             actual = int(frame.raw_labels[row, col])
@@ -441,6 +451,14 @@ def _camera_record(
     if type(source) is not SourceBinding or source.configuration_root != config_root():
         raise ValueError("exact camera diagnostic source/configuration binding required")
     expected_rotation = CAMERA_ROTATION
+    try:
+        numerical = compiled(position, rotation, POSES[sequence_index]) | {
+            "status": "NUMERICALLY_EQUIVALENT"
+        }
+    except NumericalCameraError as error:
+        numerical = error.report | {"status": "REJECTED", "reason": str(error)}
+    except ValueError as error:
+        numerical = {"status": "STRUCTURAL_REJECTION", "reason": str(error)}
     return encode(
         {
             "validity": "unvalidated_privileged_compiled_camera_pose",
@@ -460,6 +478,7 @@ def _camera_record(
                 "rotation": expected_rotation,
                 "rotation_hex": tuple(v.hex() for v in expected_rotation),
             },
+            "numerical_camera": numerical,
             "component_equal": {
                 "position": tuple(a == b for a, b in zip(position, expected_position, strict=True)),
                 "orientation": tuple(
@@ -834,6 +853,27 @@ class NativeAdapter:
                 ),
                 draw_boxes,
             )
+            # Existing pair_complete retains raw operands; this compact report adds residuals.
+            try:
+                numerical = validate_camera(domain) | {"status": "NUMERICALLY_EQUIVALENT"}
+            except NumericalCameraError as error:
+                numerical = error.report | {"status": "REJECTED", "reason": str(error)}
+            except ValueError as error:
+                numerical = {"status": "STRUCTURAL_REJECTION", "reason": str(error)}
+            numerical |= {
+                "source": asdict(self._source),
+                "configuration_root": config_root(),
+                "sequence_index": sequence_index,
+            }
+            payload = encode(numerical)
+            if len(payload) > CAMERA_RECORD_LIMIT:
+                raise ValueError("numerical camera report exceeds fixed bound")
+            try:
+                self._retain(f"camera-numerical-{sequence_index}.json", payload)
+            except Exception as error:
+                raise RetentionFailure(
+                    "privileged sink failed at numerical camera report"
+                ) from error
             frame = Frame(
                 EvidenceKind.NATIVE,
                 domain,

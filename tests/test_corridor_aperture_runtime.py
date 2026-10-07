@@ -597,3 +597,11 @@ def test_native_capture_retains_camera_operands_before_frame_validation() -> Non
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert calls["_retain_camera_record"] < calls["Frame"] < calls["verify_pair"]
+
+
+def test_historical_v1_configuration_cannot_authorize_successor(facts: dict[str, Any]) -> None:
+    old_root = "663156ee79717d962f0432b63a5037584beaeeacea04c38f5924f48ba3963b53"
+    assert config_root() != old_root
+    binding = facts["binding"] | {"configuration_root": old_root}
+    os.environ["EPS_APERTURE_BINDING"] = encode(binding).decode()
+    assert r.aperture_rejection() == "aperture_configuration_or_image_mismatch"

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from fractions import Fraction as Q
 from typing import Any
 
-VERSION = "corridor-aperture-box-capability-v1"
+VERSION = "corridor-aperture-box-capability-v2"
 WIDTH, HEIGHT = 128, 96
 POSES = (2, 4, 6)
 ACTIONS = ((2, 0, 0), (2, 0, 0))
@@ -54,6 +54,12 @@ def digest(value: bytes) -> str:
 def configuration() -> dict[str, Any]:
     return {
         "version": VERSION,
+        "camera_numerical_policy": "aperture-camera-numerical-v2",
+        "camera_compiled_component_allowance": str(64 * Q(1, 2**52)),
+        "camera_draw_component_allowance": str(4 * Q(1, 2**23) + 64 * Q(1, 2**52)),
+        "camera_position_scale": "max(1,pose_forward_coordinate)",
+        "camera_target_significance_pixels": "1/1024",
+        "camera_ray_domain": "realised_modelview_camera_depth",
         "boxes": [[b.name, list(map(str, b.lower)), list(map(str, b.upper))] for b in BOXES],
         "poses": list(POSES),
         "actions": [list(a) for a in ACTIONS],
