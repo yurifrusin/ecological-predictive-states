@@ -7,7 +7,8 @@ from fractions import Fraction as Q
 from itertools import product
 from typing import Literal
 
-from epsbench.diagnostics.corridor_aperture import BOXES, NAMES, POSES, Box, Point, index
+from epsbench.diagnostics.corridor_aperture import BOXES, NAMES, Box, Point, index
+from epsbench.diagnostics.corridor_aperture_camera import camera_map, validate_camera
 
 COORDINATE_TOLERANCE = Q(1, 10**12)
 PROJECTION_TOLERANCE = Q(1, 500000)
@@ -147,26 +148,11 @@ def domain_boxes(domain: DrawDomain) -> tuple[Box, ...]:
         if any(a >= b for a, b in zip(lo, hi, strict=True)):
             raise ValueError("drawn solid has nonpositive thickness")
         drawn.append(Box(actual.name, lo, hi))  # type: ignore[arg-type]
-    q = POSES[domain.sequence_index]
     vector(domain.camera_position, 3)
     vector(domain.camera_rotation, 9)
     vector(domain.modelview, 16)
     vector(domain.projection, 16)
-    if domain.camera_position != (0.0, float(q), 1.0) or domain.camera_rotation != (
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        -1.0,
-        0.0,
-        1.0,
-        0.0,
-    ):
-        # MuJoCo camera columns are right, up, backward in world coordinates.
-        raise ValueError("compiled fixed camera pose differs")
-    if domain.modelview != modelview(q):
-        raise ValueError("actual draw modelview differs from fixed camera")
+    validate_camera(domain)
     if len(domain.projection) != 16:
         raise ValueError("complete retained projection required")
     p = tuple(map(rational, domain.projection))
@@ -213,35 +199,11 @@ def clip_planes(domain: DrawDomain) -> tuple[Q, Q]:
 def validate_frusta(domain: DrawDomain) -> None:
     if type(domain.scene_cameras) is not tuple or len(domain.scene_cameras) != 2:
         raise ValueError("two retained native scene cameras required")
-    q = POSES[domain.sequence_index]
-    for cam in domain.scene_cameras:
-        if (
-            type(cam) is not SceneCamera
-            or type(cam.orthographic) is not int
-            or (
-                cam.orthographic != 0 or cam.forward != (0.0, 1.0, 0.0) or cam.up != (0.0, 0.0, 1.0)
-            )
-        ):
-            raise ValueError("fixed perspective scene-camera basis required")
-        vector(cam.pos, 3)
-        vector(cam.forward, 3)
-        vector(cam.up, 3)
-        if (
-            len(cam.pos) != 3
-            or any(type(v) is not float for v in cam.pos)
-            or (abs(rational(cam.pos[0])) > Q(1, 10) or cam.pos[1:] != (float(q), 1.0))
-        ):
-            raise ValueError("bounded native eye position differs")
 
     # Pinned SDK setView uses mjv_averageCamera for mono, then viewport aspect.
     def mean(name: str) -> Q:
         return sum((rational(getattr(c, name)) for c in domain.scene_cameras), Q(0)) / 2
 
-    average_pos = tuple(
-        sum((rational(c.pos[i]) for c in domain.scene_cameras), Q(0)) / 2 for i in range(3)
-    )
-    if average_pos != (Q(0), Q(q), Q(1)):
-        raise ValueError("native mono average differs from fixed modelview")
     n, f = mean("frustum_near"), mean("frustum_far")
     top, bottom = mean("frustum_top"), mean("frustum_bottom")
     halfwidth = mean("frustum_width")
@@ -279,7 +241,15 @@ class Hit:
 
 def first_hit(origin: Point, direction: Point, boxes: tuple[Box, ...], near: Q, far: Q) -> Hit:
     """Enumerate all six face planes independently; no slab intersection reuse."""
-    if not (0 < near < far) or direction[1] != 1:
+    if (
+        not (0 < near < far)
+        or type(origin) is not tuple
+        or type(direction) is not tuple
+        or len(origin) != 3
+        or len(direction) != 3
+        or any(type(v) is not Q for v in (*origin, *direction))
+        or not any(direction)
+    ):
         raise ValueError("positive forward-depth ray/clipping required")
     candidates: list[tuple[Q, str, bool]] = []
     for b in boxes:
@@ -318,9 +288,9 @@ def sample_ray(domain: DrawDomain, row: int, column: int) -> tuple[Point, Point]
     ):
         raise ValueError("fixed raster sample index required")
     p = tuple(map(rational, domain.projection))
-    origin: Point = (Q(0), Q(POSES[domain.sequence_index]), Q(1))
-    direction: Point = (Q(2 * column + 1 - 128, 128) / p[0], Q(1), Q(95 - 2 * row, 96) / p[5])
-    return origin, direction
+    return camera_map(domain.modelview).ray(
+        Q(2 * column + 1 - 128, 128) / p[0], Q(95 - 2 * row, 96) / p[5]
+    )
 
 
 def target_cause(domain: DrawDomain) -> str:
@@ -331,18 +301,25 @@ def target_cause(domain: DrawDomain) -> str:
     walls = boxes[3:8]
     if len({(b.lower[0], b.upper[0]) for b in walls}) != 1:
         raise ValueError("right slab planes disagree")
-    q = Q(POSES[domain.sequence_index])
+    camera = camera_map(domain.modelview)
+    origin = camera.origin
     ys, zs, horizontal, vertical, depths = [], [], [], [], []
     for x, y, z in product(*zip(target.lower, target.upper, strict=True)):
-        depth = y - q
+        view = camera.view((x, y, z))
+        depth = -view[2]
         depths.append(depth)
         if depth <= 0:
             raise ValueError("target not wholly ahead")
-        horizontal.append(x / depth)
-        vertical.append((z - 1) / depth)
+        horizontal.append(view[0] / depth)
+        vertical.append(view[1] / depth)
         for b in (walls[0].lower[0], walls[0].upper[0]):
-            ys.append(q + b / x * depth)
-            zs.append(1 + b / x * (z - 1))
+            if x <= origin[0]:
+                raise ValueError("positive target/slab denominator required")
+            fraction = (b - origin[0]) / (x - origin[0])
+            if not 0 < fraction < 1:
+                raise ValueError("camera/slab/target ordering clearance missing")
+            ys.append(origin[1] + fraction * (y - origin[1]))
+            zs.append(origin[2] + fraction * (z - origin[2]))
     p = tuple(map(rational, domain.projection))
     if (
         max(abs(x * p[0]) for x in horizontal) >= 1
@@ -350,8 +327,10 @@ def target_cause(domain: DrawDomain) -> str:
         or not clip_planes(domain)[0] < min(depths) <= max(depths) < clip_planes(domain)[1]
     ):
         raise ValueError("target clipping/frame clearance missing")
-    if not by_name["floor"].upper[2] < target.lower[2] or (
-        by_name["left"].upper[0] >= 0 or target.upper[1] >= by_name["end"].lower[1]
+    # Convex half-space separation of every origin-to-target segment.
+    if not by_name["floor"].upper[2] < min(origin[2], target.lower[2]) or (
+        by_name["left"].upper[0] >= min(origin[0], target.lower[0])
+        or max(origin[1], target.upper[1]) >= by_name["end"].lower[1]
     ):
         raise ValueError("competing blocker clearance missing")
     if not by_name["right_bottom"].upper[2] < min(zs) <= max(zs) < (by_name["right_top"].lower[2]):

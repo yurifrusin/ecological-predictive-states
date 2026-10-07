@@ -197,9 +197,9 @@ def test_malformed_calibration_denies(field: str, value: Any) -> None:
         target_cause(replace(domain(0), **{field: value}))
 
 
-def test_exact_camera_mismatch_is_retained_before_validator_rejects() -> None:
+def test_material_camera_mismatch_is_retained_before_validator_rejects() -> None:
     source = SourceBinding("a" * 40, "b" * 40, config_root())
-    observed = (0.0, 2.0000000000000004, 1.0)
+    observed = (0.0, 2.00000001, 1.0)
     payload = _camera_record(0, observed, CAM_ROT, source, "mujoco:fake-3.12.0")
     retained: list[tuple[str, bytes]] = []
     _retain_camera_record(lambda name, data: retained.append((name, data)), payload, 0)
@@ -208,7 +208,7 @@ def test_exact_camera_mismatch_is_retained_before_validator_rejects() -> None:
     record = json.loads(payload)
     assert record["observed"]["position_hex"][1] == observed[1].hex()
     assert record["component_equal"]["position"] == [True, False, True]
-    with pytest.raises(ValueError, match="compiled fixed camera pose differs"):
+    with pytest.raises(ValueError, match="compiled position outside"):
         domain_boxes(replace(domain(0), camera_position=observed))
 
 
