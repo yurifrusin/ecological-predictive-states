@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from fractions import Fraction
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -540,3 +540,226 @@ def test_hand_derived_reset_after_gru_and_adam_numerics() -> None:
     assert torch.allclose(fresh.weight("encoder/layer1/W"), expected, atol=1e-7, rtol=0)
     assert adam.k == 1
     assert all(p.grad is None for p in fresh.parameters())
+
+
+def test_portable_memory_capability_missing_and_fake_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ctypes
+    import platform
+
+    from epsbench.diagnostics import restricted_model_resources as resources
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    assert resources.observed_peak_bytes() is None
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(ctypes, "windll", None, raising=False)
+    assert resources.observed_peak_bytes() is None
+    current = ctypes.CFUNCTYPE(ctypes.c_void_p)(lambda: 123)
+    api = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong)(
+        lambda h, p, n: 0
+    )
+
+    class FakeLibrary(ctypes.CDLL):
+        GetCurrentProcess = current
+        GetProcessMemoryInfo = api
+
+        def __init__(self, name: str) -> None:
+            pass
+
+    loader = ctypes.LibraryLoader(FakeLibrary)
+    monkeypatch.setattr(ctypes, "windll", loader, raising=False)
+    assert resources.observed_peak_bytes() is None
+    assert current.restype is ctypes.wintypes.HANDLE
+    assert current.argtypes == ()
+    assert api.argtypes[0] is ctypes.wintypes.HANDLE
+    assert len(api.argtypes) == 3
+
+    class FakeCounters(ctypes.Structure):
+        cb: int
+        peak_working: int
+        _fields_ = [("cb", ctypes.wintypes.DWORD), ("faults", ctypes.wintypes.DWORD)] + [
+            (name, ctypes.c_size_t)
+            for name in (
+                "peak_working",
+                "working",
+                "peak_paged",
+                "paged",
+                "peak_nonpaged",
+                "nonpaged",
+                "pagefile",
+                "peak_pagefile",
+            )
+        ]
+
+    def fill(h: int, p: int, n: int) -> int:
+        memory = ctypes.cast(p, ctypes.POINTER(FakeCounters)).contents
+        assert memory.cb == n
+        memory.peak_working = 123456
+        return 1
+
+    successful = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong)(
+        fill
+    )
+    FakeLibrary.GetProcessMemoryInfo = successful
+    assert resources.observed_peak_bytes() == 123456
+
+
+def test_fit_setup_clocks_include_both_constructors(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    from epsbench.diagnostics import restricted_model_training as training
+
+    clocks = [100.0, 200.0]
+    monkeypatch.setattr(time, "process_time", lambda: clocks[0])
+    monkeypatch.setattr(time, "monotonic", lambda: clocks[1])
+
+    def model(condition: str, seed: int) -> object:
+        clocks[0] += 5.0
+        clocks[1] += 7.0
+        return object()
+
+    def adam(value: object) -> object:
+        clocks[0] += 3.0
+        clocks[1] += 4.0
+        return object()
+
+    monkeypatch.setattr(training, "RestrictedModel", model)
+    monkeypatch.setattr(training, "Adam", adam)
+    monkeypatch.setattr(training, "provenance", lambda: {})
+    _, _, _, _, cpu, wall = training._fit_setup("relational", 17)
+    assert (cpu, wall) == (100.0, 200.0)
+    assert (clocks[0] - cpu, clocks[1] - wall) == (8.0, 11.0)
+
+
+def test_required_scalar_derivation_and_matching_totals() -> None:
+    from epsbench.diagnostics.restricted_model_resources import matching_totals, scalar_work
+
+    for condition in ("relational", "action-zero", "memory-reset"):
+        measured = scalar_work(condition, 1, 1)
+        # Hand count: three p/2 divides + two (zero-start three-add sums +divide),
+        # repeated six streams/three observations; Adam2pow+2sub each38 tensors.
+        assert measured == {
+            "python_scalar_forward_units": 6 * 3 * (3 + 2 * (3 + 1)),
+            "python_scalar_adam_bias_correction_units": 38 * 4,
+            "python_scalar_adam_step_units": 1,
+        }
+        forward, total = matching_totals(
+            {
+                "trace": {"work": {"forward": 1000, "backward": 2000, "adam": 3000, "loss": 40}},
+                **measured,
+            }
+        )
+        assert (forward, total) == (1198, 6040 + 198 + 152 + 1)
+    dense = scalar_work("dense", 16000, 1000)
+    assert dense == {
+        "python_scalar_forward_units": 0,
+        "python_scalar_adam_bias_correction_units": 80000,
+        "python_scalar_adam_step_units": 1000,
+    }
+    with pytest.raises(ValueError):
+        scalar_work("unknown", 1, 1)
+    with pytest.raises(ValueError):
+        scalar_work("relational", True, 1)
+
+
+def test_full_synthetic_measurement_requires_known_scalar_work() -> None:
+    from copy import deepcopy
+
+    from epsbench.diagnostics.restricted_model_resources import (
+        SCALAR_CONVENTION,
+        scalar_work,
+        valid_measurement,
+    )
+
+    # A hand-built SYNTHETIC_SOURCE_ONLY schema witness, never an actual fit receipt.
+    n = 99913
+    report: dict[str, Any] = {
+        "fit": "16/init-0/relational",
+        "model_source": {"head": "a" * 40, "tree": "b" * 40, "launch": "c" * 64},
+        **{
+            k: "0" * 64
+            for k in ("initialization", "labels", "order", "schedule", "data", "checkpoint")
+        },
+        "optimizer": {
+            "name": "Adam",
+            "lr": 0.001,
+            "beta1": 0.9,
+            "beta2": 0.999,
+            "epsilon": 1e-8,
+            "weight_decay": 0,
+            "clipping": False,
+            "amsgrad": False,
+            "dtype": "float32",
+        },
+        "trace": {
+            "convention": "executed-dispatch-v1; nonlinear unit; not CPU instructions",
+            "unclassified": {},
+            "work": {"forward": 1000000, "backward": 2000000, "adam": 3000000, "loss": 40},
+            "arithmetic_by_operator": {
+                "forward:synthetic": 1000000,
+                "backward:synthetic": 2000000,
+                "adam:synthetic": 3000000,
+                "loss:synthetic": 40,
+            },
+            "operators": {"forward:aten.mv.default": 534 * 16000, "adam:aten.sub_.Tensor": 38000},
+        },
+        "used_parameters": n,
+        "parameter_bytes": n * 4,
+        "gradient_bytes": n * 4,
+        "adam_moment_bytes": n * 8,
+        "gradient_connected": True,
+        "state_floats": 384,
+        "recurrent_bytes": 1536,
+        "streams": 6,
+        "updates": 1000,
+        "batch": 16,
+        "trainer_batch_examples": 16,
+        "prediction_values": 3,
+        "shared_encoder": True,
+        "saved_activation_bytes_cumulative_not_peak": 1000,
+        "saved_activation_peak_conservative_bytes": 100,
+        "buffers": {
+            "current_mask_bytes": 12288,
+            "shared_features_bytes": 192,
+            "current_boundary_bytes": 48,
+            "flags_bytes": 24,
+            "commands_bytes": 24,
+            "candidate_context_bytes": 4240,
+            "prediction_bytes": 12,
+            "batch_examples": 16,
+            "schedule_index_bytes": 128000,
+            "lawful_material_mask_bytes": 128,
+        },
+        "observed_mask_encodings": 0,
+        "provenance": {
+            "threads": 1,
+            "interop_threads": 1,
+            "deterministic": True,
+            "device": "cpu",
+            "cuda": None,
+            **{
+                k: "SYNTHETIC_SOURCE_ONLY"
+                for k in ("cpu", "os", "python", "framework", "runtime_blas")
+            },
+        },
+        "memory_peak": 100000,
+        "memory_complete": True,
+        "elapsed_cpu": 1.0,
+        "elapsed_wall": 1.0,
+        **scalar_work("relational", 16000, 1000),
+        "python_scalar_scope": SCALAR_CONVENTION,
+    }
+    assert valid_measurement(report)  # schema/accounting only, never actual evidence acceptance
+    for field in scalar_work("relational", 16000, 1000):
+        missing = deepcopy(report)
+        del missing[field]
+        assert not valid_measurement(missing)
+        wrong = deepcopy(report)
+        wrong[field] += 1
+        assert not valid_measurement(wrong)
+        wrong[field] = True
+        assert not valid_measurement(wrong)
+    wrong = deepcopy(report)
+    wrong["python_scalar_scope"] = "unknown power accounting"
+    assert not valid_measurement(wrong)

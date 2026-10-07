@@ -22,9 +22,11 @@ from epsbench.diagnostics.restricted_learning_membership import INIT_DOMAIN
 from epsbench.diagnostics.restricted_learning_sampling import commitment
 from epsbench.diagnostics.restricted_model_export import Example, TrainingMaterial
 from epsbench.diagnostics.restricted_model_resources import (
+    SCALAR_CONVENTION,
     WorkTrace,
     observed_peak_bytes,
     provenance,
+    scalar_work,
 )
 from epsbench.diagnostics.restricted_models import RestrictedModel
 from epsbench.diagnostics.visible_forecast_contract import _json, _keys
@@ -262,6 +264,15 @@ def restore(data: bytes, model: RestrictedModel, expected: dict[str, Any]) -> No
             p.copy_(tensor)
 
 
+def _fit_setup(
+    condition: str, seed: int
+) -> tuple[RestrictedModel, Adam, WorkTrace, dict[str, Any], float, float]:
+    started_cpu, started_wall = time.process_time(), time.monotonic()
+    model = RestrictedModel(condition, seed)
+    adam = Adam(model)
+    return model, adam, WorkTrace(), provenance(), started_cpu, started_wall
+
+
 def train(
     material: TrainingMaterial, fit: Fit, source: ModelSource
 ) -> tuple[bytes, dict[str, Any]]:
@@ -277,11 +288,7 @@ def train(
     if torch.get_num_threads() != 1 or not torch.are_deterministic_algorithms_enabled():
         raise PermissionError("recorded deterministic single-thread CPU runtime required")
     seed = material.initialization_values[int(fit.initialization[-1])]
-    model = RestrictedModel(fit.condition, seed)
-    adam = Adam(model)
-    trace = WorkTrace()
-    runtime = provenance()
-    started_cpu, started_wall = time.process_time(), time.monotonic()
+    model, adam, trace, runtime, started_cpu, started_wall = _fit_setup(fit.condition, seed)
     saved_bytes = 0
     batch_saved_bytes = 0
     peak_saved_upperbound = 0
@@ -315,11 +322,8 @@ def train(
         "initialization": commitment(INIT_DOMAIN, seed.to_bytes(8, "little")),
         "labels": material.labels_root,
         "order": digest(canonical_json_bytes(list(material.order))),
-        "python_scalar_adam_bias_correction_units": 1000 * 4 * len(tuple(model.parameters())),
-        "python_scalar_scope": (
-            "bias correction powers/subtractions only; bookkeeping/initializer excluded; "
-            "included in elapsed CPU/wall"
-        ),
+        **scalar_work(fit.condition, len(material.order), adam.k),
+        "python_scalar_scope": SCALAR_CONVENTION,
         "optimizer": {
             "name": "Adam",
             "lr": 0.001,

@@ -43,9 +43,17 @@ structured reports. Both families use exactly the same sanitized schedules.
 Resource accounting traces executed tensor forward/backward/loss/Adam operators.
 Named nonlinear evaluations are unit operations under the frozen arithmetic
 convention, not machine instructions. Structural operations and unclassified work
-are retained; unknown required work/provenance fails matching. Python scalar
-bookkeeping and initialization are excluded from tensor counts but included in CPU
-and wall time; Adam bias-correction scalar units are separately reported. Forward
+are retained; unknown required work/provenance fails matching. Known Python
+predictor/Adam scalar arithmetic is required, validated and included
+in forward/full-training matching alongside the tensor breakdown: candidate families
+charge198 normalization/summary operations per three-observation example; dense has
+none of these scalar summaries. Each Adam parameter tensor charges two power calls
+(named proxy units) and two subtractions per update. One step-index increment is
+charged per update.
+Bookkeeping and initialization are excluded from arithmetic counts but included in
+inclusive fit CPU/wall clocks starting before model and optimizer construction.
+Whole-launch supervision must additionally cover module startup/export/forecasts/
+scoring and retained failure/output overhead. Forward
 and total forward+backward+loss+Adam each require <=10% matching; phase breakdowns
 have no additional tolerance. Reports include buffers, saved-activation conservative
 bounds, process-lifetime peak working set when honestly available, and cumulative

@@ -177,13 +177,44 @@ def observed_peak_bytes() -> int | None:
 
     counters = Counters()
     counters.cb = ctypes.sizeof(counters)
-    current = ctypes.windll.kernel32.GetCurrentProcess
+    loader = getattr(ctypes, "windll", None)
+    if not isinstance(loader, ctypes.LibraryLoader):
+        return None
+    try:
+        current = loader.LoadLibrary("kernel32").GetCurrentProcess
+        api = loader.LoadLibrary("psapi").GetProcessMemoryInfo
+    except (AttributeError, OSError):
+        return None
     current.restype = wintypes.HANDLE
-    api = ctypes.windll.psapi.GetProcessMemoryInfo
+    current.argtypes = ()
     api.argtypes = (wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD)
     if not api(current(), ctypes.byref(counters), counters.cb):
         return None
     return int(counters.peak_working)
+
+
+SCALAR_CONVENTION = "model-normalization-and-Adam-v1; arithmetic and named power units"
+
+
+def scalar_work(condition: str, examples: int, updates: int) -> dict[str, int]:
+    from epsbench.diagnostics.restricted_learning_contract import CONDITIONS
+
+    if (
+        condition not in CONDITIONS
+        or type(examples) is not int
+        or type(updates) is not int
+        or examples < 0
+        or updates < 0
+    ):
+        raise ValueError("known condition and nonnegative integer execution counts required")
+    # Per stream/step: three p/2 divisions; two sum(3 terms, starting0)/3 (4 each).
+    candidate_forward = 6 * 3 * (3 + 2 * (3 + 1))
+    tensors = 20 if condition == "dense" else 38
+    return {
+        "python_scalar_forward_units": 0 if condition == "dense" else candidate_forward * examples,
+        "python_scalar_adam_bias_correction_units": updates * tensors * 2 * (1 + 1),
+        "python_scalar_adam_step_units": updates,
+    }
 
 
 def valid_measurement(record: dict[str, Any]) -> bool:
@@ -224,6 +255,10 @@ def valid_measurement(record: dict[str, Any]) -> bool:
             "provenance",
             "memory_peak",
             "memory_complete",
+            "python_scalar_forward_units",
+            "python_scalar_adam_bias_correction_units",
+            "python_scalar_adam_step_units",
+            "python_scalar_scope",
             "elapsed_cpu",
             "elapsed_wall",
         }
@@ -235,6 +270,12 @@ def valid_measurement(record: dict[str, Any]) -> bool:
         budget, initialization, condition = record["fit"].split("/")
         fit = Fit(int(budget), initialization, condition)
         ModelSource(**record["model_source"])
+        expected_scalars = scalar_work(condition, 16000, 1000)
+        if record["python_scalar_scope"] != SCALAR_CONVENTION or any(
+            type(record[k]) is not int or record[k] != value
+            for k, value in expected_scalars.items()
+        ):
+            return False
         for name in ("initialization", "labels", "order", "schedule", "data", "checkpoint"):
             sha(record[name])
         expected = 99984 if fit.condition == "dense" else 99913
@@ -352,6 +393,20 @@ def valid_measurement(record: dict[str, Any]) -> bool:
         return False
 
 
+def matching_totals(record: dict[str, Any]) -> tuple[int, int]:
+    forward = int(record["trace"]["work"]["forward"] + record["python_scalar_forward_units"])
+    total = sum(int(record["trace"]["work"][p]) for p in ("forward", "backward", "adam", "loss"))
+    total += sum(
+        int(record[k])
+        for k in (
+            "python_scalar_forward_units",
+            "python_scalar_adam_bias_correction_units",
+            "python_scalar_adam_step_units",
+        )
+    )
+    return forward, total
+
+
 def matched_reports(left: dict[str, Any], right: dict[str, Any]) -> str:
     if not valid_measurement(left) or not valid_measurement(right):
         return "INCONCLUSIVE"
@@ -388,12 +443,8 @@ def matched_reports(left: dict[str, Any], right: dict[str, Any]) -> str:
         )
         if any(left["provenance"][k] != right["provenance"][k] for k in keys):
             return "INCONCLUSIVE"
-    a, b = left["trace"]["work"]["forward"], right["trace"]["work"]["forward"]
-    phases = ("forward", "backward", "adam", "loss")
-    x, y = (
-        sum(left["trace"]["work"][p] for p in phases),
-        sum(right["trace"]["work"][p] for p in phases),
-    )
+    a, x = matching_totals(left)
+    b, y = matching_totals(right)
     if max(a, b) / min(a, b) > 1.1 or max(x, y) / min(x, y) > 1.1:
         return "INCONCLUSIVE"
     return "MATCHED_OBSERVED_DISPATCH_ONLY"
