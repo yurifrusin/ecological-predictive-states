@@ -282,3 +282,55 @@ def test_canonical_tensor_decode_and_terminal_reservation(tmp_path: Path) -> Non
     sink.write("terminal.json", b"{}", terminal=True)
     assert (sink.root / "terminal.json").read_bytes() == b"{}"
     assert not (sink.root / "ordinary.json").exists()
+
+
+@pytest.mark.parametrize("criterion", ["PASS", "NO_GO"])
+@pytest.mark.parametrize("failure", ["none", "late", "resource", "write"])
+def test_public_closure_fake_retention(criterion: str, failure: str) -> None:
+    now = [59.0]
+    saved: list[bytes] = []
+
+    def retain(raw: bytes) -> None:
+        saved.append(raw)
+        if failure == "write":
+            raise OSError("fake terminal retention failed")
+        if failure == "late":
+            now[0] = 61.0
+
+    local = {"status": criterion, "updates": 200, "local_criterion": criterion}
+    closed = t.close_readiness(
+        local,
+        retain,
+        0.0,
+        clock=lambda: now[0],
+        measure=lambda: (1 << 30) + 1 if failure == "resource" else 123,
+    )
+    assert local == {"status": criterion, "updates": 200, "local_criterion": criterion}
+    assert closed["status"] == (criterion if failure == "none" else "INCONCLUSIVE")
+    assert closed["local_criterion"] == criterion
+    assert closed["operation_artifact_retained"] is (failure != "write")
+    assert closed["record_kind"] == "EXTERNAL_CLOSURE_RECEIPT"
+    provisional = json.loads(saved[0])
+    assert provisional["status"] == "PROVISIONAL_LOCAL_ONLY"
+    assert provisional["requires_external_closure_receipt"] is True
+    assert provisional["local_criterion"] == criterion
+    if failure != "none":
+        assert closed["first_failure"] == closed["closure_failure"]
+
+
+def test_closure_preserves_first_failure_and_missing_measurement() -> None:
+    original = {"type": "OSError", "message": "earlier partial retention"}
+
+    def unavailable() -> int:
+        raise OSError("measurement unavailable")
+
+    closed = t.close_readiness(
+        {"status": "INCONCLUSIVE", "local_criterion": "PASS", "first_failure": original},
+        lambda raw: None,
+        0.0,
+        clock=lambda: 61.0,
+        measure=unavailable,
+    )
+    assert closed["first_failure"] == original
+    assert closed["status"] == "INCONCLUSIVE" and closed["local_criterion"] == "PASS"
+    assert closed["closure_failure"]["message"] == "measurement unavailable"

@@ -107,7 +107,15 @@ headers/wrappers. Actual inclusive accounting remains the admitted driver's duty
 Measured peak working set must remain ≤1GiB. Deadlines/resources are cooperative,
 not a hard aggregate host guarantee. All setup, retention and binding failures are
 INCONCLUSIVE; typed fitted nonfinite arithmetic or a complete intact 200-step
-nonzero-error result is NO_GO. No rescue/tuning/retry is authorized.
+nonzero-error result is NO_GO. `terminal.json` is explicitly provisional local evidence;
+its local criterion alone cannot qualify readiness. After its durable write,
+`close_readiness` measures/checks wall time and peak working set. Late, failed or
+resource-invalid closure returns current INCONCLUSIVE while preserving local
+PASS/NO_GO and first failure. The separately admitted runner must persist that
+returned external closure receipt and complete actual inclusive accounting;
+failed receipt persistence cannot qualify. Receipt publication overhead is
+observed/accounted separately, without recursive receipts or a new controller.
+No rescue/tuning/retry is authorized.
 
 The sampler defines prospective domain-separated unbiased 2^-32 lattice membership,
 split grouping and closed-geometry collision rejection. Its local raw/audit receipt

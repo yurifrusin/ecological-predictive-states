@@ -259,9 +259,9 @@ def fit_comparative(
 
 def memory_check() -> int:
     """Measure this process peak working set; cooperative, not host enforcement."""
-    import os
+    import sys
 
-    if os.name == "nt":
+    if sys.platform == "win32":
         import ctypes
         from ctypes import wintypes
 
@@ -290,9 +290,8 @@ def memory_check() -> int:
         peak = int(info.peak)
     else:
         import resource
-        import sys
 
-        peak = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)  # type: ignore[attr-defined]
+        peak = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
         if sys.platform != "darwin":
             peak *= 1024
     if peak > 1 << 30:
@@ -336,6 +335,47 @@ class _Retained:
         return self.snapshot
 
 
+def close_readiness(
+    local: dict[str, Any],
+    retain_terminal: Callable[[bytes], None],
+    start: float,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    measure: Callable[[], int] = memory_check,
+) -> dict[str, Any]:
+    """Close operation artifacts, then return an externally retained closure receipt.
+
+    terminal.json is explicitly provisional local evidence. The admitted runner
+    must persist this returned receipt and actual inclusive accounting to qualify
+    an operation; receipt publication overhead is observed separately, not recursed.
+    Fake retention/time/resource callbacks exercise this helper without any fit.
+    """
+    result = dict(local)
+    result["local_criterion"] = local.get("local_criterion", local["status"])
+    result["operation_artifact_retained"] = False
+    provisional = dict(result)
+    provisional["status"] = "PROVISIONAL_LOCAL_ONLY"
+    provisional["requires_external_closure_receipt"] = True
+    try:
+        retain_terminal(canonical_json_bytes(provisional))
+        result["operation_artifact_retained"] = True
+        peak = measure()
+        result["peak_working_set"] = max(result.get("peak_working_set", 0), peak)
+        if peak > 1 << 30:
+            raise MemoryError("restricted process working-set budget at closure")
+        result["wall_seconds"] = clock() - start
+        if result["wall_seconds"] > 60:
+            raise TimeoutError("public readiness wall deadline after terminal retention")
+    except Exception as exc:
+        result["status"] = "INCONCLUSIVE"
+        failure = {"type": type(exc).__name__, "message": str(exc)}
+        result["closure_failure"] = failure
+        result.setdefault("first_failure", failure)
+        result["wall_seconds"] = clock() - start
+    result["record_kind"] = "EXTERNAL_CLOSURE_RECEIPT"
+    return result
+
+
 def public_readiness(arm: Arm, source_head: str, output: Path) -> dict[str, Any]:
     """ONE later-admitted operation per arm, exclusive output; CI must deny this entry.
 
@@ -349,7 +389,12 @@ def public_readiness(arm: Arm, source_head: str, output: Path) -> dict[str, Any]
     start = time.monotonic()
     cpu_start = time.process_time()
     fitting_started = False
-    result: dict[str, Any] = {"arm": arm, "status": "INCONCLUSIVE", "updates": 0}
+    result: dict[str, Any] = {
+        "arm": arm,
+        "status": "INCONCLUSIVE",
+        "local_criterion": "UNRESOLVED",
+        "updates": 0,
+    }
 
     def check() -> None:
         result["peak_working_set"] = max(result.get("peak_working_set", 0), memory_check())
@@ -418,11 +463,13 @@ def public_readiness(arm: Arm, source_head: str, output: Path) -> dict[str, Any]
                 ),
             )
             if not any(errors):
+                result["local_criterion"] = "PASS"
                 sink.write("checkpoint.json", checkpoint(reader, opt))
                 check()
                 result["status"] = "PASS"
                 break
         else:
+            result["local_criterion"] = "NO_GO"
             sink.write("checkpoint.json", checkpoint(reader, opt))
             check()
             result["status"] = "NO_GO"
@@ -430,9 +477,15 @@ def public_readiness(arm: Arm, source_head: str, output: Path) -> dict[str, Any]
         result["status"] = (
             "NO_GO" if fitting_started and isinstance(exc, ArithmeticFailure) else "INCONCLUSIVE"
         )
+        if result["status"] == "NO_GO":
+            result["local_criterion"] = "NO_GO"
         result["first_failure"] = {"type": type(exc).__name__, "message": str(exc)}
     result["cpu_seconds"] = time.process_time() - cpu_start
     result["wall_seconds"] = time.monotonic() - start
     result["retained_bytes_before_terminal"] = sink.count
-    sink.write("terminal.json", canonical_json_bytes(result), terminal=True)
-    return result
+    closed = close_readiness(
+        result, lambda raw: sink.write("terminal.json", raw, terminal=True), start
+    )
+    closed["retained_bytes"] = sink.count
+    closed["cpu_seconds"] = time.process_time() - cpu_start
+    return closed
