@@ -32,7 +32,12 @@ LIMIT = 32 * 1024 * 1024
 REVIEW_RESERVE = 8 * 1024 * 1024
 PROCESS_LIMIT = 1024**3
 ENVIRONMENT_LIMIT = 2 * 1024**3
-SOURCE_FILES = (*shared.SOURCE_FILES, "src/epsbench/diagnostics/finite_mask_motion.py")
+SOURCE_FILES = (
+    *shared.SOURCE_FILES,
+    "src/epsbench/diagnostics/finite_mask_motion.py",
+    "src/epsbench/appearance.py",
+    "src/epsbench/utils/seeding.py",
+)
 
 
 def action(step: Q) -> Action:
