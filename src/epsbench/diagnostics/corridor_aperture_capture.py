@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import re
 import subprocess
 from collections.abc import Callable
@@ -413,6 +414,160 @@ class RetentionFailure(RuntimeError):
     """A supplied sink failed; the original exception remains the cause."""
 
 
+CAMERA_ROTATION = (1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0)
+CAMERA_RECORD_LIMIT = 32 * 1024
+
+
+def _camera_record(
+    sequence_index: int,
+    position: tuple[float, ...],
+    rotation: tuple[float, ...],
+    source: SourceBinding,
+    dependency: str,
+) -> bytes:
+    """Privileged, unvalidated exact compiled-pose operands, retained before validation."""
+    index(sequence_index)
+    expected_position = (0.0, float(POSES[sequence_index]), 1.0)
+    if (
+        type(position) is not tuple
+        or len(position) != 3
+        or type(rotation) is not tuple
+        or len(rotation) != 9
+        or any(type(v) is not float or not math.isfinite(v) for v in (*position, *rotation))
+    ):
+        raise ValueError("finite compiled camera operands required")
+    if type(dependency) is not str or not dependency or len(dependency) > 128:
+        raise ValueError("bounded camera diagnostic dependency identity required")
+    if type(source) is not SourceBinding or source.configuration_root != config_root():
+        raise ValueError("exact camera diagnostic source/configuration binding required")
+    expected_rotation = CAMERA_ROTATION
+    return encode(
+        {
+            "validity": "unvalidated_privileged_compiled_camera_pose",
+            "source": asdict(source),
+            "configuration_root": config_root(),
+            "dependency": dependency,
+            "sequence_index": sequence_index,
+            "observed": {
+                "position": position,
+                "position_hex": tuple(v.hex() for v in position),
+                "rotation": rotation,
+                "rotation_hex": tuple(v.hex() for v in rotation),
+            },
+            "expected": {
+                "position": expected_position,
+                "position_hex": tuple(v.hex() for v in expected_position),
+                "rotation": expected_rotation,
+                "rotation_hex": tuple(v.hex() for v in expected_rotation),
+            },
+            "component_equal": {
+                "position": tuple(a == b for a, b in zip(position, expected_position, strict=True)),
+                "orientation": tuple(
+                    a == b for a, b in zip(rotation, expected_rotation, strict=True)
+                ),
+            },
+        }
+    )
+
+
+def _retain_camera_record(
+    retain: Callable[[str, bytes], None], payload: bytes, sequence_index: int
+) -> None:
+    if len(payload) > CAMERA_RECORD_LIMIT:
+        raise ValueError("camera diagnostic record exceeds fixed bound")
+    try:
+        retain(f"camera-pose-{sequence_index}.json", payload)
+    except Exception as error:
+        raise RetentionFailure("privileged sink failed at camera pose") from error
+
+
+def _compiled_setup(mujoco: Any, sequence_index: int) -> tuple[Any, Any, tuple[int, ...], int]:
+    """The shared fixed compile/position/forward sequence; no renderer is constructed here."""
+    model = mujoco.MjModel.from_xml_string(scene_xml())
+    if int(model.ngeom) != 9 or int(model.ncam) != 1:
+        raise ValueError("compiled nine-box/one-camera membership differs")
+    ids = tuple(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, n) for n in NAMES)
+    camera = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "aperture_camera")
+    if any(v < 0 for v in ids) or len(set(ids)) != 9 or camera < 0:
+        raise ValueError("compiled member absent before indexing")
+    model.cam_pos[camera, 1] = POSES[sequence_index]
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    return model, data, ids, camera
+
+
+def _load_mujoco() -> Any:
+    import mujoco
+
+    return mujoco
+
+
+def _mujoco_identity(mujoco: Any) -> str:
+    version = getattr(mujoco, "__version__", None)
+    if type(version) is not str or not version or len(version) > 64:
+        raise ValueError("bounded MuJoCo dependency identity required")
+    return "mujoco:" + version
+
+
+class CameraCompilationDiagnostic:
+    """Disabled-default privileged first-view compilation-only diagnostic."""
+
+    def __init__(
+        self,
+        permissions: ModalityPermissionSet,
+        *,
+        enabled: bool = False,
+        expected_source: SourceBinding | None = None,
+        retain: Callable[[str, bytes], None] | None = None,
+    ) -> None:
+        require(permissions, PRIVILEGED)
+        if type(enabled) is not bool or not enabled:
+            raise PermissionError("camera compilation diagnostic disabled by default")
+        if type(expected_source) is not SourceBinding:
+            raise PermissionError("exact source/configuration binding required")
+        if not callable(retain):
+            raise PermissionError("privileged camera retention sink required before compilation")
+        self._source = expected_source
+        self._permissions = permissions.model_copy(deep=True)
+        self._retain = retain
+
+    def run(self) -> bytes:
+        require(self._permissions, PRIVILEGED)
+        root = Path(__file__).resolve().parents[3]
+        identity = (
+            subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD", "HEAD^{tree}"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            .stdout.strip()
+            .splitlines()
+        )
+        dirty = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=normal"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if identity != [self._source.head, self._source.tree] or dirty:
+            raise PermissionError("camera diagnostic source identity/cleanliness changed")
+        mujoco = _load_mujoco()
+        model, data, _ids, camera = _compiled_setup(mujoco, 0)
+        position = tuple(map(float, data.cam_xpos[camera]))
+        rotation = tuple(map(float, data.cam_xmat[camera].flat))
+        payload = _camera_record(
+            0,
+            position,
+            rotation,
+            self._source,
+            _mujoco_identity(mujoco),
+        )
+        _retain_camera_record(self._retain, payload, 0)
+        del model
+        return payload
+
+
 def retained_capture(
     renderer: Any,
     capture: Callable[[Callable[[str, Any], None]], Any],
@@ -604,16 +759,7 @@ class NativeAdapter:
 
         from epsbench.sim.canonical_paired import CanonicalPairedRenderer
 
-        model = mujoco.MjModel.from_xml_string(scene_xml())
-        if int(model.ngeom) != 9 or int(model.ncam) != 1:
-            raise ValueError("compiled nine-box/one-camera membership differs")
-        ids = tuple(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, n) for n in NAMES)
-        camera = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "aperture_camera")
-        if any(v < 0 for v in ids) or len(set(ids)) != 9 or camera < 0:
-            raise ValueError("compiled member absent before indexing")
-        model.cam_pos[camera, 1] = POSES[sequence_index]
-        data = mujoco.MjData(model)
-        mujoco.mj_forward(model, data)
+        model, data, ids, camera = _compiled_setup(mujoco, sequence_index)
         renderer = mujoco.Renderer(model, height=HEIGHT, width=WIDTH)
 
         def build(pair: Any) -> Frame:
@@ -643,11 +789,24 @@ class NativeAdapter:
                 )
                 for name, raw in zip(NAMES, ids, strict=True)
             )
+            camera_position = tuple(map(float, data.cam_xpos[camera]))
+            camera_rotation = tuple(map(float, data.cam_xmat[camera].flat))
+            _retain_camera_record(
+                self._retain,
+                _camera_record(
+                    sequence_index,
+                    camera_position,
+                    camera_rotation,
+                    self._source,
+                    _mujoco_identity(mujoco),
+                ),
+                sequence_index,
+            )
             domain = DrawDomain(
                 sequence_index,
                 boxes,
-                tuple(map(float, data.cam_xpos[camera])),
-                tuple(map(float, data.cam_xmat[camera].flat)),
+                camera_position,
+                camera_rotation,
                 float(model.cam_fovy[camera]),
                 tuple(map(float, state["projection_matrix_float32"])),
                 tuple(map(float, state["modelview_matrix_float32"])),
