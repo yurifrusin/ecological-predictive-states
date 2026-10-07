@@ -490,6 +490,10 @@ def test_camera_compile_diagnostic_is_privileged_bound_and_renderer_free(
     assert retained == [("camera-pose-0.json", payload)]
     assert fake.calls == ["compile"] + ["name"] * 10 + ["data", "forward"]
     assert fake.models[0].cam_pos[0, 1] == 2
+    with pytest.raises(PermissionError, match="single-use"):
+        diagnostic.run()
+    assert retained == [("camera-pose-0.json", payload)]
+    assert fake.calls == ["compile"] + ["name"] * 10 + ["data", "forward"]
 
 
 def test_camera_compile_diagnostic_denies_before_sdk_and_fails_closed_on_retention(
@@ -562,6 +566,10 @@ def test_camera_compile_diagnostic_retention_failure_is_fatal(
     )
     with pytest.raises(c.RetentionFailure, match="camera pose"):
         diagnostic.run()
+    operations = list(fake.calls)
+    with pytest.raises(PermissionError, match="single-use"):
+        diagnostic.run()
+    assert fake.calls == operations
 
 
 def test_native_capture_retains_camera_operands_before_frame_validation() -> None:

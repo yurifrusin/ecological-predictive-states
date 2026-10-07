@@ -530,9 +530,13 @@ class CameraCompilationDiagnostic:
         self._source = expected_source
         self._permissions = permissions.model_copy(deep=True)
         self._retain = retain
+        self._used = False
 
     def run(self) -> bytes:
         require(self._permissions, PRIVILEGED)
+        if self._used:
+            raise PermissionError("camera compilation diagnostic is single-use")
+        self._used = True
         root = Path(__file__).resolve().parents[3]
         identity = (
             subprocess.run(
