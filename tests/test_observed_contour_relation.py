@@ -24,6 +24,7 @@ from epsbench.diagnostics.observed_contour_relation import (
     REQUIRED,
     RULES,
     EndpointEvidence,
+    Pair,
     Reference,
     advance,
     bind,
@@ -114,8 +115,10 @@ class Fake:
         return self.value
 
 
-def project(ref: Reference, state: State, value: EndpointEvidence) -> Reference:
-    update = advance(ref, state, EPISODE, Fake(value), PERMISSIONS, state.decision_index)
+def project(ref: Reference, state: State, value: EndpointEvidence, predecessor: State) -> Reference:
+    update = advance(
+        ref, state, EPISODE, Fake(value), PERMISSIONS, state.decision_index, predecessor=predecessor
+    )
     assert update.unresolved is None
     return update.reference
 
@@ -141,11 +144,11 @@ def test_positive_empty_stale_unavailable_roundtrip(rule: str) -> None:
     assert not initial.pairs and initial.availability == "INITIAL"
     s1 = lifecycle(s0)
     ev = evidence(s1, rule=rule)
-    current = project(initial, s1, ev)
+    current = project(initial, s1, ev, s0)
     assert {(p.owner, p.affected) for p in current.current()} == independent(ev.elements)
     assert current.oracle_rule == rule
     s2 = lifecycle(s1)
-    empty = project(current, s2, evidence(s2, (), rule))
+    empty = project(current, s2, evidence(s2, (), rule), s1)
     assert empty.availability == "AVAILABLE" and not empty.current()
     assert empty.pairs[0].latest_support == 1
     s3 = lifecycle(s2, False)
@@ -163,7 +166,7 @@ def test_positive_empty_stale_unavailable_roundtrip(rule: str) -> None:
             reason="public fixture unavailable",
         ),
     )
-    stale = project(empty, s3, unavailable)
+    stale = project(empty, s3, unavailable, s2)
     assert (
         stale.availability == "UNAVAILABLE" and stale.pairs == current.pairs and not stale.current()
     )
@@ -180,7 +183,7 @@ def test_opposite_pairs_and_ambiguous_coexistence() -> None:
         for o, a in ((A, B), (B, A))
     )
     value = replace(evidence(s1, elements), reported_pairs=reports)
-    result = project(initialize(s0, EPISODE), s1, value)
+    result = project(initialize(s0, EPISODE), s1, value, s0)
     assert {(p.owner, p.affected) for p in result.current()} == independent(elements)
     ambiguous = OrientedBoundaryElement(
         frame_index=1,
@@ -194,7 +197,7 @@ def test_opposite_pairs_and_ambiguous_coexistence() -> None:
         owner_surface_id=None,
     )
     value = evidence(s1, (contour(), ambiguous))
-    assert len(project(initialize(s0, EPISODE), s1, value).current()) == 1
+    assert len(project(initialize(s0, EPISODE), s1, value, s0).current()) == 1
 
 
 @pytest.mark.parametrize(
@@ -276,7 +279,7 @@ def test_contradictions_atomic(case: str) -> None:
     elif case == "duplicate_location":
         value = replace(value, elements=(*value.elements, *value.elements))
     before = initial.canonical_bytes()
-    result = advance(initial, s1, EPISODE, Fake(value), PERMISSIONS, 1)
+    result = advance(initial, s1, EPISODE, Fake(value), PERMISSIONS, 1, predecessor=s0)
     assert result.unresolved is not None and result.reference is initial
     assert result.reference.canonical_bytes() == before
     if case == "extra_unknown_report":
@@ -290,12 +293,15 @@ def test_prefetch_permissions_future_chronology_episode() -> None:
     p = Fake(evidence(s1))
     for allowed in (frozenset(), REQUIRED | {Modality.DEPTH}, LIFECYCLE_PERMISSIONS):
         with pytest.raises(PermissionError):
-            advance(r0, s1, EPISODE, p, ModalityPermissionSet(allowed=allowed), 1)
+            advance(r0, s1, EPISODE, p, ModalityPermissionSet(allowed=allowed), 1, predecessor=s0)
     with pytest.raises(PermissionError):
-        advance(r0, s1, EPISODE, p, PERMISSIONS, 0)
-    assert advance(r0, s0, EPISODE, p, PERMISSIONS, 0).unresolved is not None
-    assert advance(r0, lifecycle(s1), EPISODE, p, PERMISSIONS, 2).unresolved is not None
-    assert advance(r0, s1, "b" * 32, p, PERMISSIONS, 1).unresolved is not None
+        advance(r0, s1, EPISODE, p, PERMISSIONS, 0, predecessor=s0)
+    assert advance(r0, s0, EPISODE, p, PERMISSIONS, 0, predecessor=s0).unresolved is not None
+    assert (
+        advance(r0, lifecycle(s1), EPISODE, p, PERMISSIONS, 2, predecessor=s0).unresolved
+        is not None
+    )
+    assert advance(r0, s1, "b" * 32, p, PERMISSIONS, 1, predecessor=s0).unresolved is not None
     assert not p.calls
 
 
@@ -317,7 +323,7 @@ def test_prefetch_permissions_future_chronology_episode() -> None:
 def test_decode_strict(mutation: str) -> None:
     s0 = lifecycle()
     s1 = lifecycle(s0)
-    result = project(initialize(s0, EPISODE), s1, evidence(s1))
+    result = project(initialize(s0, EPISODE), s1, evidence(s1), s0)
     v: Any = json.loads(result.canonical_bytes())
     if mutation == "extra":
         v["raw_id"] = 9
@@ -347,7 +353,7 @@ def test_decode_strict(mutation: str) -> None:
 def test_renaming_and_smoke_inspection() -> None:
     s0 = lifecycle()
     s1 = lifecycle(s0)
-    result = project(initialize(s0, EPISODE), s1, evidence(s1))
+    result = project(initialize(s0, EPISODE), s1, evidence(s1), s0)
     restored = decode(result.canonical_bytes())
     assert restored == result and len(restored.current()) == 1
     v = json.loads(result.canonical_bytes())
@@ -383,10 +389,10 @@ def test_positive_side_owner_refresh_and_full_projection_renaming() -> None:
             OcclusionRelation(occluder_surface_id=B, occluded_surface_id=A, frame_indices=(1,)),
         ),
     )
-    first = project(initialize(s0, EPISODE), s1, ev)
+    first = project(initialize(s0, EPISODE), s1, ev, s0)
     assert {(p.owner, p.affected) for p in first.current()} == independent(ev.elements)
     s2 = lifecycle(s1)
-    refreshed = project(first, s2, replace(ev, binding=bind(EPISODE, s2)))
+    refreshed = project(first, s2, replace(ev, binding=bind(EPISODE, s2)), s1)
     assert refreshed.pairs[0].latest_support == 2 and len(refreshed.current()) == 1
     rename = {A: B, B: A}
     states = []
@@ -415,7 +421,7 @@ def test_positive_side_owner_refresh_and_full_projection_renaming() -> None:
             OcclusionRelation(occluder_surface_id=A, occluded_surface_id=B, frame_indices=(1,)),
         ),
     )
-    renamed = project(initialize(states[0], EPISODE), states[1], renamed_ev)
+    renamed = project(initialize(states[0], EPISODE), states[1], renamed_ev, states[0])
     assert {(p.owner, p.affected, p.latest_support) for p in renamed.pairs} == {
         (rename[p.owner], rename[p.affected], p.latest_support) for p in first.pairs
     }
@@ -432,11 +438,13 @@ def test_provider_failure_and_malformed_owned_record_retention() -> None:
             raise RuntimeError("public endpoint failure")
 
     with pytest.raises(RuntimeError, match="public endpoint failure"):
-        advance(initial, s1, EPISODE, Broken(), PERMISSIONS, 1)
+        advance(initial, s1, EPISODE, Broken(), PERMISSIONS, 1, predecessor=s0)
     assert initial.canonical_bytes() == saved
     ev = evidence(s1)
     bad = ev.elements[0].model_copy(update={"owner_surface_id": C})
-    result = advance(initial, s1, EPISODE, Fake(replace(ev, elements=(bad,))), PERMISSIONS, 1)
+    result = advance(
+        initial, s1, EPISODE, Fake(replace(ev, elements=(bad,))), PERMISSIONS, 1, predecessor=s0
+    )
     assert result.unresolved is not None and result.reference is initial
     assert result.reference.canonical_bytes() == saved
 
@@ -446,9 +454,121 @@ def test_initialization_requires_zero_and_current_inventory_cannot_drop_history(
     s1 = lifecycle(s0)
     with pytest.raises(ValueError):
         initialize(s1, EPISODE)
-    supported = project(initialize(s0, EPISODE), s1, evidence(s1))
+    supported = project(initialize(s0, EPISODE), s1, evidence(s1), s0)
     s2 = lifecycle(s1)
     contradictory_lifecycle = replace(s2, nodes=())
     p = Fake(evidence(contradictory_lifecycle, ()))
-    rejected = advance(supported, contradictory_lifecycle, EPISODE, p, PERMISSIONS, 2)
+    rejected = advance(
+        supported, contradictory_lifecycle, EPISODE, p, PERMISSIONS, 2, predecessor=s1
+    )
     assert rejected.unresolved is not None and rejected.reference is supported and not p.calls
+
+
+@pytest.mark.parametrize(
+    "case", ["root", "branch", "commands", "first_seen", "last_seen", "new_history"]
+)
+def test_predecessor_binding_and_continuation_before_fetch(case: str) -> None:
+    s0 = lifecycle()
+    s1 = lifecycle(s0)
+    s2 = lifecycle(s1, False)
+    s3 = lifecycle(s2, False)
+    prior = project(initialize(s0, EPISODE), s1, evidence(s1), s0)
+    predecessor, current = s1, s2
+    if case == "root":
+        prior = replace(prior, binding=replace(prior.binding, lifecycle_root="0" * 64))
+    elif case == "branch":
+        predecessor = lifecycle(s0, False)
+        prior = replace(prior, binding=bind(EPISODE, predecessor))
+    elif case == "commands":
+        changed = canonical_json_bytes(ACTION.model_copy(update={"delta_forward": 0.25}))
+        current = replace(s2, executed_commands=(changed, *s2.executed_commands[1:]))
+    else:
+        prior = project(prior, s2, evidence(s2, ()), s1)
+        predecessor, current = s2, s3
+        nodes = list(current.nodes)
+        if case == "first_seen":
+            nodes[0] = replace(nodes[0], first_seen=1)
+        elif case == "last_seen":
+            nodes[1] = replace(nodes[1], last_seen=0)
+        else:
+            nodes.append(replace(nodes[1], token=C))
+        current = replace(current, nodes=tuple(nodes))
+    provider = Fake(evidence(current, ()))
+    before = prior.canonical_bytes()
+    result = advance(
+        prior,
+        current,
+        EPISODE,
+        provider,
+        PERMISSIONS,
+        current.decision_index,
+        predecessor=predecessor,
+    )
+    assert result.unresolved is not None and result.reference is prior
+    assert result.reference.canonical_bytes() == before and not provider.calls
+
+
+@pytest.mark.parametrize("case", ["duplicate", "noncanonical"])
+def test_report_list_canonical_before_pair_equality(case: str) -> None:
+    s0 = lifecycle()
+    s1 = lifecycle(s0)
+    prior = initialize(s0, EPISODE)
+    ev = evidence(s1, (contour(), contour(B, A, 1)))
+    ab = ev.reported_pairs[0]
+    ba = OcclusionRelation(occluder_surface_id=B, occluded_surface_id=A, frame_indices=(1,))
+    reports = (ab, ab, ba) if case == "duplicate" else (ba, ab)
+    provider = Fake(replace(ev, reported_pairs=reports))
+    before = prior.canonical_bytes()
+    result = advance(prior, s1, EPISODE, provider, PERMISSIONS, 1, predecessor=s0)
+    assert result.unresolved is not None and "canonical" in result.unresolved
+    assert result.reference is prior and prior.canonical_bytes() == before
+    assert provider.calls == [1]
+
+
+def test_accepted_continuation_can_add_new_observed_region() -> None:
+    s0 = lifecycle()
+    s1 = lifecycle(s0)
+    prior = project(initialize(s0, EPISODE), s1, evidence(s1), s0)
+    raster = VisibleRaster(2, np.array([[1, 2, 1]], dtype=np.int32), ((1, A), (2, C)))
+    result = observe(
+        s1,
+        RasterProvider(raster),
+        ModalityPermissionSet(allowed=LIFECYCLE_PERMISSIONS),
+        2,
+        2,
+        ACTION,
+    )
+    assert result.state is not None and result.unresolved is None
+    s2 = result.state
+    ev = replace(
+        evidence(s2, (contour(A, C),)),
+        reported_pairs=(
+            OcclusionRelation(occluder_surface_id=A, occluded_surface_id=C, frame_indices=(1,)),
+        ),
+    )
+    accepted = project(prior, s2, ev, s1)
+    assert {(p.owner, p.affected) for p in accepted.current()} == {(A, C)}
+    assert accepted.pairs[0].latest_support == 1
+
+
+def test_incoming_history_cannot_claim_new_current_token() -> None:
+    s0 = lifecycle()
+    s1 = lifecycle(s0)
+    prior = project(initialize(s0, EPISODE), s1, evidence(s1), s0)
+    raster = VisibleRaster(2, np.array([[1, 2, 1]], dtype=np.int32), ((1, A), (2, C)))
+    result = observe(
+        s1,
+        RasterProvider(raster),
+        ModalityPermissionSet(allowed=LIFECYCLE_PERMISSIONS),
+        2,
+        2,
+        ACTION,
+    )
+    assert result.state is not None
+    s2 = result.state
+    forged = replace(prior, pairs=(Pair(A, C, 1),))
+    provider = Fake(evidence(s2, ()))
+    before = forged.canonical_bytes()
+    rejected = advance(forged, s2, EPISODE, provider, PERMISSIONS, 2, predecessor=s1)
+    assert rejected.unresolved is not None and rejected.reference is forged
+    assert rejected.reference.canonical_bytes() == before and not provider.calls

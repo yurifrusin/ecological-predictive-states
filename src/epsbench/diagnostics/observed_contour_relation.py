@@ -207,6 +207,8 @@ def advance(
     provider: Provider,
     permissions: ModalityPermissionSet,
     decision_index: int,
+    *,
+    predecessor: State,
 ) -> Update:
     if (
         type(permissions) is not ModalityPermissionSet
@@ -217,7 +219,11 @@ def advance(
         raise PermissionError(
             "exact separate ownership/occlusion permissions required before access"
         )
-    if type(reference) is not Reference or type(lifecycle) is not State:
+    if (
+        type(reference) is not Reference
+        or type(lifecycle) is not State
+        or type(predecessor) is not State
+    ):
         raise ValueError("exact prior relation reference and accepted lifecycle required")
     t, cutoff = integer(lifecycle.decision_index), integer(decision_index)
     if t > cutoff:
@@ -233,9 +239,31 @@ def advance(
         or lifecycle.shape != reference.binding.shape
     ):
         return reject("nonconsecutive or incompatible lifecycle/episode binding")
-    known = set(lifecycle.inventory)
+    if reference.binding != bind(episode_key, predecessor):
+        return reject("prior reference does not bind exact accepted predecessor lifecycle")
+    if (
+        t != predecessor.decision_index + 1
+        or lifecycle.shape != predecessor.shape
+        or lifecycle.executed_commands[:-1] != predecessor.executed_commands
+    ):
+        return reject("current lifecycle does not continue predecessor command history")
+    previous = {n.token: n for n in predecessor.nodes}
+    current = {n.token: n for n in lifecycle.nodes}
+    if not previous.keys() <= current.keys():
+        return reject("current lifecycle drops predecessor inventory")
+    for token, old in previous.items():
+        new = current[token]
+        if (
+            new.previous_mask != old.current_mask
+            or new.first_seen != old.first_seen
+            or new.last_seen != (t if new.status == "VISIBLE" else old.last_seen)
+        ):
+            return reject("current lifecycle does not continue predecessor region history")
+    if any(n.first_seen != t for token, n in current.items() if token not in previous):
+        return reject("new current region claims unaccepted predecessor history")
+    known = set(predecessor.inventory)
     if any(p.owner not in known or p.affected not in known for p in reference.pairs):
-        return reject("remembered relation does not belong to accepted lifecycle inventory")
+        return reject("remembered relation does not belong to accepted predecessor inventory")
     evidence = provider.endpoint_one(t)
     if (
         type(evidence) is not EndpointEvidence
@@ -307,6 +335,9 @@ def advance(
                 positives.add((owner, other))
         if len(locations) != len(set(locations)):
             return reject("duplicate endpoint boundary locations")
+        report_keys = [(p.occluder_surface_id, p.occluded_surface_id) for p in reports]
+        if report_keys != sorted(set(report_keys)):
+            return reject("reported relations must be uniquely canonical-ordered")
         reported = set()
         for p in reports:
             if p.frame_indices != (1,):
