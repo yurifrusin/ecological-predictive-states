@@ -569,7 +569,30 @@ class RendererAdapter:
 def observe_zero_sample_osmesa(
     renderer: object, model: Any, width: int, height: int
 ) -> Mapping[str, object]:
-    from OpenGL import GL  # type: ignore[import-untyped]
+    """Preserve the historical qualification raster of 160x120."""
+    return observe_zero_sample_osmesa_raster(
+        renderer, model, width, height, expected_width=160, expected_height=120
+    )
+
+
+def observe_zero_sample_osmesa_raster(
+    renderer: object,
+    model: Any,
+    width: int,
+    height: int,
+    *,
+    expected_width: int,
+    expected_height: int,
+) -> Mapping[str, object]:
+    """Observe strict zero-sample provenance against an explicit renderer raster."""
+    if (
+        type(expected_width) is not int
+        or type(expected_height) is not int
+        or expected_width <= 0
+        or expected_height <= 0
+    ):
+        raise QualificationFailure("expected OSMesa raster dimensions invalid")
+    from OpenGL import GL  # type: ignore[import-untyped, import-not-found, unused-ignore]
 
     from epsbench.diagnostics.gl_provenance import inspect_mujoco_offscreen_attachments
     from epsbench.diagnostics.mujoco_runner import _observed_backend
@@ -643,9 +666,9 @@ def observe_zero_sample_osmesa(
         facts["actual_backend"] == "osmesa"
         and facts["context_module"] == "mujoco.osmesa"
         and facts["actual_offsamples"] == facts["model_offsamples"] == 0
-        and (width, height) == (160, 120)
-        and (facts["mjr_off_width"], facts["mjr_off_height"]) == (160, 120)
-        and color_dimensions == depth_dimensions == [160, 120]
+        and (width, height) == (expected_width, expected_height)
+        and (facts["mjr_off_width"], facts["mjr_off_height"]) == (expected_width, expected_height)
+        and color_dimensions == depth_dimensions == [expected_width, expected_height]
         and facts["sample_buffers"] == facts["samples"] == 0
         and before_error == after_error == 0
         and main.get("present") is True

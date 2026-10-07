@@ -587,14 +587,19 @@ def observe_canonical_paired_state(renderer: Any) -> Mapping[str, object]:
 
     from epsbench.diagnostics.osmesa_joint0_qualification import (
         context_runtime_binding,
-        observe_zero_sample_osmesa,
+        observe_zero_sample_osmesa_raster,
     )
     from epsbench.diagnostics.shared_raster_capture import observe_native_read_state
 
     # Capture native state first: the context query may not repair an invalid binding.
     state = observe_native_read_state(renderer)
-    context_facts = observe_zero_sample_osmesa(
-        renderer, renderer._model, int(renderer.width), int(renderer.height)
+    context_facts = observe_zero_sample_osmesa_raster(
+        renderer,
+        renderer._model,
+        int(renderer.width),
+        int(renderer.height),
+        expected_width=int(renderer.width),
+        expected_height=int(renderer.height),
     )
     state["context_runtime"] = context_runtime_binding(context_facts)
     state["scene_geometry"] = _scene_geometry(renderer)
