@@ -86,10 +86,22 @@ supply a separately admitted bounded durable private sink/resource supervisor;
 neither filesystem names nor same-process Python objects provide adversarial
 isolation. Full durable inspection/admission/accounting are future invocation work.
 
+Native construction requires a caller-supplied privileged retention sink before
+capture. Eight ordered paired progress events are saved immediately; successful
+native read bytes are explicitly bottom-up and unvalidated, never inferred when a
+read raises. Completed oriented pair arrays/state are saved before domain/frame
+verification, and verified frame bytes before renderer close. Records are bounded
+to two MiB each; snapshots retain the paired primitive's256 KiB limit. Partial
+records are not certified frames. Retention failure stops further views; initiating,
+retention and close exceptions remain distinguishable, including simultaneous
+failures. No durable supervisor or launch authority is supplied by this hook.
+
 ## Outcomes and checks
 
 Later evaluate_frame audits the full raster, reconstructed ID channels and strict
-target cause. Valid contrary target support yields FAIL; target ambiguity,
+target cause. A valid target contradiction yields FAIL even when separate pixels
+are ambiguous or mismatched. Valid support in the hidden stage also yields FAIL.
+An unresolved missing visible witness remains INCONCLUSIVE; target ambiguity,
 non-target reconstruction mismatch, unsupported facts or provenance/resource gaps
 yield INCONCLUSIVE. Complete agreed three-view reports alone could support this
 finite box-region capability after independent actual review. Per-view PASS is

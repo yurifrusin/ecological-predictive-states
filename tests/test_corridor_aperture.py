@@ -6,6 +6,7 @@ import json
 import xml.etree.ElementTree as ET
 from dataclasses import replace
 from fractions import Fraction as Q
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -26,12 +27,15 @@ from epsbench.diagnostics.corridor_aperture_capture import (
     NativeAdapter,
     ObservedState,
     Projection,
+    RetentionFailure,
     SourceBinding,
     collect,
+    disposition,
     ecological_observation,
     evaluate_frame,
     privileged_frame,
     retain_three,
+    retained_capture,
 )
 from epsbench.diagnostics.corridor_aperture_reference import (
     IDENTITY,
@@ -361,3 +365,168 @@ def test_finite_adapter_retains_partial_and_both_faults() -> None:
         retain_three(Fake(), ALL, bad_sink)
     assert isinstance(caught.value.__cause__, ExceptionGroup)
     assert len(caught.value.__cause__.exceptions) == 2
+
+
+@pytest.mark.parametrize("unknown,other", [(1, 0), (0, 1), (1, 1)])
+def test_valid_target_contradiction_precedes_unrelated_uncertainty(
+    unknown: int, other: int
+) -> None:
+    facts = dict(target_mismatch=1, target_unknown=unknown, other_mismatch=other, target_support=0)
+    assert disposition(facts, True) == "FAIL"
+    facts["target_mismatch"] = 0
+    assert disposition(facts, True) == "INCONCLUSIVE"
+    facts["target_support"] = 1
+    assert disposition(facts, False) == "FAIL"
+
+
+def fake_pair() -> Any:
+    f = frame(0)
+    return SimpleNamespace(
+        raw_geom_segmentation=f.raw_labels,
+        depth=f.depth,
+        native_id_rgb=f.native_rgb,
+        native_depth_pre_metric=f.native_depth,
+        stable_state={"fake": True},
+        operational_state={"fake": True},
+        near=0.1,
+        far=300.0,
+    )
+
+
+def fake_progress(observer: Any, *, read_failure: bool = False) -> None:
+    for label in (
+        "draw_input",
+        "draw_attempt",
+        "draw_complete",
+        "draw_output",
+        "read_input",
+        "read_attempt",
+        "read_complete",
+        "read_output",
+    ):
+        if label == "read_complete":
+            if read_failure:
+                raise ValueError("native read did not return")
+            value: Any = (bytes(96 * 128 * 3), bytes(96 * 128 * 4))
+        elif label.endswith("input") or label.endswith("output"):
+            value = b'{"fake":true}'
+        else:
+            value = None
+        observer(label, value)
+
+
+@pytest.mark.parametrize("failure", ["read", "validation", "domain", "verify", "close"])
+def test_current_view_progress_pair_and_close_failures_retained(failure: str) -> None:
+    saved: dict[str, bytes] = {}
+
+    class Renderer:
+        closed = 0
+
+        def close(self) -> None:
+            self.closed += 1
+            if failure == "close":
+                raise OSError("close failed")
+
+    def capture(observer: Any) -> Any:
+        fake_progress(observer, read_failure=failure == "read")
+        if failure == "validation":
+            raise ValueError("read state validation failed")
+        return fake_pair()
+
+    def build(pair: Any) -> Frame:
+        if failure in ("domain", "verify"):
+            raise ValueError(failure + " failed")
+        return frame(0)
+
+    renderer = Renderer()
+    with pytest.raises((ValueError, OSError)):
+        retained_capture(renderer, capture, build, ALL, saved.__setitem__, 0, frame(0).source)
+    assert renderer.closed == 1
+    assert "view-0-native_failure.json" in saved
+    assert ("view-0-read_complete.json" in saved) == (failure != "read")
+    assert ("view-0-pair_complete.json" in saved) == (failure in ("domain", "verify", "close"))
+    if failure != "read":
+        raw = json.loads(saved["view-0-read_complete.json"])
+        assert raw["orientation"] == "native_bottom_up" and raw["certified_frame"] is False
+    if failure == "close":
+        assert "view-0-verified_frame.json" in saved
+        assert (
+            json.loads(saved["view-0-native_failure.json"])["errors"][0]["role"] == "renderer_close"
+        )
+
+
+def test_progress_retention_failure_stops_capture_and_keeps_all_errors() -> None:
+    calls: list[str] = []
+
+    class Renderer:
+        def close(self) -> None:
+            raise OSError("cleanup failed")
+
+    def sink(name: str, payload: bytes) -> None:
+        calls.append(name)
+        if name.endswith("read_complete.json") or name.endswith("native_failure.json"):
+            raise OSError("retention failed")
+
+    def capture(observer: Any) -> Any:
+        fake_progress(observer)
+        raise AssertionError("capture continued after retention failure")
+
+    with pytest.raises(ExceptionGroup) as caught:
+        retained_capture(Renderer(), capture, lambda p: frame(0), ALL, sink, 0, frame(0).source)
+    assert len(caught.value.exceptions) == 3
+    assert isinstance(caught.value.exceptions[0], RetentionFailure)
+    assert isinstance(caught.value.exceptions[0].__cause__, OSError)
+    assert "view-0-read_output.json" not in calls and "view-0-pair_complete.json" not in calls
+
+
+def test_progress_sink_denied_before_fake_access_and_native_hook_static() -> None:
+    import ast
+    from pathlib import Path
+
+    with pytest.raises(PermissionError):
+        retained_capture(
+            None, lambda p: None, lambda p: frame(0), ECO, lambda n, b: None, 0, frame(0).source
+        )
+    source = Path(__file__).parents[1] / "src/epsbench/diagnostics/corridor_aperture_capture.py"
+    tree = ast.parse(source.read_text())
+    assert any(
+        isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "CanonicalPairedRenderer"
+        and any(k.arg == "progress_observer" for k in n.keywords)
+        for n in ast.walk(tree)
+    )
+    adapter = NativeAdapter(
+        ALL, enabled=True, expected_source=frame(0).source, retain=lambda n, b: None
+    )
+    adapter._failed = True
+    with pytest.raises(PermissionError):
+        adapter.frame(0)  # Denied before Git or SDK import.
+
+
+def test_initiating_close_and_failure_sink_errors_remain_distinct() -> None:
+    saved: dict[str, bytes] = {}
+
+    class Renderer:
+        def close(self) -> None:
+            raise OSError("cleanup failure")
+
+    def capture(observer: Any) -> Any:
+        fake_progress(observer)
+        return fake_pair()
+
+    def build(pair: Any) -> Frame:
+        raise ValueError("initiating domain failure")
+
+    def sink(name: str, payload: bytes) -> None:
+        if name.endswith("native_failure.json"):
+            saved[name] = payload
+            raise OSError("failure record retention failure")
+        saved[name] = payload
+
+    with pytest.raises(ExceptionGroup) as caught:
+        retained_capture(Renderer(), capture, build, ALL, sink, 0, frame(0).source)
+    assert [type(e) for e in caught.value.exceptions] == [ValueError, OSError, RetentionFailure]
+    errors = json.loads(saved["view-0-native_failure.json"])["errors"]
+    assert [e["role"] for e in errors] == ["initiating", "renderer_close"]
+    assert "view-0-read_complete.json" in saved and "view-0-pair_complete.json" in saved

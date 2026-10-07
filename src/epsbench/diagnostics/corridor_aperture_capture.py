@@ -307,6 +307,17 @@ def verify_pair(frame: Frame, permissions: ModalityPermissionSet) -> None:
         raise ValueError("shared draw arrays do not reconstruct")
 
 
+def disposition(counts: dict[str, int], wanted_visible: bool) -> str:
+    """Classify retained facts; valid counterexamples survive unrelated uncertainty."""
+    if counts["target_mismatch"] or (not wanted_visible and counts["target_support"]):
+        return "FAIL"
+    if counts["target_unknown"] or counts["other_mismatch"]:
+        return "INCONCLUSIVE"
+    if wanted_visible and not counts["target_support"]:
+        return "FAIL"
+    return "PASS"
+
+
 def evaluate_frame(frame: Frame, permissions: ModalityPermissionSet) -> dict[str, Any]:
     """Later-use full raster audit; source checks never execute this enumeration."""
     require(permissions, PRIVILEGED)
@@ -342,11 +353,7 @@ def evaluate_frame(frame: Frame, permissions: ModalityPermissionSet) -> dict[str
             if expected == target_id:
                 counts["target_support"] += 1
     wanted_visible = frame.domain.sequence_index != 1
-    result = "PASS"
-    if counts["target_unknown"] or counts["other_mismatch"]:
-        result = "INCONCLUSIVE"
-    elif counts["target_mismatch"] or bool(counts["target_support"]) != wanted_visible:
-        result = "FAIL"
+    result = disposition(counts, wanted_visible)
     return {
         "version": VERSION,
         "index": frame.domain.sequence_index,
@@ -402,6 +409,155 @@ def retain_three(
     return tuple(roots)
 
 
+class RetentionFailure(RuntimeError):
+    """A supplied sink failed; the original exception remains the cause."""
+
+
+def retained_capture(
+    renderer: Any,
+    capture: Callable[[Callable[[str, Any], None]], Any],
+    build: Callable[[Any], Frame],
+    permissions: ModalityPermissionSet,
+    retain: Callable[[str, bytes], None],
+    sequence_index: int,
+    source: SourceBinding,
+) -> Frame:
+    """Bounded privileged lifecycle hook; fake interfaces suffice for source checks."""
+    require(permissions, PRIVILEGED)
+    index(sequence_index)
+    stages = (
+        "draw_input",
+        "draw_attempt",
+        "draw_complete",
+        "draw_output",
+        "read_input",
+        "read_attempt",
+        "read_complete",
+        "read_output",
+    )
+    stage = "capture_start"
+    next_stage = 0
+
+    def save(label: str, payload: dict[str, Any]) -> None:
+        encoded = encode(
+            {"index": sequence_index, "source": asdict(source), "certified_frame": False, **payload}
+        )
+        if len(encoded) > 2 * 1024 * 1024:
+            raise ValueError("current-view retention record exceeds fixed bound")
+        try:
+            retain(f"view-{sequence_index}-{label}.json", encoded)
+        except Exception as error:
+            raise RetentionFailure("privileged sink failed at " + label) from error
+
+    def progress(label: str, value: Any) -> None:
+        nonlocal stage, next_stage
+        if next_stage == len(stages) or label != stages[next_stage]:
+            raise ValueError("paired progress order/bound differs")
+        stage = label
+        next_stage += 1
+        record: dict[str, Any] = {"stage": label, "validity": "unvalidated_progress"}
+        if label == "read_complete":
+            if (
+                type(value) is not tuple
+                or len(value) != 2
+                or (
+                    any(type(v) is not bytes for v in value)
+                    or len(value[0]) != HEIGHT * WIDTH * 3
+                    or len(value[1]) != HEIGHT * WIDTH * 4
+                )
+            ):
+                raise ValueError("native readback bytes/shape differ")
+            record |= {
+                "orientation": "native_bottom_up",
+                "rgb_dtype": "uint8",
+                "depth_dtype": "float32",
+                "shape": [HEIGHT, WIDTH],
+                "raw_rgb": base64.b64encode(value[0]).decode(),
+                "raw_depth": base64.b64encode(value[1]).decode(),
+            }
+        elif label in ("draw_input", "draw_output", "read_input", "read_output"):
+            if type(value) is not bytes or len(value) > 256 * 1024:
+                raise ValueError("paired snapshot bytes/bound differ")
+            record["snapshot_bytes"] = base64.b64encode(value).decode()
+        elif value is not None:
+            raise ValueError("paired marker payload differs")
+        save(label, record)
+
+    errors: list[Exception] = []
+    roles: list[str] = []
+    frame: Frame | None = None
+    try:
+        pair = capture(progress)
+        stage = "pair_complete"
+        arrays = {}
+        for name in ("raw_geom_segmentation", "depth", "native_id_rgb", "native_depth_pre_metric"):
+            a = getattr(pair, name)
+            if not isinstance(a, np.ndarray) or a.nbytes > HEIGHT * WIDTH * 4:
+                raise ValueError("completed pair array/bound differs")
+            arrays[name] = {
+                "dtype": str(a.dtype),
+                "shape": list(a.shape),
+                "bytes": base64.b64encode(a.tobytes(order="C")).decode(),
+            }
+        save(
+            stage,
+            {
+                "stage": stage,
+                "validity": "paired_capture_complete_domain_unvalidated",
+                "orientation": "oriented_top_down",
+                "arrays": arrays,
+                "stable_state": pair.stable_state,
+                "operational_state": pair.operational_state,
+                "near": pair.near,
+                "far": pair.far,
+            },
+        )
+        stage = "domain_frame_verification"
+        frame = build(pair)
+        save(
+            "verified_frame",
+            {
+                "stage": "verified_frame",
+                "validity": "verified_before_close",
+                "frame_bytes": base64.b64encode(frame.scientific_bytes()).decode(),
+            },
+        )
+    except Exception as error:
+        errors.append(error)
+        roles.append("retention" if isinstance(error, RetentionFailure) else "initiating")
+    try:
+        renderer.close()
+    except Exception as cleanup:
+        errors.append(cleanup)
+        roles.append("renderer_close")
+    if errors:
+        try:
+            save(
+                "native_failure",
+                {
+                    "stage": stage,
+                    "validity": "failed_not_certified",
+                    "errors": [
+                        {
+                            "role": role,
+                            "type": type(e).__name__,
+                            "message": str(e),
+                            "cause_type": type(e.__cause__).__name__ if e.__cause__ else None,
+                            "cause": str(e.__cause__) if e.__cause__ else None,
+                        }
+                        for role, e in zip(roles, errors, strict=True)
+                    ],
+                },
+            )
+        except Exception as retention_error:
+            errors.append(retention_error)
+        if len(errors) == 1:
+            raise errors[0]
+        raise ExceptionGroup("capture/retention/close failures", errors)
+    assert frame is not None
+    return frame
+
+
 class NativeAdapter:
     """Finite future-use OSMesa adapter. Explicit enablement is not owner authority."""
 
@@ -411,20 +567,25 @@ class NativeAdapter:
         *,
         enabled: bool = False,
         expected_source: SourceBinding | None = None,
+        retain: Callable[[str, bytes], None] | None = None,
     ) -> None:
         require(permissions, PRIVILEGED)
         if type(enabled) is not bool or not enabled:
             raise PermissionError("native aperture adapter disabled by default")
         if type(expected_source) is not SourceBinding:
             raise PermissionError("separately reviewed exact source/configuration required")
+        if not callable(retain):
+            raise PermissionError("privileged current-view retention sink required before capture")
         self._source = expected_source
         self._permissions = permissions.model_copy(deep=True)
         self._next = 0
+        self._retain = retain
+        self._failed = False
 
     def frame(self, sequence_index: int) -> Frame:
         require(self._permissions, PRIVILEGED)
         index(sequence_index)
-        if sequence_index != self._next:
+        if self._failed or sequence_index != self._next:
             raise PermissionError("native repeat/future view denied before SDK access")
         self._next += 1  # Claim consumed even on failure; no retry through this adapter.
         root = Path(__file__).resolve().parents[3]
@@ -454,9 +615,8 @@ class NativeAdapter:
         data = mujoco.MjData(model)
         mujoco.mj_forward(model, data)
         renderer = mujoco.Renderer(model, height=HEIGHT, width=WIDTH)
-        try:
-            renderer.update_scene(data, camera=camera)
-            pair = CanonicalPairedRenderer(renderer).capture()
+
+        def build(pair: Any) -> Frame:
             boxes = tuple(
                 CompiledBox(
                     name,
@@ -524,13 +684,22 @@ class NativeAdapter:
                 self._source,
             )
             verify_pair(frame, self._permissions)
-        except Exception as error:
-            try:
-                renderer.close()
-            except Exception as cleanup:
-                raise ExceptionGroup(
-                    "capture and renderer-close failures", [error, cleanup]
-                ) from None
+            return frame
+
+        def capture(progress: Callable[[str, Any], None]) -> Any:
+            renderer.update_scene(data, camera=camera)
+            return CanonicalPairedRenderer(renderer, progress_observer=progress).capture()
+
+        try:
+            return retained_capture(
+                renderer,
+                capture,
+                build,
+                self._permissions,
+                self._retain,
+                sequence_index,
+                self._source,
+            )
+        except Exception:
+            self._failed = True
             raise
-        renderer.close()
-        return frame
