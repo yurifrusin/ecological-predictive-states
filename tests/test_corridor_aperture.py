@@ -42,6 +42,7 @@ from epsbench.diagnostics.corridor_aperture_capture import (
 )
 from epsbench.diagnostics.corridor_aperture_reference import (
     IDENTITY,
+    MODEL_ZNEAR,
     CompiledBox,
     DrawDomain,
     SceneCamera,
@@ -73,7 +74,7 @@ def domain(i: int) -> DrawDomain:
         )
         for j, b in enumerate(BOXES)
     )
-    n, f = 0.1, 300.0
+    n, f = float(np.float32(float(MODEL_ZNEAR) * 10)), 300.0
     projection = (
         1.0,
         0.0,
@@ -93,7 +94,16 @@ def domain(i: int) -> DrawDomain:
         0.0,
     )
     camera = SceneCamera(
-        (0.0, float(q), 1.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), n, f, 0.075, -0.075, 0.0, 0.0, 0
+        (0.0, float(q), 1.0),
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, 1.0),
+        n,
+        f,
+        float(np.float32(0.75 * n)),
+        -float(np.float32(0.75 * n)),
+        0.0,
+        0.0,
+        0,
     )
     import math
 
@@ -108,7 +118,7 @@ def domain(i: int) -> DrawDomain:
         n,
         f,
         10.0,
-        0.01,
+        float(MODEL_ZNEAR),
         30.0,
         (camera, camera),
         boxes,

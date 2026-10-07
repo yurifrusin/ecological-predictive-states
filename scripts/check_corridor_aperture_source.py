@@ -62,6 +62,7 @@ def main() -> int:
             "-q",
             "tests/test_corridor_aperture.py",
             "tests/test_corridor_aperture_camera.py",
+            "tests/test_corridor_aperture_declarations.py",
             "tests/test_corridor_aperture_runtime.py",
             "tests/test_corridor_aperture_observer.py",
         ]

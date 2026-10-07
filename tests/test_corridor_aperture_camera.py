@@ -35,9 +35,9 @@ def changed(values: tuple[float, ...], slot: int, value: float) -> tuple[float, 
     return (*values[:slot], value, *values[slot + 1 :])
 
 
-def test_declared_v2_budget_configuration_matches_executable_policy() -> None:
+def test_declared_v3_retains_camera_budget_configuration_matches_executable_policy() -> None:
     config = configuration()
-    assert VERSION.endswith("-v2")
+    assert VERSION.endswith("-v3")
     assert config["camera_numerical_policy"] == POLICY
     assert Q(config["camera_compiled_component_allowance"]) == B64
     assert Q(config["camera_draw_component_allowance"]) == B32
@@ -173,7 +173,22 @@ def test_near_zero_ray_clearance_is_exact_unknown() -> None:
     assert edge.status == "BOUNDARY" and interior.status == "HIT"
 
 
-def test_exact_v1_root_and_runtime_purpose_are_distinct() -> None:
+@pytest.mark.parametrize(
+    "old_purpose,old_root",
+    [
+        (
+            "corridor_aperture_native_v1",
+            "663156ea79a70422201c8edc7715f817903058b0192d5b60e31c6d78b94fc911",
+        ),
+        (
+            "corridor_aperture_native_v2",
+            "52041034d876cbfa70c3644ba6667c1049b9abfb1dae326bdad0d9cc9e4cb9e2",
+        ),
+    ],
+)
+def test_historical_roots_and_runtime_purposes_are_distinct(
+    old_purpose: str, old_root: str
+) -> None:
     from pydantic import ValidationError
 
     from epsbench.diagnostics import corridor_aperture_runtime as runtime
@@ -181,21 +196,21 @@ def test_exact_v1_root_and_runtime_purpose_are_distinct() -> None:
     facts = dict(
         source_head="a" * 40,
         source_tree="b" * 40,
-        configuration_root="c" * 64,
-        purpose="corridor_aperture_native_v1",
+        configuration_root=old_root,
+        purpose=old_purpose,
         image="sha256:" + "d" * 64,
         manifest_sha256="e" * 64,
     )
     with pytest.raises(ValidationError):
         runtime.ApertureRuntimeBinding.model_validate(facts)
-    assert runtime.PURPOSE == "corridor_aperture_native_v2"
+    assert runtime.PURPOSE == "corridor_aperture_native_v3"
 
 
-def test_ci_routes_v2_branch_to_source_only_job_and_three_exclusions() -> None:
+def test_ci_routes_v3_branch_to_source_only_job_and_three_exclusions() -> None:
     import yaml
 
     workflows = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text())
-    branch = "codex/camera-numerical-equivalence-20261007"
+    branch = "codex/aperture-float-declarations-20261007"
     jobs = workflows["jobs"]
     for job in ("corridor-aperture-source", "quality", "qualify-wgl", "qualify-osmesa"):
         assert branch in jobs[job]["if"]

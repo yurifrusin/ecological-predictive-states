@@ -42,8 +42,11 @@ from epsbench.diagnostics.corridor_aperture_reference import (
     DrawDomain,
     SceneCamera,
     clip_planes,
+    clipping_declarations,
+    depth_projection_report,
     domain_boxes,
     first_hit,
+    floating_operand,
     target_cause,
 )
 from epsbench.schema import Modality, ModalityPermissionSet
@@ -500,6 +503,60 @@ def _retain_camera_record(
         raise RetentionFailure("privileged sink failed at camera pose") from error
 
 
+def _domain_numerical_record(
+    domain: DrawDomain, source: SourceBinding, compiled_precision: dict[str, str]
+) -> bytes:
+    """Only missing privileged operands; paired records already retain draw facts."""
+    try:
+        camera = validate_camera(domain) | {"status": "NUMERICALLY_EQUIVALENT"}
+    except NumericalCameraError as error:
+        camera = error.report | {"status": "REJECTED", "reason": str(error)}
+    except ValueError as error:
+        camera = {"status": "STRUCTURAL_REJECTION", "reason": str(error)}
+    clipping = clipping_declarations(domain)
+    boxes = []
+    for box in domain.boxes:
+        vectors = {
+            name: [
+                v if type(v) is float and math.isfinite(v) else floating_operand(v)
+                for v in getattr(box, name)
+            ]
+            for name in ("position", "half_size", "rotation")
+        }
+        boxes.append({"name": box.name, "raw_id": box.raw_id, "kind": box.kind} | vectors)
+    return encode(
+        {
+            "source": asdict(source),
+            "configuration_root": config_root(),
+            "sequence_index": domain.sequence_index,
+            "domain_status": "UNVALIDATED",
+            "camera": camera,
+            "clipping_declarations": clipping,
+            "depth_projection": depth_projection_report(domain),
+            "compiled_domain": {
+                "boxes": boxes,
+                "fovy": floating_operand(domain.fovy),
+                "array_dtypes": compiled_precision,
+            },
+        }
+    )
+
+
+def _retain_domain_record(
+    retain: Callable[[str, bytes], None],
+    domain: DrawDomain,
+    source: SourceBinding,
+    compiled_precision: dict[str, str],
+) -> None:
+    try:
+        payload = _domain_numerical_record(domain, source, compiled_precision)
+        if len(payload) > CAMERA_RECORD_LIMIT:
+            raise ValueError("numerical domain record exceeds fixed bound")
+        retain(f"camera-numerical-{domain.sequence_index}.json", payload)
+    except Exception as error:
+        raise RetentionFailure("privileged numerical domain retention failed") from error
+
+
 def _compiled_setup(mujoco: Any, sequence_index: int) -> tuple[Any, Any, tuple[int, ...], int]:
     """The shared fixed compile/position/forward sequence; no renderer is constructed here."""
     model = mujoco.MjModel.from_xml_string(scene_xml())
@@ -852,28 +909,19 @@ class NativeAdapter:
                     for c in state["scene_cameras"]
                 ),
                 draw_boxes,
+                model_clip_precision="binary32",  # Pinned MuJoCo 3.12 API assumption.
             )
-            # Existing pair_complete retains raw operands; this compact report adds residuals.
-            try:
-                numerical = validate_camera(domain) | {"status": "NUMERICALLY_EQUIVALENT"}
-            except NumericalCameraError as error:
-                numerical = error.report | {"status": "REJECTED", "reason": str(error)}
-            except ValueError as error:
-                numerical = {"status": "STRUCTURAL_REJECTION", "reason": str(error)}
-            numerical |= {
-                "source": asdict(self._source),
-                "configuration_root": config_root(),
-                "sequence_index": sequence_index,
-            }
-            payload = encode(numerical)
-            if len(payload) > CAMERA_RECORD_LIMIT:
-                raise ValueError("numerical camera report exceeds fixed bound")
-            try:
-                self._retain(f"camera-numerical-{sequence_index}.json", payload)
-            except Exception as error:
-                raise RetentionFailure(
-                    "privileged sink failed at numerical camera report"
-                ) from error
+            _retain_domain_record(
+                self._retain,
+                domain,
+                self._source,
+                {
+                    "geom_xpos": str(data.geom_xpos.dtype),
+                    "geom_xmat": str(data.geom_xmat.dtype),
+                    "geom_size": str(model.geom_size.dtype),
+                    "cam_fovy": str(model.cam_fovy.dtype),
+                },
+            )
             frame = Frame(
                 EvidenceKind.NATIVE,
                 domain,

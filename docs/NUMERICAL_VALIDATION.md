@@ -18,10 +18,9 @@ and empirical success. Do not expand allowances after outcomes or rescore histor
 Work package: `DUAL_REVIEW` / `PUBLIC_REPOSITORY_ONLY`; implementation and independent
 review are separate. Source acceptance grants no operation or empirical authority.
 
-The one live development contract is `corridor-aperture-box-capability-v2`. Historical v1 at
+The camera numerical policy introduced by `corridor-aperture-box-capability-v2` is retained by v3. Historical v1 at
 PR #64, head `8280bdbee97f71750de46fcfe1bb7bf9fc698457`, and its exact-contract tests/results remain
-authoritative and unchanged. Runtime purpose `corridor_aperture_native_v2` and new config root
-are required; v1 admission cannot authorize v2.
+authoritative and unchanged. Historical v2 is PR #65, head `0282812622185b1b6d3ad57264f60366337821e0`.
 
 Compiled component allowance `b64 = 64 * 2^-52`; scene/draw `b32 = 4 * 2^-23 + b64`; position/translation
 allowance scales by `max(1, q)`, with `q` in `{2, 4, 6}`. These are prospective engineering allowances, not
@@ -48,3 +47,49 @@ and compact residual reports remain privileged; existing capture records retain 
 Pinned camera convention: [MuJoCo 3.12 setView](https://github.com/google-deepmind/mujoco/blob/3.12.0/src/render/classic/render_gl3.c#L718-L777)
 and [lookAt](https://github.com/google-deepmind/mujoco/blob/3.12.0/src/render/classic/render_util.c#L126-L159).
 This source contract has no launch, retrospective-pass, empirical-gate or EPS-result effect.
+
+## Aperture declarations v3
+
+The prospective live contract is `corridor-aperture-box-capability-v3`, purpose
+`corridor_aperture_native_v3`, with a distinct configuration root. Old purposes and roots
+cannot authorize it. `DUAL_REVIEW` / `PUBLIC_REPOSITORY_ONLY` remains required.
+
+MuJoCo 3.12 [visual map declarations](https://github.com/google-deepmind/mujoco/blob/3.12.0/include/mujoco/mjmodel.h#L142-L156)
+store near/far as binary32. This is a pinned API storage assumption, not a dynamically
+measured C-field precision; recorded array dtypes are separate measured facts. Validate their exact widened realizations: near
+`5368709/536870912` and far `30`, after finite floating type and positive ordered range
+checks. Incoming values are never rounded; adjacent binary32 values and unsupported
+declared precision reject. This is a representation identity, with zero residual budget,
+not a larger coordinate tolerance.
+
+The existing privileged numerical record retains direct declaration values and hexadecimal
+operands, precision, observed/expected values, residual, budget and status before domain
+validation can fail. Missing compiled box coordinates, FOV and array dtypes share that
+record's existing 32 KiB cap. Camera admission and overall unvalidated domain status are
+distinct; raw draw operands remain in the existing paired capture record. Sink or cap
+failure is terminal. Camera, lateral projection, exact structural and geometric budgets are unchanged.
+
+Conditional public arithmetic models of final-only versus intermediate binary32 projection
+rounding do not establish an actual GL error bound or a future apparatus pass. No historical
+result is rescored and no operation or gate authority follows from this source correction.
+
+The conditional depth policy `conditional-binary32-depth-v3` covers normal round-to-nearest
+binary32 sum/difference/product/division for ordinary projection coefficients, exact halving
+and Sterbenz reverse-Z subtraction. Identical eye near/far operands must be exactly widened
+binary32 in `[2^-30, 2^30]`, with `f > 3n` and the rounded ordinary coefficient interval within
+`[1,2]`. This conservative exponent window keeps sums/differences, `2fn` and divisions normal
+and finite. Require the reverse-depth lower endpoints to remain at least `2^-126`, excluding
+underflow/flush-to-zero and degenerate propagation. These are declared engineering assumptions,
+not measured or proved driver internals.
+
+With `A=n/(f-n)`, `B=fn/(f-n)`, `C=(f+n)/(f-n)`, `u=2^-24` and
+`eta=(1+u)^2/(1-u)-1`, use absolute p10 allowance `epsA=eta*C/2`, with `epsA<A`.
+Propagate `epsB=max(eta*B, (1/500000)*abs(B))`, covering the unchanged p14 check.
+`deltaNear=(epsB+n*epsA)/(1+A-epsA)` and `deltaFar=(epsB+f*epsA)/(A-epsA)`.
+Only p10 consistency and projected-far consistency use amended budgets. Keep existing p0, p5,
+p14, projected-near and scene/model checks. Actual whole-target near margin must strictly
+exceed `max(deltaNear,(1/500000)*n)`; far margin must strictly exceed `deltaFar`.
+Compact amended residuals and these strict clearance checks share the privileged prevalidation
+record. Actual projection planes and rays, exact first-hit/tie/boundary/clipping decisions and
+other whole-target clearances remain. No label invariance, actual driver guarantee, historical
+recertification or operation authority is claimed.

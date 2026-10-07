@@ -17,7 +17,7 @@ from epsbench.diagnostics.corridor_aperture import config_root, encode
 Hex40 = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{40}$")]
 Hex64 = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
 Image = Annotated[str, StringConstraints(strict=True, pattern=r"^sha256:[0-9a-f]{64}$")]
-PURPOSE = "corridor_aperture_native_v2"
+PURPOSE = "corridor_aperture_native_v3"
 
 
 class ApertureRuntimeBinding(BaseModel):
@@ -25,7 +25,7 @@ class ApertureRuntimeBinding(BaseModel):
     source_head: Hex40
     source_tree: Hex40
     configuration_root: Hex64
-    purpose: Literal["corridor_aperture_native_v2"]
+    purpose: Literal["corridor_aperture_native_v3"]
 
     image: Image
     manifest_sha256: Hex64
