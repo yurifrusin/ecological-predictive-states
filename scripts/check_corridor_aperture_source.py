@@ -53,7 +53,16 @@ def main() -> int:
     import pytest
 
     result = pytest.main(
-        ["--noconftest", "-o", "addopts=", "-q", "tests/test_corridor_aperture.py"]
+        [
+            "--noconftest",
+            "-p",
+            "no:cacheprovider",
+            "-o",
+            "addopts=",
+            "-q",
+            "tests/test_corridor_aperture.py",
+            "tests/test_corridor_aperture_runtime.py",
+        ]
     )
     loaded()
     return int(result)
