@@ -592,7 +592,7 @@ def observe_zero_sample_osmesa_raster(
         or expected_height <= 0
     ):
         raise QualificationFailure("expected OSMesa raster dimensions invalid")
-    from OpenGL import GL  # type: ignore[import-untyped]
+    from OpenGL import GL  # type: ignore[import-untyped, import-not-found, unused-ignore]
 
     from epsbench.diagnostics.gl_provenance import inspect_mujoco_offscreen_attachments
     from epsbench.diagnostics.mujoco_runner import _observed_backend
