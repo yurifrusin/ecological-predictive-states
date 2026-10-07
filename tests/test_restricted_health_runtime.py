@@ -15,6 +15,9 @@ from epsbench.diagnostics import restricted_health_runtime as runtime
 def setup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, same: bool = False
 ) -> tuple[Any, list[Any]]:
+    monkeypatch.setenv(
+        "PROCESSOR_IDENTIFIER", "Intel64 Family 6 Model 142 Stepping 10, GenuineIntel"
+    )
     pid = 111 if same else 222
     ready = tmp_path / "runtime.json"
     runtime.write(
@@ -104,12 +107,87 @@ def test_filtered_environment_excludes_private_configuration(
             "SECRET": "DENIED",
             "PYTHONPATH": "DENIED",
             "OMP_NUM_THREADS": "64",
+            "PROCESSOR_IDENTIFIER": "Intel64 Family 6 Model 142 Stepping 10, GenuineIntel",
+            "PROCESSOR_ARCHITECTURE": "AMD64",
+            "PROCESSOR_ARCHITEW6432": "AMD64",
             "PATH": "public-path",
         },
     )
     environment = runtime.filtered_environment()
     assert environment["USERNAME"] == "public-user" and environment["OMP_NUM_THREADS"] == "1"
+    assert environment["PROCESSOR_IDENTIFIER"].startswith("Intel64 Family 6 Model 142")
+    assert "PROCESSOR_ARCHITECTURE" not in environment
+    assert "PROCESSOR_ARCHITEW6432" not in environment
     assert "SECRET" not in environment and "PYTHONPATH" not in environment
+
+
+@pytest.mark.parametrize(
+    "processor",
+    [
+        None,
+        "",
+        "AMD64",
+        "Family 6 Model 142",
+        "Intel64 Family X Model 142 Stepping 10",
+        "Intel64 Family 6 Model 142 Stepping 10, vendor\nspoof",
+        "Intel64 Family 6 Model 142 Stepping 10, " + "v" * 129,
+    ],
+)
+def test_missing_or_malformed_processor_identity_fails_before_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, processor: str | None
+) -> None:
+    ready, go = tmp_path / "ready", tmp_path / "go"
+    if processor is None:
+        monkeypatch.delenv("PROCESSOR_IDENTIFIER", raising=False)
+    else:
+        monkeypatch.setenv("PROCESSOR_IDENTIFIER", processor)
+    with pytest.raises(RuntimeError, match="processor identity"):
+        runtime.handshake(ready, go, runtime.sha(Path(runtime.__file__).read_bytes()))
+    assert not ready.exists()
+
+
+def test_processor_identity_is_descriptive_public_runtime_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = "Intel64 Family 6 Model 142 Stepping 10, GenuineIntel"
+    monkeypatch.setenv("PROCESSOR_IDENTIFIER", expected)
+    public = runtime.identity()
+    assert public["processor_identity"] == expected
+    assert public["processor_identity_source"] == "PROCESSOR_IDENTIFIER"
+
+
+def test_malformed_processor_identity_in_ready_metadata_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.setenv(
+        "PROCESSOR_IDENTIFIER", "Intel64 Family 6 Model 142 Stepping 10, GenuineIntel"
+    )
+    ready = tmp_path / "runtime.json"
+    runtime.write(
+        ready,
+        runtime.identity()
+        | {
+            "pid": 111,
+            "ppid": 111,
+            "source": runtime.sha(Path(runtime.__file__).read_bytes()),
+            "processor_identity": "AMD64",
+        },
+    )
+    opened: list[int] = []
+    monkeypatch.setattr(
+        runtime,
+        "native",
+        lambda: {
+            "open": lambda mask, inherit, pid: opened.append(pid),
+            "close": lambda handle: None,
+        },
+    )
+    child = SimpleNamespace(pid=111, poll=lambda: None)
+    with pytest.raises(ValueError, match="owned parent/executable/source identity"):
+        runtime.OwnedProcess(child, ready, 1.0)  # type: ignore[arg-type]
+    assert opened == []
 
 
 def test_handshake_hash_and_existing_ack_denied(tmp_path: Path) -> None:
