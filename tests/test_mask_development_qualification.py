@@ -430,3 +430,61 @@ def test_return_retention_failure_keeps_return_in_terminal(
     assert fake.produced == 1 and fake.audited == 0
     assert terminal["first_failure"]["unretained_return"]["returned"] == fake.last
     assert c.inspect(output, ctx, lambda: None)["development_outcome"] == "INCONCLUSIVE"
+
+
+@pytest.mark.parametrize("kind", ["write", "deadline"])
+@pytest.mark.parametrize("mode", ["PASS", "NO_NEW"])
+def test_late_closure_failure_never_promotes_local_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, mode: str
+) -> None:
+    original = c.Sink.json
+    value = 0.0
+
+    def fail(self: c.Sink, name: str, data: Any, terminal: bool = False) -> None:
+        nonlocal value
+        if name == "branch1-analysis.json":
+            if kind == "write":
+                raise OSError("late fake report write failure")
+            value = 61.0
+        original(self, name, data, terminal)
+
+    monkeypatch.setattr(c.Sink, "json", fail)
+    raw = manifest()
+    ctx = context(raw)
+    output = tmp_path / "fresh"
+    fake = Fake(output, mode)
+    result = c.collect(
+        raw,
+        DEFINITION,
+        ADOPTION,
+        ctx,
+        output,
+        lambda p: None,
+        lambda: None,
+        fake,
+        lambda: 0,
+        clock=lambda: value,
+        allocate=lambda: {
+            "episode": "d" * 32,
+            "tokens": [f"surface-{i:016x}" for i in (30, 10, 20)],
+        },
+    )
+    assert fake.produced == fake.audited == 4
+    assert all(call["completed"] and call["retained"] for call in result["calls"])
+    assert result["completion"] == "STOPPED_INCOMPLETE"
+    assert result["first_failure"]["type"] == ("OSError" if kind == "write" else "TimeoutError")
+    assert result["analysis"]["development_outcome"] == "INCONCLUSIVE"
+    assert result["analysis"]["qualification"] == "UNRESOLVED"
+    local = result["analysis"]["local_analysis"]
+    assert local["development_outcome"] == ("PASS" if mode == "PASS" else "FAIL")
+    assert len(local["branches"]) == 2 and "signals" in local
+    assert (output / "branch0-analysis.json").is_file()
+    assert not (output / "branch1-analysis.json").exists()
+    assert c.inspect(output, ctx, lambda: None) == result["analysis"]
+    with pytest.raises(FileExistsError):
+        run(output, fake)
+    assert fake.produced == fake.audited == 4
+    result["analysis"] = local
+    (output / "terminal.json").write_bytes(canonical_json_bytes(result))
+    with pytest.raises(ValueError, match="stopped closure"):
+        c.inspect(output, ctx, lambda: None)

@@ -576,6 +576,15 @@ def empty_analysis(reason: str = "incomplete evidence") -> dict[str, Any]:
     }
 
 
+def stopped_analysis(local: dict[str, Any]) -> dict[str, Any]:
+    """Retain descriptive local evidence without promoting a failed attempt."""
+    return {
+        **empty_analysis("attempt operational/retention/resource closure failed"),
+        "branches": local["branches"],
+        "local_analysis": local,
+    }
+
+
 def inspect(
     path: Path, context: dict[str, Any], source_check: Callable[[], None], terminal: bool = True
 ) -> dict[str, Any]:
@@ -663,14 +672,22 @@ def inspect(
                 raise ValueError("returned object/completion accounting differs")
         if finish["completion"] not in ("COMPLETE", "STOPPED_INCOMPLETE"):
             raise ValueError("terminal completion required")
+        if finish["completion"] == "STOPPED_INCOMPLETE" and (
+            finish["analysis"]["development_outcome"] != "INCONCLUSIVE"
+            or finish["analysis"]["qualification"] != "UNRESOLVED"
+        ):
+            raise ValueError("stopped closure cannot qualify a development outcome")
         if finish["completion"] == "COMPLETE" and (
-            len(calls) != 8
+            finish["elapsed_seconds"] > 60
+            or len(calls) != 8
             or finish["first_failure"] is not None
             or not all(c["completed"] and c["retained"] for c in calls)
         ):
             raise ValueError("complete attempt accounting differs")
 
     def conclusion(output: dict[str, Any]) -> dict[str, Any]:
+        if finish is not None and finish["completion"] != "COMPLETE":
+            output = stopped_analysis(output)
         if finish is not None and output != finish["analysis"]:
             raise ValueError("terminal development analysis differs")
         return output
@@ -830,13 +847,7 @@ def inspect(
         "signals": checks,
         "branches": reports,
     }
-    if finish is not None:
-        if output != finish["analysis"]:
-            raise ValueError("terminal development analysis differs")
-        size = sum(f.stat().st_size for f in path.iterdir() if f.is_file())
-        if 2 * (size + finish["external_bytes"] + LOG_RESERVE) + REVIEW_RESERVE > LIMIT:
-            raise ValueError("inclusive retained budget exceeded")
-    return output
+    return conclusion(output)
 
 
 def collect(
@@ -939,6 +950,7 @@ def collect(
             frame("target", i, p)
             analysis = inspect(output, context, source_check, False)
             sink.json(f"branch{i}-analysis.json", analysis)
+        sink.check()
     except Exception as error:
         failure = cast(dict[str, Any], {"type": type(error).__name__, "message": str(error)})
         if pending is not None:
@@ -949,6 +961,11 @@ def collect(
             failure["inspection_error"] = str(inspection_error)
             failure["prior_analysis_unverified"] = analysis
             analysis = empty_analysis("global source/evidence unverifiable")
+    actual_files = {p.name: sha256_bytes(p.read_bytes()) for p in output.iterdir() if p.is_file()}
+    sink.bytes = sum(p.stat().st_size for p in output.iterdir() if p.is_file())
+    elapsed = clock() - sink.started
+    if elapsed > 60 and failure is None:
+        failure = {"type": "TimeoutError", "message": "cooperative budget exceeded"}
     completion = (
         "COMPLETE"
         if failure is None
@@ -956,8 +973,8 @@ def collect(
         and all(c["completed"] and c["retained"] for c in calls)
         else "STOPPED_INCOMPLETE"
     )
-    actual_files = {p.name: sha256_bytes(p.read_bytes()) for p in output.iterdir() if p.is_file()}
-    sink.bytes = sum(p.stat().st_size for p in output.iterdir() if p.is_file())
+    if completion != "COMPLETE":
+        analysis = stopped_analysis(analysis)
     terminal = {
         "version": VERSION,
         "completion": completion,
@@ -965,7 +982,7 @@ def collect(
         "analysis": analysis,
         "calls": calls,
         "files": actual_files,
-        "elapsed_seconds": clock() - sink.started,
+        "elapsed_seconds": elapsed,
         "external_bytes": external(),
         "bytes_before_terminal": sink.bytes,
     }
