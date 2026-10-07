@@ -148,7 +148,7 @@ class Fake:
 
 
 def run(
-    output: Path, fake: Fake, clock: Clock | None = None
+    output: Path, fake: Fake, clock: Clock | None = None, source_check: Any = None
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     payload = manifest()
     ctx = context(payload)
@@ -169,7 +169,7 @@ def run(
         ctx,
         output,
         lambda p: None,
-        lambda: None,
+        source_check or (lambda: None),
         fake,
         clock or Clock(),
         allocate,
@@ -407,3 +407,54 @@ def test_global_tamper_invalidates_prior_analysis(
     assert (output / "u0-analysis.json").exists()
     with pytest.raises(ValueError):
         c.inspect(output, ctx)
+
+
+def test_all_prefix_pairs_retained_before_any_forecast(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = c.Sink.write
+    forecasts = 0
+
+    def verify(self: c.Sink, name: str, data: bytes, terminal: bool = False) -> None:
+        nonlocal forecasts
+        if name.endswith("-forecast.json"):
+            assert len(list(self.path.glob("u*-p*-raw.json"))) == 4
+            assert len(list(self.path.glob("u*-p*-audit.json"))) == 4
+            forecasts += 1
+        original(self, name, data, terminal)
+
+    monkeypatch.setattr(c.Sink, "write", verify)
+    output = tmp_path / "fresh"
+    terminal, _ = run(output, Fake(output))
+    assert terminal["first_failure"] is None and forecasts == 4
+
+
+def test_persistent_source_failure_invalidates_prior_valid_negative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = c.Sink.json
+    failed = False
+    rejected_checks = 0
+
+    def mark(self: c.Sink, name: str, value: Any, terminal: bool = False) -> None:
+        nonlocal failed
+        original(self, name, value, terminal)
+        if name == "u0-analysis.json":
+            failed = True
+
+    def source_check() -> None:
+        nonlocal rejected_checks
+        if failed:
+            rejected_checks += 1
+            raise ValueError("synthetic persistent source mismatch")
+
+    monkeypatch.setattr(c.Sink, "json", mark)
+    output = tmp_path / "fresh"
+    fake = Fake(output, ("FAIL", "PASS"))
+    terminal, _ = run(output, fake, source_check=source_check)
+    assert terminal["analysis"]["scientific_outcome"] == "INCONCLUSIVE"
+    assert terminal["first_failure"]["prior_analysis_unverified"]["scientific_outcome"] == "FAIL"
+    assert terminal["first_failure"]["inspection_error"] == "synthetic persistent source mismatch"
+    assert rejected_checks == 2 and fake.produced == 6
+    assert terminal["completion"] == "STOPPED_INCOMPLETE"
+    assert json.loads((output / "u0-analysis.json").read_bytes())["status"] == "FAIL"

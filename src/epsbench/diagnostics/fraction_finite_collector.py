@@ -737,8 +737,11 @@ def collect(
                 products.append(produced)
             return qualified(products[0], products[1])
 
-        for i, unit in enumerate(study.units):
-            prefix = tuple(frame(i, "p", j, pos) for j, pos in enumerate(unit.prefix))
+        prefixes = [
+            tuple(frame(i, "p", j, pos) for j, pos in enumerate(unit.prefix))
+            for i, unit in enumerate(study.units)
+        ]
+        for i, prefix in enumerate(prefixes):
             for j, source in enumerate(before(study, i, prefix, identities[i], context["head"])):
                 sink.write(f"u{i}-q{j}-forecast.json", forecast(source).canonical_bytes())
         members = {n: h for n, h in sink.hashes.items() if not n.startswith("call-")}
@@ -757,6 +760,7 @@ def collect(
         if pending_return is not None:
             first_failure["unretained_return"] = pending_return
         try:
+            source_check()
             analysis = inspect(output, context, terminal=False)
         except Exception as inspection_error:
             first_failure["inspection_error"] = str(inspection_error)
