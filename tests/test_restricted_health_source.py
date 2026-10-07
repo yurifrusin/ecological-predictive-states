@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import struct
+import sys
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
@@ -26,6 +29,8 @@ from epsbench.diagnostics.restricted_model_training import ModelSource
 from epsbench.diagnostics.visible_forecast_contract import _json
 from epsbench.utils.canonical import canonical_json_bytes
 from tests.test_restricted_models_source import example
+
+_ENVIRONMENT_BYTES = health._environment_bytes
 
 SOURCE = ModelSource("1" * 40, "2" * 40, "3" * 64)
 
@@ -373,3 +378,70 @@ def test_environment_change_retained_fail_closed(
     with pytest.raises(ValueError, match="environment"):
         health._operate(tmp_path / "new", tmp_path / "closed", admission(), payload, fake)
     assert (tmp_path / "new" / "failure.json").exists()
+
+
+def test_complete_environment_tree_positive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "a.bin").write_bytes(b"abc")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "b.bin").write_bytes(b"12345")
+    (nested / "empty").mkdir()
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    assert _ENVIRONMENT_BYTES() == 8
+
+
+@pytest.mark.parametrize("kind", ("missing", "file"))
+def test_environment_root_must_be_existing_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    root = tmp_path / kind
+    if kind == "file":
+        root.write_bytes(b"synthetic file-as-root")
+    monkeypatch.setattr(sys, "prefix", str(root))
+    with pytest.raises((FileNotFoundError, ValueError)):
+        _ENVIRONMENT_BYTES()
+
+
+@pytest.mark.parametrize("where", ("root", "subtree"))
+def test_environment_enumeration_failure_propagates_after_partial_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    (tmp_path / "counted.bin").write_bytes(b"partial bytes cannot certify completeness")
+    (tmp_path / "unreadable").mkdir()
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    initiating = PermissionError("synthetic unreadable " + where)
+
+    def walk(
+        root: Path, *, followlinks: bool, onerror: Callable[[OSError], None]
+    ) -> Iterator[tuple[str, list[str], list[str]]]:
+        assert root == tmp_path and not followlinks
+        if where == "subtree":
+            yield str(root), ["unreadable"], ["counted.bin"]
+        onerror(initiating)
+
+    monkeypatch.setattr(os, "walk", walk)
+    with pytest.raises(PermissionError) as caught:
+        _ENVIRONMENT_BYTES()
+    assert caught.value is initiating
+
+
+def test_environment_stat_failure_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broken = tmp_path / "unstatable.bin"
+    broken.write_bytes(b"synthetic")
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    original = Path.stat
+    initiating = PermissionError("synthetic file stat failure")
+
+    def observed(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
+        if path == broken:
+            raise initiating
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", observed)
+    with pytest.raises(PermissionError) as caught:
+        _ENVIRONMENT_BYTES()
+    assert caught.value is initiating

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import os
+import stat
 import struct
 import subprocess
 import sys
@@ -594,14 +595,33 @@ def _write(directory: Path, name: str, data: bytes) -> None:
 
 
 def _environment_bytes() -> int:
-    root = Path(sys.prefix).resolve()
+    root = Path(sys.prefix)
     reject_reparse(root)
+    if not stat.S_ISDIR(root.stat().st_mode):
+        raise ValueError("existing environment directory required")
+    root = root.resolve()
+
+    def unavailable(error: OSError) -> None:
+        raise error
+
     total = 0
-    for directory, children, files in os.walk(root, followlinks=False):
-        for name in (*children, *files):
-            path = Path(directory) / name
+    for directory, children, files in os.walk(root, followlinks=False, onerror=unavailable):
+        current = Path(directory)
+        reject_reparse(current)
+        if not stat.S_ISDIR(current.stat().st_mode):
+            raise ValueError("environment traversal directory changed")
+        for name in children:
+            path = current / name
             reject_reparse(path)
-        total += sum((Path(directory) / name).stat().st_size for name in files)
+            if not stat.S_ISDIR(path.stat().st_mode):
+                raise ValueError("environment child directory changed")
+        for name in files:
+            path = current / name
+            reject_reparse(path)
+            observed = path.stat()
+            if not stat.S_ISREG(observed.st_mode):
+                raise ValueError("regular environment file required")
+            total += observed.st_size
     return total
 
 
