@@ -6,12 +6,27 @@ import ctypes
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any
+
+_PROCESSOR_IDENTITY = re.compile(
+    r"(?:x86|AMD64|ARM64|Intel64) Family [0-9]{1,3} Model [0-9]{1,5} "
+    r"Stepping [0-9]{1,3}(?:, [A-Za-z0-9][A-Za-z0-9 _.-]{0,63})?"
+)
+
+
+def valid_processor_identity(value: Any) -> bool:
+    """Recognize the bounded Windows PROCESSOR_IDENTIFIER description grammar."""
+    return (
+        type(value) is str
+        and len(value) <= 128
+        and _PROCESSOR_IDENTITY.fullmatch(value) is not None
+    )
 
 
 def raw(value: Any) -> bytes:
@@ -38,6 +53,9 @@ def write(path: Path, value: Any) -> None:
 
 
 def identity() -> dict[str, Any]:
+    processor = os.environ.get("PROCESSOR_IDENTIFIER")
+    if not valid_processor_identity(processor):
+        raise RuntimeError("descriptive Windows processor identity unavailable")
     return {
         "pid": os.getpid(),
         "self_cpu_ready": time.process_time(),
@@ -50,6 +68,8 @@ def identity() -> dict[str, Any]:
         "login_variable_presence": {
             k: k in os.environ for k in ("LOGNAME", "USER", "LNAME", "USERNAME")
         },
+        "processor_identity": processor,
+        "processor_identity_source": "PROCESSOR_IDENTIFIER",
     }
 
 
@@ -165,6 +185,8 @@ class OwnedProcess:
                 "base_prefix",
                 "virtual_env",
                 "login_variable_presence",
+                "processor_identity",
+                "processor_identity_source",
                 "source",
                 "self_cpu_ready",
             }:
@@ -174,6 +196,8 @@ class OwnedProcess:
                 or type(self.ready["pid"]) is not int
                 or self.ready["ppid"] not in (child.pid, os.getpid())
                 or Path(self.ready["executable"]).resolve() != Path(sys.executable).resolve()
+                or not valid_processor_identity(self.ready["processor_identity"])
+                or self.ready["processor_identity_source"] != "PROCESSOR_IDENTIFIER"
             ):
                 raise ValueError("owned parent/executable/source identity differs")
             for pid in dict.fromkeys((child.pid, self.ready["pid"])):
@@ -276,6 +300,7 @@ def filtered_environment() -> dict[str, str]:
         "USER",
         "LNAME",
         "USERNAME",
+        "PROCESSOR_IDENTIFIER",
     }
     result = {k: v for k, v in os.environ.items() if k.upper() in allowed}
     result.update(

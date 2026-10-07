@@ -7,6 +7,16 @@ an exact source decision and a separate actual-operation decision. No comparativ
 model equations/trainer, allocation, collection archive or scientific endpoint changes.
 Original gates and the charter hypothesis remain unresolved.
 
+The later future-runtime provenance maintenance is source-only. It does not reopen
+the terminal health route, authorize any private input release or learner operation,
+or permit comparative use of health outputs.
+
+The startup handshake records the bounded Windows `PROCESSOR_IDENTIFIER` description
+(`x86`, `AMD64`, `ARM64`, or `Intel64` followed by numeric Family/Model/Stepping and
+an optional short printable vendor suffix). It is an environment-provided description,
+not verified host or hardware-model attestation. Unsupported or malformed descriptions
+fail before handshake readiness; architecture-only values are insufficient.
+
 `restricted_model_health.run` is evaluator-only and must be invoked in a fresh
 single-use evaluator process. Its HealthAdmission receives separately authenticated
 archive/SealA/precommit roots and exact accepted health source/decision identity.
