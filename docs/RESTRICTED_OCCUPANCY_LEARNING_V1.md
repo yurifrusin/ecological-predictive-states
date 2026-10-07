@@ -206,3 +206,34 @@ remains disabled. A reviewed read-only bulk train/dev exporter and separate
 forecast-stage controller are deferred to WP2; do not reopen the producer or keep
 the qualification process live while implementing models. No model, forecast,
 scoring access, empirical SUPPORT or gate advancement is supplied here.
+
+
+## Prospective exact rational producer source
+
+The restricted adapter now uses `restricted-exact-slab-v1` from
+`restricted_exact_raster.py`, bound in its fixed logical source recipe and retained
+private audit annotation. It targets the declared ideal rational scene and fixed
+32x32 untilted square 90-degree camera: row/column centres, strictly positive
+hits and closed support/box boundaries. The dedicated producer intersects slabs
+and the support plane with rational arithmetic through nearest-hit decisions;
+integer labels are materialized afterward. Unsupported calibration or malformed
+primitives fail closed. Equal nearest surfaces retain their labels and pixel
+positions privately, with no selected winner; any producer/reference tie or exact
+label disagreement still denies qualification. There is no epsilon, floating fast
+path, replacement label or excluded cell.
+
+The independent reference retains its separate face-enumeration, footprint and
+status algorithm unchanged. Historical floating Camera/Scene behavior is unchanged.
+Shared rational arithmetic and declared constants leave common-mode risk;
+synthetic hand-derived primitive/ray checks establish no actual membership coverage.
+The guarded source check runs these primitive checks with reference imports denied,
+then the existing symbolic lifecycle suite. No actual adapter, collection, private
+seed, membership sweep or historical study is executed by those checks.
+
+This is a changed prospective apparatus, not a repair or continuation of a closed
+trial. The previous pilot remains CLOSED_INCONCLUSIVE / FAILED_CLOSED with its
+original evidence and membership immutable. A future qualification needs its own
+prospective decision, fresh authority and independently reviewed exact source;
+this package allocates none. Original0B/0C/0E remain incomplete, Gate0D remains
+unauthorized, and full EPS appearance efficacy remains untested. Preserve18/21
+recovery, Slice6 FAILED_CLOSED, held48 and parked privileged helpers.
