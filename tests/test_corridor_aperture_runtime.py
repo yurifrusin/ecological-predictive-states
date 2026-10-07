@@ -5,13 +5,14 @@ from __future__ import annotations
 import ast
 import builtins
 import hashlib
+import json
 import os
 import platform
 import subprocess
 import threading
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -365,3 +366,234 @@ def test_no_historical_candidate_still_rejects(facts: dict[str, Any]) -> None:
         os.environ.pop(field)
     with pytest.raises(chain["CanonicalPairedCaptureError"]):
         chain["CanonicalPairedRenderer"](object())
+
+
+def _fake_mujoco(position: tuple[float, ...], rotation: tuple[float, ...]) -> Any:
+    operations: list[str] = []
+
+    class CameraPositions:
+        def __init__(self) -> None:
+            self.values = [0.0, 2.0, 1.0]
+
+        def __setitem__(self, key: tuple[int, int], value: float) -> None:
+            row, column = key
+            assert row == 0
+            self.values[column] = value
+
+        def __getitem__(self, key: tuple[int, int]) -> float:
+            row, column = key
+            assert row == 0
+            return self.values[column]
+
+    class Model:
+        ngeom = 9
+        ncam = 1
+
+        def __init__(self) -> None:
+            self.cam_pos = CameraPositions()
+
+        @staticmethod
+        def from_xml_string(xml: str) -> Any:
+            operations.append("compile")
+            assert "aperture_camera" in xml
+            model = Model()
+            MujocoFake.models.append(model)
+            return model
+
+    class Data:
+        def __init__(self, model: Any) -> None:
+            operations.append("data")
+            self.cam_xpos = [position]
+            self.cam_xmat = [SimpleNamespace(flat=rotation)]
+
+    class MJObject:
+        mjOBJ_GEOM = "geom"
+        mjOBJ_CAMERA = "camera"
+
+    class MujocoFake:
+        __version__ = "fake-3.12.0"
+        MjModel = Model
+        MjData = Data
+        mjtObj = MJObject
+        calls: ClassVar[list[str]] = operations
+        models: ClassVar[list[Any]] = []
+
+        @staticmethod
+        def mj_name2id(model: Any, kind: str, name: str) -> int:
+            operations.append("name")
+            if kind == "camera":
+                return 0
+            return (
+                "floor",
+                "left",
+                "end",
+                "right_bottom",
+                "right_top",
+                "right_front",
+                "right_pier",
+                "right_back",
+                "target",
+            ).index(name)
+
+        @staticmethod
+        def mj_forward(model: Any, data: Any) -> None:
+            operations.append("forward")
+
+        @staticmethod
+        def Renderer(*args: Any, **kwargs: Any) -> Any:
+            pytest.fail("compile-only diagnostic constructed a renderer")
+
+    return MujocoFake
+
+
+def test_camera_compile_diagnostic_is_privileged_bound_and_renderer_free(
+    facts: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from epsbench.diagnostics import corridor_aperture_capture as c
+    from epsbench.diagnostics.corridor_aperture import config_root
+    from epsbench.schema import ModalityPermissionSet
+
+    fake = _fake_mujoco(
+        (0.0, 2.0000000000000004, 1.0),
+        (1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0),
+    )
+    monkeypatch.setattr(c, "_load_mujoco", lambda: fake)
+    expected_source = c.SourceBinding("a" * 40, "b" * 40, config_root())
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda command, **kwargs: SimpleNamespace(
+            stdout=(expected_source.head + "\n" + expected_source.tree)
+            if command[-2:] == ["HEAD", "HEAD^{tree}"]
+            else ""
+        ),
+    )
+    retained: list[tuple[str, bytes]] = []
+    diagnostic = c.CameraCompilationDiagnostic(
+        ModalityPermissionSet.all_modalities(),
+        enabled=True,
+        expected_source=expected_source,
+        retain=lambda name, payload: retained.append((name, payload)),
+    )
+    payload = diagnostic.run()
+    result = json.loads(payload)
+    assert result["validity"] == "unvalidated_privileged_compiled_camera_pose"
+    assert result["source"] == {
+        "head": expected_source.head,
+        "tree": expected_source.tree,
+        "configuration_root": config_root(),
+    }
+    assert result["dependency"] == "mujoco:fake-3.12.0"
+    assert result["observed"]["position_hex"][1] == (2.0000000000000004).hex()
+    assert result["component_equal"]["position"] == [True, False, True]
+    assert result["component_equal"]["orientation"] == [True] * 9
+    assert retained == [("camera-pose-0.json", payload)]
+    assert fake.calls == ["compile"] + ["name"] * 10 + ["data", "forward"]
+    assert fake.models[0].cam_pos[0, 1] == 2
+    with pytest.raises(PermissionError, match="single-use"):
+        diagnostic.run()
+    assert retained == [("camera-pose-0.json", payload)]
+    assert fake.calls == ["compile"] + ["name"] * 10 + ["data", "forward"]
+
+
+def test_camera_compile_diagnostic_denies_before_sdk_and_fails_closed_on_retention(
+    facts: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from epsbench.diagnostics import corridor_aperture_capture as c
+    from epsbench.diagnostics.corridor_aperture import config_root
+    from epsbench.schema import ModalityPermissionSet
+
+    monkeypatch.setattr(c, "_load_mujoco", lambda: pytest.fail("SDK reached before authorization"))
+    source = c.SourceBinding("a" * 40, "b" * 40, config_root())
+    with pytest.raises(PermissionError, match="disabled by default"):
+        c.CameraCompilationDiagnostic(
+            ModalityPermissionSet.all_modalities(), expected_source=source, retain=lambda *_: None
+        )
+    with pytest.raises(PermissionError, match="typed aperture permissions"):
+        c.CameraCompilationDiagnostic(
+            ModalityPermissionSet.ecological_only(),
+            enabled=True,
+            expected_source=source,
+            retain=lambda *_: None,
+        )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda command, **kwargs: SimpleNamespace(
+            stdout="d" * 40 + "\n" + "e" * 40 if command[-2:] == ["HEAD", "HEAD^{tree}"] else ""
+        ),
+    )
+    diagnostic = c.CameraCompilationDiagnostic(
+        ModalityPermissionSet.all_modalities(),
+        enabled=True,
+        expected_source=source,
+        retain=lambda *_: None,
+    )
+    with pytest.raises(PermissionError, match="source identity/cleanliness"):
+        diagnostic.run()
+    with pytest.raises(ValueError, match="finite compiled camera operands"):
+        c._camera_record(0, (0.0, float("nan"), 1.0), (1.0,) * 9, source, "mujoco:fake")
+
+
+def test_camera_compile_diagnostic_retention_failure_is_fatal(
+    facts: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from epsbench.diagnostics import corridor_aperture_capture as c
+    from epsbench.diagnostics.corridor_aperture import config_root
+    from epsbench.schema import ModalityPermissionSet
+
+    source = c.SourceBinding("a" * 40, "b" * 40, config_root())
+    fake = _fake_mujoco((0.0, 2.0, 1.0), (1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0))
+    monkeypatch.setattr(c, "_load_mujoco", lambda: fake)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda command, **kwargs: SimpleNamespace(
+            stdout=source.head + "\n" + source.tree
+            if command[-2:] == ["HEAD", "HEAD^{tree}"]
+            else ""
+        ),
+    )
+
+    def fail_sink(*_: Any) -> None:
+        raise OSError("controlled sink failure")
+
+    diagnostic = c.CameraCompilationDiagnostic(
+        ModalityPermissionSet.all_modalities(),
+        enabled=True,
+        expected_source=source,
+        retain=fail_sink,
+    )
+    with pytest.raises(c.RetentionFailure, match="camera pose"):
+        diagnostic.run()
+    operations = list(fake.calls)
+    with pytest.raises(PermissionError, match="single-use"):
+        diagnostic.run()
+    assert fake.calls == operations
+
+
+def test_native_capture_retains_camera_operands_before_frame_validation() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src/epsbench/diagnostics/corridor_aperture_capture.py"
+    )
+    module = ast.parse(source.read_text(encoding="utf-8"))
+    adapter = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.ClassDef) and node.name == "NativeAdapter"
+    )
+    frame_method = next(
+        node for node in adapter.body if isinstance(node, ast.FunctionDef) and node.name == "frame"
+    )
+    build = next(
+        node
+        for node in frame_method.body
+        if isinstance(node, ast.FunctionDef) and node.name == "build"
+    )
+    calls = {
+        node.func.id: node.lineno
+        for node in ast.walk(build)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert calls["_retain_camera_record"] < calls["Frame"] < calls["verify_pair"]
