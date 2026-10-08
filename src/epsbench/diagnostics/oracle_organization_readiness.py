@@ -9,7 +9,11 @@ import torch
 from torch import Tensor
 from torch.utils._python_dispatch import TorchDispatchMode
 
-from epsbench.diagnostics.oracle_organization_contract import OracleInput, public_fixtures
+from epsbench.diagnostics.oracle_organization_contract import (
+    OracleInput,
+    public_fixtures,
+    public_region_fixtures,
+)
 from epsbench.diagnostics.oracle_organization_models import Common, Ecological, Generic
 
 
@@ -97,9 +101,11 @@ def profile(model: Common, inputs: OracleInput) -> dict[str, int]:
     # checked() owns Boolean copies; astype(float32) is a separate NumPy temporary.
     # Torch copies, float flags and all dispatch outputs are already in the ledger.
     # Conservative NumPy validation scratch allowance: 49,152 bytes exceeds
-    # int64 region-overlap reduction (24,576), comparison (3,072), all four
-    # Boolean neighbour products over three frames (11,904), and other tiny
-    # flag/relation products. Copies and the float32 cast are separate below.
+    # int64 region-overlap reduction (24,576), comparison (3,072) and
+    # sequential neighbour checks (one <=992-byte product at a time), including
+    # bounded N=3/4 pair loops and tiny flags/relations. This is a NumPy live
+    # scratch bound, not a cumulative sum over sequential pair products.
+    # Copies and the float32 cast are separate below.
     validation_scratch_bound = 49152
     numpy_temporaries = (
         inputs.storage_bytes()
@@ -131,7 +137,22 @@ def source_report() -> dict[str, Any]:
         for p in profiles.values()
     ):
         raise ValueError("prospective storage accounting failure; fit prohibited")
+    additional_profiles = {
+        str(n): {
+            name: profile(model, public_region_fixtures(n)[0].inputs)
+            for name, model in models.items()
+        }
+        for n in (3, 4)
+    }
+    if any(
+        p["input_bytes"] > RECIPE.input_bytes_per_case
+        for by_model in additional_profiles.values()
+        for p in by_model.values()
+    ):
+        raise ValueError("bounded cardinality input storage failure")
     return {
+        "additional_cardinality_profiles": additional_profiles,
+        "new_cardinality_live_accounting": "UNVERIFIED: separate reviewed live profile required",
         "counts": counts,
         "relative_difference": relative,
         "profiles": profiles,

@@ -27,10 +27,16 @@ class OracleInput:
     executed: tuple[int, int]
     announced: tuple[int, int]
 
+    @property
+    def region_count(self) -> int:
+        return int(self.masks.shape[1])
+
     def checked(self) -> OracleInput:
-        n = self.masks.shape[1] if self.masks.ndim == 4 else 0
-        if n != 2:
-            raise ValueError("public readiness requires exactly two before-known regions")
+        if type(self.masks) is not np.ndarray:
+            raise ValueError("exact Boolean lawful array required")
+        n = self.region_count if self.masks.ndim == 4 else 0
+        if n not in (2, 3, 4):
+            raise ValueError("public software permits exactly 2, 3 or 4 before-known regions")
         shapes = ((3, n, 32, 32), (3, n), (3, n), (3, n, n), (3, n, n))
         arrays = (self.masks, self.present, self.observed, self.contacts, self.available)
         for array, shape in zip(arrays, shapes, strict=True):
@@ -50,14 +56,16 @@ class OracleInput:
             raise ValueError("missing records cannot claim contact availability")
         factual = np.zeros((3, n, n), dtype=np.bool_)
         for t in range(3):
-            a, b = self.masks[t]
-            touching = bool(
-                (a[1:] & b[:-1]).any()
-                or (a[:-1] & b[1:]).any()
-                or (a[:, 1:] & b[:, :-1]).any()
-                or (a[:, :-1] & b[:, 1:]).any()
-            )
-            factual[t, 0, 1] = factual[t, 1, 0] = touching
+            for r in range(n):
+                for q in range(r + 1, n):
+                    a, b = self.masks[t, r], self.masks[t, q]
+                    touching = bool(
+                        (a[1:] & b[:-1]).any()
+                        or (a[:-1] & b[1:]).any()
+                        or (a[:, 1:] & b[:, :-1]).any()
+                        or (a[:, :-1] & b[:, 1:]).any()
+                    )
+                    factual[t, r, q] = factual[t, q, r] = touching
         if np.any((self.contacts != factual) & self.available):
             raise ValueError("contact facts must match lawful four-neighbour masks")
         if np.any(self.contacts & ~self.available):
@@ -83,8 +91,18 @@ class OracleInput:
             copied[0], copied[1], copied[2], copied[3], copied[4], self.executed, self.announced
         )
 
-    def permuted(self) -> OracleInput:
-        p = [1, 0]
+    def permuted(self, order: tuple[int, ...] | None = None) -> OracleInput:
+        self.checked()
+        n = self.region_count
+        order = tuple(reversed(range(n))) if order is None else order
+        if (
+            type(order) is not tuple
+            or len(order) != n
+            or any(type(i) is not int for i in order)
+            or set(order) != set(range(n))
+        ):
+            raise ValueError("complete region-slot bijection required")
+        p = list(order)
         return OracleInput(
             self.masks[:, p],
             self.present[:, p],
@@ -98,7 +116,11 @@ class OracleInput:
     def serialized(self) -> bytes:
         x = self.checked()
         return (
-            b"EPS-PUBLIC-ORACLE-V3\0"
+            (
+                b"EPS-PUBLIC-ORACLE-V3\0"
+                if x.region_count == 2
+                else b"EPS-PUBLIC-ORACLE-N34-V1\0" + bytes([x.region_count])
+            )
             + b"".join(
                 a.tobytes() for a in (x.masks, x.present, x.observed, x.contacts, x.available)
             )
@@ -128,19 +150,25 @@ def read_public(permission: Permission, supplier: Callable[[], OracleInput]) -> 
 @dataclass(frozen=True)
 class PublicFixture:
     inputs: OracleInput
-    success: tuple[tuple[int, int], tuple[int, int]]
-    support: tuple[tuple[int, int], tuple[int, int]]
+    success: tuple[tuple[int, int], ...]
+    support: tuple[tuple[int, int], ...]
+
+    def permuted(self, order: tuple[int, ...]) -> PublicFixture:
+        inputs = self.inputs.permuted(order)
+        return PublicFixture(
+            inputs, tuple(self.success[i] for i in order), tuple(self.support[i] for i in order)
+        )
 
     def __post_init__(self) -> None:
         self.inputs.checked()
         for targets in (self.success, self.support):
             if (
                 type(targets) is not tuple
-                or len(targets) != 2
+                or len(targets) != self.inputs.region_count
                 or any(type(row) is not tuple or len(row) != 2 for row in targets)
             ):
-                raise ValueError("two-region/two-arm target shape required")
-        for r in range(2):
+                raise ValueError("all-region/two-arm target shape required")
+        for r in range(self.inputs.region_count):
             for a in range(2):
                 value = self.success[r][a]
                 if type(value) is not int or value not in (0, 1):
@@ -173,20 +201,57 @@ def public_fixtures() -> tuple[PublicFixture, ...]:
     return tuple(result)
 
 
+def public_region_fixtures(n: int) -> tuple[PublicFixture, ...]:
+    """Literal reviewed N=3/4 extension of the unchanged eight v3 software cases."""
+    if type(n) is not int or n not in (3, 4):
+        raise ValueError("new public fixtures require exactly N=3 or N=4")
+    result = []
+    for base in public_fixtures():
+        masks = np.zeros((3, n, 32, 32), dtype=np.bool_)
+        masks[:, :2] = base.inputs.masks
+        masks[:, 2, 16:20, 4:8] = True
+        if n == 4:
+            masks[:, 3, 16:20, 8:12] = True
+        contacts = np.zeros((3, n, n), dtype=np.bool_)
+        if n == 4:
+            contacts[:, 2, 3] = contacts[:, 3, 2] = True
+        inputs = OracleInput(
+            masks,
+            np.ones((3, n), dtype=np.bool_),
+            np.asarray(masks.any(axis=(2, 3)), dtype=np.bool_),
+            contacts,
+            np.ones((3, n, n), dtype=np.bool_),
+            base.inputs.executed,
+            base.inputs.announced,
+        ).checked()
+        result.append(
+            PublicFixture(
+                inputs, base.success + ((1, 1),) * (n - 2), base.support + ((16, 16),) * (n - 2)
+            )
+        )
+    return tuple(result)
+
+
 def decode_public(permission: Permission, supplier: Callable[[], bytes]) -> OracleInput:
     if type(permission) is not Permission or permission is not Permission.PUBLIC_ORACLE_SOFTWARE:
         raise PermissionError("public oracle software permission required before byte read")
     payload = supplier()
-    prefix = b"EPS-PUBLIC-ORACLE-V3\0"
-    if (
-        type(payload) is not bytes
-        or len(payload) != len(prefix) + 6212
-        or not payload.startswith(prefix)
-    ):
+    old_prefix = b"EPS-PUBLIC-ORACLE-V3\0"
+    new_prefix = b"EPS-PUBLIC-ORACLE-N34-V1\0"
+    if type(payload) is not bytes:
         raise ValueError("exact versioned lawful payload required")
-    offset = len(prefix)
+    if payload.startswith(old_prefix):
+        n, offset = 2, len(old_prefix)
+    elif payload.startswith(new_prefix) and len(payload) > len(new_prefix):
+        n, offset = payload[len(new_prefix)], len(new_prefix) + 1
+        if n not in (3, 4):
+            raise ValueError("new bounded format permits only N=3/4")
+    else:
+        raise ValueError("exact versioned lawful payload required")
+    if len(payload) != offset + 3072 * n + 6 * n + 6 * n * n + 32:
+        raise ValueError("exact cardinality payload length required")
     arrays = []
-    for shape in ((3, 2, 32, 32), (3, 2), (3, 2), (3, 2, 2), (3, 2, 2)):
+    for shape in ((3, n, 32, 32), (3, n), (3, n), (3, n, n), (3, n, n)):
         length = int(np.prod(shape))
         raw = payload[offset : offset + length]
         if any(v not in (0, 1) for v in raw):
