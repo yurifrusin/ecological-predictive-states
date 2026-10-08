@@ -41,6 +41,7 @@ def main() -> int:
     # Patch every exposed optimizer class, including overrides of base step.
     for value in vars(torch.optim).values():
         if isinstance(value, type) and issubclass(value, torch.optim.Optimizer):
+            value.__init__ = denied  # type: ignore[method-assign]
             value.step = denied  # type: ignore[method-assign, assignment]
     torch.set_num_threads(1)
     torch.use_deterministic_algorithms(True)
@@ -57,6 +58,7 @@ def main() -> int:
             "addopts=",
             "-q",
             "tests/test_oracle_organization.py",
+            "tests/test_oracle_region_extension.py",
         ]
     )
     print(json.dumps(source_report(), sort_keys=True))

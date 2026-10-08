@@ -79,3 +79,48 @@ The conditional 72-orbit pilot and unresolved pilot finding 0002 are outside thi
 Original Gate0D remains incomplete. No appearance robustness, learned sufficiency, E/G
 advantage, generalization, scaling or biological claim follows. Preserve all earlier closed
 failures and inconclusive evidence; the charter appearance hypothesis remains UNTESTED.
+
+
+## Bounded region extension source
+
+The public contract admits exactly two, three or four known regions in the same
+three 32-by-32 mask frames. Two-region V3 bytes and the original eight fixtures
+remain unchanged. Three/four-region inputs use the bounded N34-V1 format with an
+explicit cardinality byte. All unordered region pairs receive the same validated
+contact facts and availability semantics. Missing records retain known nodes;
+observed empty masks remain distinct from missing records. Neither consumer
+receives identifiers, metric geometry, causes, family labels or privileged data.
+
+E processes every region with contact-message normalization by the region count
+and global context. G retains unrestricted attention over all three frames and
+every region, with the same association/contact/availability information. Their
+parameter shapes remain fixed: E 24,209 and G 23,881 (1.374% relative difference).
+Constructors accept only exact integer initialization seeds 271828, 271829 and
+271830; default 271828 preserves the original initialization. Each model uses its
+own CPU generator and the unchanged common-component initialization order. This
+interface does not authorize fitting, additional seeds or a seed search.
+
+Eight literal public software cases at each new cardinality preserve A/B masks
+and labels. C occupies rows 16:20, columns 4:8 in every frame; D at cardinality
+four occupies rows 16:20, columns 8:12. Each added region has success (1,1) and
+support (16,16); C/D contact is available and true. These fixtures are software
+checks, not hidden benchmark evidence. Guarded tests deny optimizer construction
+and steps, and check every region permutation, information parity, complete
+contact validation, bounded decoding, gradients and exact default two-region
+untrained regression against the frozen PR84 implementation.
+
+Raw array storage is 6,212 / 9,320 / 12,440 bytes at cardinalities 2 / 3 / 4,
+within the 64 KiB input ceiling. Source reports provide conservative cumulative
+forward allocation ledgers, not live forward/backward peaks. In particular, the
+four-region G ledger plus NumPy scratch totals 271,008 bytes; this loose bound
+exceeds 256 KiB and cannot establish admission or an observed live-cap failure.
+New-cardinality live accounting remains UNVERIFIED until a separately reviewed
+CPU operation measures it against the unchanged 256 KiB per-case derived cap,
+with shared parameters, gradients and optimizer states accounted separately.
+There is no host RSS guarantee.
+
+No new-cardinality fit is run by this source or CI. Any prospective three/four
+readiness operation needs exact source review, resource qualification and
+separate adoption; previous two-region results cannot qualify it. A prospective
+1000-update budget is a new study choice, not a retroactive change to the original
+200-update study. Private pilot design and its open finding remain separate.
