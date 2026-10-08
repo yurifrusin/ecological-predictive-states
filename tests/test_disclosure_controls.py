@@ -332,3 +332,12 @@ def test_software_smoke_validation_and_inspection() -> None:
         "methods",
         ",".join(out["methods"]),
     )
+
+
+def test_seventeen_pixel_current_support() -> None:
+    seventeen = mask(range(0, 8))
+    seventeen[2, 0] = True
+    frames = tuple(TokenFrame(i, SHAPE, ((NAMES[0], seventeen),)) for i in range(3))
+    row = json.loads(controls.predict(memory(Q(1), frames=frames)))["rows"][0]
+    assert row["methods"]["current_support"]["support"] == 17
+    assert row["methods"]["current_support"]["p"] == "1"

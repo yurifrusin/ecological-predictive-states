@@ -90,6 +90,7 @@ def main() -> int:
             "-s",
             "tests/test_disclosure_geometry.py",
             "tests/test_disclosure_controls.py",
+            "tests/test_point_sample_qualification.py",
         ]
     )
     loaded()
